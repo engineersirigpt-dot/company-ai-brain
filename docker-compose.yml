@@ -1,0 +1,37 @@
+services:
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: brain_qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: brain_api
+    ports:
+      - "8000:8000"
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - COLLECTION_NAME=company_docs
+      - MODEL_NAME=BAAI/bge-m3
+    volumes:
+      # Mount HuggingFace cache — model ไม่ต้อง download ซ้ำทุกครั้ง
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  hf_cache:

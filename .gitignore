@@ -1,0 +1,37 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated output
+qdrant_storage/
+parsed_output/
+
+# Secrets
+api.txt
+.env
+*.key
+
+# Raw documents (ไม่ commit เอกสารบริษัท)
+info/
+*.pdf
+*.xlsx
+*.docx
+*.pptx
+*.ppt
+*.xls
+*.doc
+*.zip
+*.rar
+*.7z
+*.mp3
+*.wav
+*.m4a
+*.exe
+*.dll
+*.bat
+
+# OS
+.DS_Store
+Thumbs.db

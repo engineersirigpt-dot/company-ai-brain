@@ -1,0 +1,602 @@
+[
+  {
+    "question": "วิธีอนุมัติเอกสารค่าเดินทาง",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "วิธีตีกลับเอกสารและกรอกเหตุผล",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนเปิดระบบ AE Compass",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "username และ password ใช้อะไร login AE Compass",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ถ้าลืมรหัสผ่านต้องทำอย่างไร",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ผู้จัดการ AE มีสิทธิ์ทำอะไรได้บ้างในระบบ",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เอกสารที่อนุมัติแล้วจะย้ายไปแท็บไหน",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ระบบ AE Compass ใช้ browser อะไร",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการทำงานของผู้จัดการ AE มีกี่ขั้นตอน",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เมื่อ AE ส่งขออนุมัติ ผู้จัดการจะเห็นรายการที่แท็บไหน",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การตรวจสอบ Visit และระยะทางก่อนอนุมัติ",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "สถานะ Google Maps ใน AE Compass บอกอะไร",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เงื่อนไขการตีกลับเอกสารคืออะไร",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "how to install Dobot Magician driver",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "how to download DobotStudio software",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "Dobot Magician supported operating systems",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "how to check if Dobot driver installed correctly",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "what is CH340 driver for Dobot",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "Dobot Magician USB connection setup",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "DobotStudio Windows XP support limitations",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "Dobot support email contact",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "where to find Dobot tutorial materials",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "USBSERIAL CH340 COM port device manager",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "นโยบายวันลาพนักงานประจำปี",
+    "expected_source": null,
+    "lang": "th",
+    "category": "no_answer"
+  },
+  {
+    "question": "ยอดขายประจำเดือนมกราคม",
+    "expected_source": null,
+    "lang": "th",
+    "category": "no_answer"
+  },
+  {
+    "question": "เงินเดือนพนักงานระดับ 5",
+    "expected_source": null,
+    "lang": "th",
+    "category": "no_answer"
+  },
+  {
+    "question": "how to configure Dobot WiFi connection",
+    "expected_source": null,
+    "lang": "en",
+    "category": "no_answer"
+  },
+  {
+    "question": "how to request annual leave",
+    "expected_source": null,
+    "lang": "en",
+    "category": "no_answer"
+  },
+  {
+    "question": "ระบบ AE Compass ใช้กับ Firefox ได้ไหม",
+    "expected_source": "Manual_ManagerAE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "Dobot Magician connect to PC via what port",
+    "expected_source": "Dobot-Magician-User-Manual-V1.2.4",
+    "lang": "en",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการควบคุมกระบวนการผสมสี",
+    "expected_source": "QP-751-15 Rev.00 การควบคุมกระบวนการผสมสี",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "วิธีจัดการกับคำร้องเรียนของลูกค้าในประเทศ",
+    "expected_source": "QP-723-01 Rev01 การจัดการกับคำร้องเรียนของลูกค้า",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการเสนอราคาขายในประเทศ",
+    "expected_source": "QP-721-01 Rev01 การขายและการเสนอราคาขายในประเทศ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "วิธีคำนวณกล่องลูกฟูก",
+    "expected_source": "WI-755-06-01 Rev.01 วิธีการคำนวณกล่องลูกฟูก",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การควบคุมเพลทพิมพ์มีขั้นตอนอย่างไร",
+    "expected_source": "WI-751-01-32 Rev.00 การควบคุมเพลท",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการจัดซื้อวัตถุดิบ FSC",
+    "expected_source": "QP-741-03 Rev05 การจัดซื้อวัตถุดิบ วัสดุในการผลิต FSC",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "วิธีควบคุมการส่งมอบผลิตภัณฑ์สำเร็จรูป",
+    "expected_source": "QP-755-04 Rev03 การควบคุมการส่งมอบผลิตภัณฑ์สำเร็จรูปภายในประเทศและนอกประเทศ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการทำงานเครื่อง Inspection Machine",
+    "expected_source": "WI-824-02-01 Rev.00  ขั้นตอนการทำงานเครื่อง INSPECTION MACHINE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "วิธีใช้งานเครื่องทำซอง Automatic",
+    "expected_source": "WI-751-09-52 Rev.00 เครื่องทำซอง Automatic (5323)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการรับและทบทวนการสั่งซื้อสินค้าในประเทศ",
+    "expected_source": "QP-722-01 Rev01 การรับและการทบทวนการสั่งซื้อผลิตภัณฑ์ในประเทศ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการส่งมอบผลิตภัณฑ์สำเร็จรูปต่างประเทศ",
+    "expected_source": "QP-755-05 Rev.06 การควบคุมการส่งมอบผลิตภัณฑ์สำเร็จรูปต่างประเทศ (มีลายน้ำ)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "วิธีการสอบเทียบเครื่องมือวัด",
+    "expected_source": "WI-760-01-01 Rev.04 คู่มือการสอบเทียบเครื่องมือวัดเทียบ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ราคาหุ้นบริษัทวันนี้",
+    "expected_source": null,
+    "lang": "th",
+    "category": "no_answer"
+  },
+  {
+    "question": "วิธีขอสินเชื่อธนาคาร",
+    "expected_source": null,
+    "lang": "th",
+    "category": "no_answer"
+  },
+  {
+    "question": "how to configure company email on iPhone",
+    "expected_source": null,
+    "lang": "en",
+    "category": "no_answer"
+  },
+  {
+    "question": "ในการปรับตั้งเครื่อง Inspection ขั้นตอนการเปิดระบบต้องทำอะไรก่อนเป็นขั้นตอนแรก",
+    "expected_source": "WI-751-12-14 Rev.00 การปรับตั้งเครื่อง Inspection  แก้ไขหัวท้าย",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การปรับตั้งตัวโหลดชิ้นงานของเครื่อง Inspection ต้องปรับฉากให้ห่างจากขอบชิ้นงานประมาณเท่าไร",
+    "expected_source": "WI-751-12-14 Rev.00 การปรับตั้งเครื่อง Inspection  แก้ไขหัวท้าย",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ส่วน Reject ของเครื่อง Inspection ทำหน้าที่อะไร และปรับตั้งอย่างไร",
+    "expected_source": "WI-751-12-14 Rev.00 การปรับตั้งเครื่อง Inspection  แก้ไขหัวท้าย",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "โปรแกรม SmartCheck4.0 ใช้ขั้นตอนอะไรในการสร้างเทมเพลตก่อนเริ่มตรวจสอบงาน",
+    "expected_source": "WI-751-12-15 Rev.00 การใช้งานโปรแกรม Smartcheck4.0 เครื่อง Inspection -แก้ไขหัวท้าย",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การแก้ไขคุณสมบัติพื้นที่ตรวจสอบในโปรแกรม SmartCheck4.0 ระหว่างการตรวจสอบทำได้อย่างไร",
+    "expected_source": "WI-751-12-15 Rev.00 การใช้งานโปรแกรม Smartcheck4.0 เครื่อง Inspection -แก้ไขหัวท้าย",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ใครมีหน้าที่เปิดใบขอซื้อกระดาษลูกฟูก (PR) ในระบบตามขั้นตอนการสั่งซื้อกระดาษลูกฟูก",
+    "expected_source": "WI-755-06-02 Rev.01 วิธีการสั่งซื้อกระดาษลูกฟูกและ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ใบขอให้ผลิตกล่องลูกฟูก FM-751-05-54 มีระยะเวลาการจัดเก็บนานเท่าใด",
+    "expected_source": "WI-755-06-02 Rev.01 วิธีการสั่งซื้อกระดาษลูกฟูกและ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการผลิตกล่องลูกฟูกด้วยเครื่องทับรอย ต้องปรับตั้งกี่เส้นสำหรับกำหนดแนวความสูงกล่อง",
+    "expected_source": "WI-755-06-03 Rev.02 วิธีการผลิตกล่องลูกฟูกและแผ่นรองกล่องลูกฟูก",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ข้อควรระวังในการเซาะร่องกระดาษลูกฟูก ทำไมจึงห้ามเซาะกระดาษเกิน 2 แผ่น",
+    "expected_source": "WI-755-06-03 Rev.02 วิธีการผลิตกล่องลูกฟูกและแผ่นรองกล่องลูกฟูก",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เมื่อกล่องลูกฟูกส่งไปโรงงานลาว ต้องแพ็คสายรัดกี่ใบต่อมัด",
+    "expected_source": "WI-755-06-03 Rev.02 วิธีการผลิตกล่องลูกฟูกและแผ่นรองกล่องลูกฟูก",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การ PACKING กล่องลูกฟูก ความสูงสูงสุดของการตั้งกองผลิตภัณฑ์ขณะเคลื่อนย้ายระหว่างกระบวนการผลิตคือเท่าใด",
+    "expected_source": "WI-755-06-04 Rev.01 การ PACKING",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ฟิล์มยืด (Stretch Film) ในกระบวนการ PACKING มีวัตถุประสงค์เพื่อป้องกันอะไร",
+    "expected_source": "WI-755-06-04 Rev.01 การ PACKING",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการใช้ HAND LIFT เคลื่อนย้ายผลิตภัณฑ์ เริ่มต้นด้วยขั้นตอนอะไรก่อน",
+    "expected_source": "WI-755-06-05 Rev.01 การเคลื่อนย้าย",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "คันโยก HAND LIFT มีหน้าที่อะไรในการเคลื่อนย้ายผลิตภัณฑ์",
+    "expected_source": "WI-755-06-05 Rev.01 การเคลื่อนย้าย",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "วิธีการจัดส่งกล่องลูกฟูกจากชั้น 2 ลงมา ต้องมีการเซ็นต์รับในเอกสารใด",
+    "expected_source": "WI-755-06-06 Rev.01 วิธีการจัดส่งกล่องลูกฟูก",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ฝ่ายเตรียมการพิมพ์รับแจ้งข้อมูลการเปิด JOB จากฝ่ายตลาดผ่านช่องทางใด",
+    "expected_source": "QP-751-01 Rev.10 ขั้นตอนการปฏิบัติงานฝ่ายเตรียมการพิมพ์",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เอกสาร File งานที่จัดเก็บใน harddisk มีระยะเวลาการจัดเก็บเท่าใดตามขั้นตอนฝ่ายเตรียมการพิมพ์",
+    "expected_source": "QP-751-01 Rev.10 ขั้นตอนการปฏิบัติงานฝ่ายเตรียมการพิมพ์",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "กรณีเพลทชำรุดระหว่างกระบวนการพิมพ์ หน่วยงานเพลทต้องรับเอกสารใดจากหน่วยงานพิมพ์",
+    "expected_source": "QP-751-01 Rev.10 ขั้นตอนการปฏิบัติงานฝ่ายเตรียมการพิมพ์",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "Profile ในกระบวนการผลิตสิ่งพิมพ์คืออะไร และใช้สำหรับคำนวณค่าใด",
+    "expected_source": "WI-751-01-01 Rev00 ขั้นตอนการทำ Profile",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ค่า Dot gain ที่นำมาเปรียบเทียบในกระบวนการทำ Profile อ้างอิงมาตรฐานใด",
+    "expected_source": "WI-751-01-01 Rev00 ขั้นตอนการทำ Profile",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เจ้าหน้าที่ Macintosh มีหน้าที่นำ Curve ที่ชดเชยค่าเม็ดสกรีนบนเพลทไปใช้งาน และเจ้าหน้าที่เพลทมีหน้าที่ทำอะไร",
+    "expected_source": "WI-751-01-01 Rev00 ขั้นตอนการทำ Profile",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การควบคุมการ Transfer ข้อมูลจากลูกค้า กรณีไฟล์ไม่ถูกต้องตาม Spec จะดำเนินการอย่างไร",
+    "expected_source": "WI-751-01-31 Rev.00 การควบคุมการ Transfer ข้อมูลจากลูกค้า ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ไฟล์ Artwork ที่ลูกค้าส่งมาสามารถเป็นนามสกุลใดได้บ้างตามขั้นตอนการ Transfer ข้อมูล",
+    "expected_source": "WI-751-01-31 Rev.00 การควบคุมการ Transfer ข้อมูลจากลูกค้า ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "กระบวนการตัดกระดาษม้วน กรณีเครื่องจักรไม่สามารถปฏิบัติงานได้ ต้องดำเนินการอะไรตามขั้นตอน",
+    "expected_source": "QP-751-11 Rev.04  การควบคุมกระบวนการตัดกระดาษม้วน (FSC) -",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ใบสั่งตัดกระดาษม้วน FM-755-01-05 มีระยะเวลาการจัดเก็บเท่าใด",
+    "expected_source": "QP-751-11 Rev.04  การควบคุมกระบวนการตัดกระดาษม้วน (FSC) -",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การบำรุงรักษาเชิงป้องกัน (PM) ถ้าตรวจสอบแล้วไม่พบสิ่งผิดปกติจะต้องติด label อะไรที่เครื่องจักร",
+    "expected_source": "QP-630-01 Rev.07 การควบคุมสาธารณูปโภค",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การจัดเก็บเกจบล็อก (Gauge Blocks) มีข้อควรระวังอะไรเกี่ยวกับการสัมผัสด้วยมือ",
+    "expected_source": "WI-760-01-02 Rev.02 การจัดเก็บเครื่องมือมาตรฐาน",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เครื่องชั่งน้ำหนักควรควบคุมความชื้นในห้องไว้ที่เท่าใดตามคู่มือการจัดเก็บเครื่องมือมาตรฐาน",
+    "expected_source": "WI-760-01-02 Rev.02 การจัดเก็บเครื่องมือมาตรฐาน",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "หมายเลขเครื่องมือวัด WM-01 หมายถึงอะไรและมีวิธีการกำหนดหมายเลขลำดับที่ 01-10 สำหรับเครื่องมือประเภทใด",
+    "expected_source": "WI-760-01-03 Rev.02 การกำหนดหมายเลขเครื่องมือ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "สัญลักษณ์ PC ในระบบหมายเลขเครื่องมือหมายถึงเครื่องวัดประเภทใด",
+    "expected_source": "WI-760-01-03 Rev.02 การกำหนดหมายเลขเครื่องมือ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เครื่องไสกาว KM470 สามารถผลิตขนาดเล่มขั้นต่ำและสูงสุดได้เท่าใด",
+    "expected_source": "WI-751-09-53 Rev.00 เครื่องไสกาว KM470 (5820 -ตัดสำเร็จ)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การหล่อลื่นโซ่ปรับและสปินเดิลของเครื่อง KM470 ต้องดำเนินการบ่อยเพียงใด",
+    "expected_source": "WI-751-09-53 Rev.00 เครื่องไสกาว KM470 (5820 -ตัดสำเร็จ)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เครื่องเย็บกี่ ASTER PRO สามารถเย็บขนาดงานสูงสุดได้เท่าใด และใช้กำลังลมสูงสุดเท่าใด",
+    "expected_source": "WI-751-09-54 Rev.00 เครื่องเย็บกี่ ASTER PRO (6004)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "HOPPER ในเครื่องเย็บกี่ ASTER PRO หมายถึงอะไร",
+    "expected_source": "WI-751-09-54 Rev.00 เครื่องเย็บกี่ ASTER PRO (6004)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "Mock up ขาวคืออะไรและจัดทำขึ้นเพื่อวัตถุประสงค์ใด",
+    "expected_source": "QP-751-07 Rev.04 การจัดทำ Mock Up ขาว",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การจัดเก็บตัวอย่าง Mock up ขาวสำหรับงานต่างประเทศมีระยะเวลาการจัดเก็บนานเท่าใด",
+    "expected_source": "QP-751-07 Rev.04 การจัดทำ Mock Up ขาว",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ยอดเผื่อเสียที่ยอมรับได้ในแต่ละงานของฝ่ายหลังการพิมพ์มือต้องไม่เกินร้อยละเท่าใด",
+    "expected_source": "QP-751-05 Rev.06 การควบคุมกระบวนการหลังการพิมพ์มือ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ตัวอย่าง Approved สำหรับฝ่ายหลังการพิมพ์มือต้องได้รับการเซ็นอนุมัติจากตำแหน่งใดบ้าง",
+    "expected_source": "QP-751-05 Rev.06 การควบคุมกระบวนการหลังการพิมพ์มือ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "กระบวนการเรียกคืนผลิตภัณฑ์ ใครเป็นผู้มีอำนาจตัดสินใจว่าจะดำเนินการเรียกคืนหรือไม่",
+    "expected_source": "QP-852-02 Rev.00 การเรียกคืนผลิตภัณฑ์หรือรับผลิตภัณฑ์คืนจากลูกค้า",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "กรณีผลิตภัณฑ์ที่ถูกเรียกคืนไม่สามารถแก้ไขได้ ต้องดำเนินการอย่างไรตามขั้นตอน",
+    "expected_source": "QP-852-02 Rev.00 การเรียกคืนผลิตภัณฑ์หรือรับผลิตภัณฑ์คืนจากลูกค้า",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การซ้อมเรียกคืนผลิตภัณฑ์ Packaging (Mock Recall) ต้องดำเนินการอย่างน้อยกี่ครั้งต่อปี",
+    "expected_source": "GP-580-01 Rev.01 การซ้อมเรียกคืนผลิตภัณฑ์ Packaging (Mock Recall)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การสอบกลับโดยองค์กรสำหรับการซ้อมเรียกคืนผลิตภัณฑ์กำหนดระยะเวลาไว้เท่าใดต่อครั้ง",
+    "expected_source": "GP-580-01 Rev.01 การซ้อมเรียกคืนผลิตภัณฑ์ Packaging (Mock Recall)",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "หน่วยงานอาร์ตตลาดในประเทศ กรณีลูกค้าไม่ตกลงราคาที่เสนอ AE ต้องปรึกษาใครก่อน",
+    "expected_source": "QP-731-01 Rev01 การรับงานหน่วยอาร์ตตลาดในประเทศ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ใบรับงานหน่วย Design-Art FM-722-01-03 มีระยะเวลาการจัดเก็บเท่าใด",
+    "expected_source": "QP-731-01 Rev01 การรับงานหน่วยอาร์ตตลาดในประเทศ",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "การควบคุมวัตถุดิบและวัสดุที่ส่งมอบจากลูกค้า สมุดบันทึกการรับวัสดุมีระยะเวลาการจัดเก็บนานเท่าใด",
+    "expected_source": "QP-754-01 Rev00 การควบคุมวัตถุดิบและวัสดุที่ส่งมอบจากลูกค้า",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "กระบวนการทำงานวิศวกรรม โปรแกรม Notion ใช้เป็น Issue and Project Overviews เพื่ออะไร",
+    "expected_source": "QP-713-01 Rev.00 กระบวนการทำงานวิศวกรรม",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "Project Leader ในกระบวนการทำงานวิศวกรรมหมายถึงใครและมีความรับผิดชอบอะไร",
+    "expected_source": "QP-713-01 Rev.00 กระบวนการทำงานวิศวกรรม",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เครื่อง INSPECTION MACHINE รุ่น IMAVISION ใช้โปรแกรมใดในการตรวจสอบชิ้นงาน",
+    "expected_source": "QP-824-02 Rev.00 การควบคุมกระบวนการตรวจสอบคุณภาพ ด้วยเครื่อง INSPECTION MACHINE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "กล้องตัวที่ 3 ของเครื่อง INSPECTION MACHINE ทำหน้าที่ตรวจจับอะไร",
+    "expected_source": "QP-824-02 Rev.00 การควบคุมกระบวนการตรวจสอบคุณภาพ ด้วยเครื่อง INSPECTION MACHINE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "เอกสาร Approved เครื่อง Inspection FM-751-12-42 มีระยะเวลาการจัดเก็บเท่าใด",
+    "expected_source": "QP-824-02 Rev.00 การควบคุมกระบวนการตรวจสอบคุณภาพ ด้วยเครื่อง INSPECTION MACHINE",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการทำบัญชีแสดงสินค้า หลังจากจัดทำ Commercial Invoice และ Packing List เสร็จแล้ว แผนก Shipping ต้องดำเนินการอะไรต่อไป",
+    "expected_source": "WI-755-05-01 Rev.01 ขั้นตอนการทำบัญชีแสดงสินค้า",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ขั้นตอนการทำบัญชีแสดงสินค้าครอบคลุมเฉพาะการส่งมอบผลิตภัณฑ์ของตลาดใด และจากโรงงานไหน",
+    "expected_source": "WI-755-05-01 Rev.01 ขั้นตอนการทำบัญชีแสดงสินค้า",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "กระบวนการควบคุมหลังการพิมพ์เครื่อง ผลิตภัณฑ์ที่ผ่านหรือไม่ผ่านข้อกำหนดต้องติดป้ายชี้บ่งสถานะตามเอกสารใด",
+    "expected_source": "QP-751-09 Rev03 การควบคุมกระบวนการหลังการพิมพ์เครื่อง",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ช่วงสเปคที่ยอมรับได้สำหรับกระดาษ 300 กรัม ตามคู่มือการรับกระดาษตามแกรมคือเท่าใด",
+    "expected_source": "WI-823-01-04 Rev.00 ขั้นตอนการรับกระดาษตามแกรมที่สามารถยอมรับได้",
+    "lang": "th",
+    "category": "has_answer"
+  },
+  {
+    "question": "ในขั้นตอนการทำ Profile การที่โปรแกรม PrintStandardizer แสดงสถานะสีเขียว หมายความว่าอะไร",
+    "expected_source": "WI-751-01-01 Rev00 ขั้นตอนการทำ Profile",
+    "lang": "th",
+    "category": "has_answer"
+  }
+]
