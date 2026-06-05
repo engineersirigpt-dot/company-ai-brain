@@ -12,7 +12,7 @@ services:
     build: .
     container_name: brain_api
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
