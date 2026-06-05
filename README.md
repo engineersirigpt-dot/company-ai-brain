@@ -30,7 +30,7 @@ AI Brain เป็น **retrieval service** — AI ฝั่งคุณไม�
 ### API Endpoint
 
 ```http
-POST http://192.168.5.32:8000/search
+POST http://192.168.5.32:8002/search
 Content-Type: application/json
 
 {
@@ -83,7 +83,7 @@ import requests
 
 def ask_brain(question: str, user_role: str) -> list[dict]:
     resp = requests.post(
-        "http://192.168.5.32:8000/search",
+        "http://192.168.5.32:8002/search",
         json={"query": question, "role": user_role, "top_k": 3},
     )
     return resp.json()["results"]
@@ -96,7 +96,7 @@ contexts = ask_brain("วิธีเสนอราคาขาย", user_role=
 ### Health Check
 
 ```bash
-curl http://192.168.5.32:8000/health
+curl http://192.168.5.32:8002/health
 # {"status":"ok","vectors":4634,"model":"BAAI/bge-m3"}
 ```
 
@@ -146,7 +146,7 @@ docker compose up -d
 python migrate_to_server.py --server http://192.168.5.32:6333
 
 # 3. ทดสอบ
-curl http://192.168.5.32:8000/health
+curl http://192.168.5.32:8002/health
 ```
 
 ---
