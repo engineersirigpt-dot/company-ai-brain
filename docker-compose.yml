@@ -8,12 +8,6 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   api:
     build: .
     container_name: brain_api
@@ -25,11 +19,9 @@ services:
       - COLLECTION_NAME=company_docs
       - MODEL_NAME=BAAI/bge-m3
     volumes:
-      # Mount HuggingFace cache — model ไม่ต้อง download ซ้ำทุกครั้ง
       - hf_cache:/root/.cache/huggingface
     depends_on:
-      qdrant:
-        condition: service_healthy
+      - qdrant
     restart: unless-stopped
 
 volumes:
