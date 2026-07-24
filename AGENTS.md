@@ -6,6 +6,12 @@ Enterprise Knowledge System — ระบบ AI กลางสำหรับ�
 
 ---
 
+## Shared Status สำหรับ AI ทุกตัว
+
+ก่อนวิเคราะห์ วางแผน หรือแก้ไขโปรเจกต์ ให้อ่าน `STATUS.md` เพื่อใช้ข้อเท็จจริง การตัดสินใจ และลำดับงานล่าสุดร่วมกัน โดยเฉพาะสถานะ corpus 143 → 95, duplicate documents, Voicebot impact และแนวทาง Authentication ช่วง PoC
+
+---
+
 ## แนวคิดหลัก
 
 Company AI Brain คือ Knowledge Layer กลางที่รวบรวมข้อมูลทั้งหมดขององค์กร แล้วให้ AI project ต่างๆ เชื่อมต่อมาใช้ร่วมกัน แทนที่แต่ละ AI จะมีข้อมูลแยกกัน (AI Silo Problem)

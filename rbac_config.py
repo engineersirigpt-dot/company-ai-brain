@@ -51,6 +51,12 @@ COLLECTIONS: dict[str, dict] = {
             "management", "admin",
         ],
     },
+    # default-deny: เอกสารที่จำแนกไม่ได้ต้องถูกกักไว้ให้ admin ตรวจก่อน
+    # ห้ามเปิดให้แผนกใดเห็นจนกว่าจะ mapping ชัด (กัน data leak จากเอกสารชื่อแปลก)
+    "UNCLASSIFIED": {
+        "confidentiality_level": 3,
+        "allowed_roles": ["admin"],
+    },
 }
 
 # Keyword overrides ก่อน pattern matching (ตรวจสอบ case-insensitive)
@@ -109,9 +115,9 @@ def get_collection(source_name: str) -> str:
         code = int(m.group(1))
         if re.match(r'gp[-_]', s):
             return "RECALL"
-        return _CODE_MAP.get(code, "PRODUCTION")
+        return _CODE_MAP.get(code, "UNCLASSIFIED")
 
-    return "PRODUCTION"  # default
+    return "UNCLASSIFIED"  # default-deny — admin ตรวจแล้วค่อยเพิ่ม mapping
 
 
 def get_rbac(source_name: str) -> dict:

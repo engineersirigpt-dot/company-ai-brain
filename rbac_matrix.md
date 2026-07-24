@@ -228,11 +228,14 @@
 Query filter ตัวอย่าง (user ที่มี role = production):
 
 ```python
+# ⚠️ ใส่เฉพาะ role ของ user คนนั้นเท่านั้น — ห้ามเติม "admin" เข้าไปใน filter
+# เพราะทุกเอกสารอนุญาต admin อยู่แล้ว การใส่ admin จะทำให้ match เอกสารทุกฉบับ
+# (permission leak) — ดู implement จริงที่ make_rbac_filter() ใน app/main.py
 filter = Filter(
     must=[
         FieldCondition(
             key="allowed_roles",
-            match=MatchAny(any=["production", "admin"])
+            match=MatchAny(any=["production"])
         )
     ]
 )
