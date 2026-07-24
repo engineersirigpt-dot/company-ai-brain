@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements-api.txt .
 RUN pip install --no-cache-dir -r requirements-api.txt
 
+# LLM SDK แยก layer — ไม่แตะ requirements-api.txt เพื่อคง cache ของ torch layer ข้างบน
+COPY requirements-llm.txt .
+RUN pip install --no-cache-dir -r requirements-llm.txt
+
 # Copy source code
 COPY app/ ./app/
 COPY rbac_config.py .

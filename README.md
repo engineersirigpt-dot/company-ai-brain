@@ -25,9 +25,12 @@ Enterprise Knowledge System — ระบบ AI **ตัวกลาง** สำ
 
 ## สำหรับ AI Project ที่จะมาเชื่อมต่อ
 
-AI Brain เป็น **retrieval service** — AI ฝั่งคุณไม่ต้องเก็บเอกสารเอง แค่ส่ง query มาขอ แล้วรับ context กลับไปตอบ
+AI Brain เป็น **knowledge service** — AI ฝั่งคุณไม่ต้องเก็บเอกสารเอง เลือกใช้ได้ 2 แบบ:
 
-### API Endpoint
+- `POST /search` — retrieval อย่างเดียว (ได้ chunk + `content` เต็ม เอาไปให้ LLM ฝั่งคุณเรียบเรียงเอง)
+- `POST /ask` — ถาม-ตอบจบในตัว (retrieval + LLM เรียบเรียง + citation) เหมาะกับ chatbot/voicebot ที่ไม่อยากต่อ LLM เอง
+
+### API Endpoint — /search (retrieval)
 
 ```http
 POST http://192.168.5.32:8002/search
@@ -39,6 +42,24 @@ Content-Type: application/json
   "top_k": 3
 }
 ```
+
+### API Endpoint — /ask (ถาม-ตอบพร้อมอ้างอิง)
+
+```http
+POST http://192.168.5.32:8002/ask
+Content-Type: application/json
+
+{
+  "question": "ขั้นตอนการผสมสีพิเศษทำยังไง",
+  "role": "production",
+  "top_k": 4
+}
+```
+
+ตอบกลับ: `{"answer": "...คำตอบภาษาไทยพร้อม [1] [2]...", "citations": [{"ref": 1, "source": "...", "heading": "...", "score": 0.84}], "model": "claude-opus-4-8"}`
+
+> ฝั่ง server ต้องตั้ง `ANTHROPIC_API_KEY` ใน `.env` ข้าง docker-compose.yml (ดู `.env.example`)
+> ถ้าไม่ตั้ง `/ask` จะตอบ 503 แต่ `/search` ใช้ได้ปกติ — จุดสลับไป LLM local (vLLM) อยู่ที่ `generate_answer()` ใน app/main.py
 
 ### Response
 

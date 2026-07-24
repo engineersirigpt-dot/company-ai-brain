@@ -29,6 +29,46 @@ def make_id(source: str, text: str) -> str:
     return h
 
 
+MAX_PARENT_CHARS = 2000
+
+
+def _parent_window(full: str, pos: int, length: int, target: int = MAX_PARENT_CHARS) -> str:
+    """ตัด context ~target ตัวรอบตำแหน่ง chunk snap ขอบย่อหน้า (\\n\\n)"""
+    if len(full) <= target:
+        return full.strip()
+    end = pos + length
+    if length >= target:
+        return full[pos:pos + target].strip()
+    extra = target - length
+    left = max(0, pos - extra // 2)
+    right = min(len(full), end + (extra - (pos - left)))
+    if right - left < target:
+        left = max(0, right - target)
+    if right - left < target:
+        right = min(len(full), left + target)
+    lb = full.rfind("\n\n", 0, left + 1)
+    if lb != -1 and pos - lb <= target:
+        left = lb + 2
+    rb = full.find("\n\n", right)
+    if rb != -1 and rb - left <= target:
+        right = rb
+    return full[left:right].strip()
+
+
+def attach_parent_text(chunks: list[dict], full_text: str) -> None:
+    """เติม parent_text (section context ~2000 ตัว) ให้แต่ละ chunk
+    ช่วย chunk สั้นๆ ให้มีบริบทพอตอบ — API build_content จะอ่าน field นี้"""
+    for c in chunks:
+        t = (c["text"] or "").strip()
+        pos = full_text.find(t)
+        if pos < 0 and len(t) >= 60:  # probe ภายใน กัน heading/whitespace เพี้ยน
+            pos = full_text.find(t[len(t) // 2:len(t) // 2 + 60].strip())
+        c["parent_text"] = (
+            c["text"][:MAX_PARENT_CHARS] if pos < 0
+            else _parent_window(full_text, pos, len(t))
+        )
+
+
 def chunk_by_headings(text: str, source_name: str) -> list[dict]:
     """
     แบ่ง chunk ตามโครงสร้าง heading ของ markdown
@@ -167,6 +207,7 @@ def store_in_qdrant(chunks: list[dict]):
             vector=chunk["vector"],
             payload={
                 "text": chunk["text"],
+                "parent_text": chunk.get("parent_text", chunk["text"]),
                 "heading": chunk["heading"],
                 "source": chunk["source"],
                 **get_rbac(chunk["source"]),
@@ -191,8 +232,9 @@ def ingest(md_path: str):
     print(f"Reading: {path.name}")
     text = path.read_text(encoding="utf-8")
 
-    # 1. Chunk
+    # 1. Chunk (+ parent context สำหรับ retrieval)
     chunks = chunk_by_headings(text, source_name=path.stem)
+    attach_parent_text(chunks, text)
     print(f"Chunks: {len(chunks)}")
     for i, c in enumerate(chunks[:3]):
         preview = c["text"][:80].replace("\n", " ")

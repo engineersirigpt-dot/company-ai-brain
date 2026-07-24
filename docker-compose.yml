@@ -18,6 +18,9 @@ services:
       - QDRANT_PORT=6333
       - COLLECTION_NAME=company_docs
       - MODEL_NAME=BAAI/bge-m3
+      # LLM สำหรับ /ask — ค่าจริงอยู่ใน .env ข้างไฟล์นี้ (gitignored)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-claude-opus-4-8}
     volumes:
       - hf_cache:/root/.cache/huggingface
     depends_on:
