@@ -301,14 +301,20 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [x] M4 — แยก prod (`003_field_policy.sql`) ออกจาก test fixtures (`migrations/test/`), ตั้ง `source_system='SYNTHETIC_TEST'`
 - [x] test gap — neg6 tightened (assert error = enquiry guard) + เพิ่ม neg8/9/10/11 + pos4/5
 
-**Accepted แต่ defer → เป็นงาน "RFQ service layer" (phase ถัดไป, ไม่ใช่ DDL):**
-- [ ] **Blocker 1/3 + M1/M2 เต็มรูป** — status/revision mutation ต้องผ่าน transactional service function
-      (`mark_ready()`, `create_rfq_revision()` ตาม v0.2 ข้อ 8) + **revoke raw DML จาก app role**
-      เพราะ BEFORE-INSERT trigger กัน `ON CONFLICT DO NOTHING` / raw UPDATE ไม่ได้ครบ (Codex ถูก)
-      → trigger ปัจจุบันเป็น defense-in-depth ไม่ใช่ primary guard
+**RFQ service layer — ✅ ทำแล้ว 2026-07-27 (commit ด้านล่าง), verify service test 10/10 + รวม 28/28:**
+- [x] **Blocker 1/3 + M1/M2** — `004_service_functions.sql`:
+      - `mark_ready()` — บังคับ readiness rules (blocking clarification, reviewer sign-off, item/qty/component,
+        state ไม่ UNKNOWN) + row_version optimistic lock + transition + log ทั้งหมด atomic; block → raise
+      - `create_rfq_revision()` — supersede เก่า + สร้าง DRAFT ใหม่ + log **ทั้ง 2 ฝั่ง atomic** (ปิด M1)
+      - revision trigger เปลี่ยนเป็น **validation-only** (ตัด side effect ออกจาก BEFORE INSERT — ปิด Blocker 3)
+      - **guard trigger**: identity/status ของ rfq + แก้ child ของ READY/SUPERSEDED revision ทำได้เฉพาะผ่าน
+        function (session flag `rfq.privileged`) — ปิด M2; raw UPDATE/DELETE ถูก block (enforce โดยไม่ขึ้นกับ role)
+- [ ] **role-based REVOKE** (defense-in-depth เสริม trigger) — documented ใน 004 เป็น production step, ยังไม่รัน
 - [ ] **M3** — subject delete/reparent orphan protection (soft-delete + guard + multi-connection test)
 - [ ] **Medium** — `rfq_external_ref_resolution` ทำเป็น append-only audit (ตอนนี้เก็บค่าล่าสุด overwrite)
 - [ ] concurrency tests (2 connections), rollback-after-trigger, migration runner + version tracking
+- [ ] **NOTE**: mark_ready ที่ block → RAISE = rollback → readiness_run ของรอบ fail ไม่ถูกเก็บ (v1 ยอมรับ;
+      production ให้ service log attempt แยก); child-lock guard v1 ครอบ `rfq_item` — ตารางลูกลึกกว่าเพิ่มภายหลัง
 
 ### งานใหญ่ / Production Readiness
 

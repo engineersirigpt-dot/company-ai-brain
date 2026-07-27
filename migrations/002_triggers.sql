@@ -9,7 +9,10 @@
 BEGIN;
 SET search_path TO rfq;
 
--- ---- revision chain (บังคับ rfq_no/enquiry_ref เดิม + supersede atomic + log) ----
+-- ---- revision chain: VALIDATION-ONLY (Blocker 3 fix) ----
+-- ตรวจเฉพาะ "invariant ที่เป็นจริงเสมอ" (identity ของ revision) ไม่มี side effect
+-- state-transition rules (predecessor ต้อง current+READY) + การ supersede + log ย้ายไป
+-- create_rfq_revision() ใน 004 (atomic ในนั้น) — กันปัญหา BEFORE INSERT + ON CONFLICT DO NOTHING
 CREATE OR REPLACE FUNCTION enforce_rfq_revision_chain()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -22,7 +25,7 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    SELECT * INTO previous_row FROM rfq WHERE id = NEW.supersedes_rfq_id FOR UPDATE;
+    SELECT * INTO previous_row FROM rfq WHERE id = NEW.supersedes_rfq_id;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Superseded RFQ does not exist';
     END IF;
@@ -38,32 +41,7 @@ BEGIN
     IF NEW.revision_no <> previous_row.revision_no + 1 THEN
         RAISE EXCEPTION 'Revision number must increment by exactly one';
     END IF;
-    IF previous_row.is_current IS NOT TRUE THEN
-        RAISE EXCEPTION 'Only the current revision can be superseded';
-    END IF;
-    IF previous_row.status_code <> 'READY_FOR_ESTIMATE' THEN
-        RAISE EXCEPTION 'Create a revision only after READY_FOR_ESTIMATE; edit Draft in place';
-    END IF;
-    IF NEW.status_code <> 'DRAFT' OR NEW.is_current IS NOT TRUE THEN
-        RAISE EXCEPTION 'A new revision must start as current DRAFT';
-    END IF;
-
-    UPDATE rfq
-       SET is_current = false, status_code = 'SUPERSEDED', updated_at = now()
-     WHERE id = previous_row.id;
-
-    -- FINDING #1: log transition ของ revision เก่าให้ atomic (อยู่ใน INSERT txn เดียวกัน)
-    -- changed_by_ref ใช้ผู้สร้าง revision ใหม่ (คนที่ทำให้เกิดการ supersede)
-    INSERT INTO rfq_status_history
-        (rfq_id, from_status_code, to_status_code, changed_by_ref, reason, idempotency_key)
-    VALUES
-        (previous_row.id, previous_row.status_code, 'SUPERSEDED', NEW.created_by_ref,
-         'superseded by revision ' || NEW.revision_no,
-         'supersede:' || previous_row.id || ':' || NEW.revision_no);
-    -- หมายเหตุ: history ของ NEW (creation → DRAFT) ให้ service/AFTER-trigger บันทึกหลัง INSERT
-    -- (BEFORE INSERT อ้าง NEW.id ใน FK ไม่ได้เพราะ row ยังไม่ถูก insert)
-
-    RETURN NEW;
+    RETURN NEW;   -- ไม่แตะ predecessor, ไม่ log — ให้ create_rfq_revision() จัดการ
 END;
 $$;
 

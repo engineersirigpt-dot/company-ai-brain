@@ -109,11 +109,8 @@ BEGIN
         RAISE NOTICE 'FAIL neg10: cross-RFQ readiness_run allowed'; fail:=fail+1;
     EXCEPTION WHEN foreign_key_violation THEN RAISE NOTICE 'PASS neg10: cross-RFQ readiness_run rejected'; pass:=pass+1; END;
 
-    -- POS 3 (finding #1): revision ถูกต้อง → supersede + log
-    INSERT INTO rfq (rfq_no,revision_no,supersedes_rfq_id,revision_reason,enquiry_ref,
-        status_code,is_current,created_by_ref,updated_by_ref)
-    VALUES ('RFQ-TEST-A',2,a_rfq,'ลูกค้าเปลี่ยนขนาด','ENQ-A','DRAFT',true,'PREPARER-MOCK','PREPARER-MOCK')
-    RETURNING id INTO tmp;
+    -- POS 3 (finding #1): revision ถูกต้องผ่าน service function → supersede + log ทั้ง 2 ฝั่ง
+    tmp := create_rfq_revision(a_rfq, 'ลูกค้าเปลี่ยนขนาด', 'PREPARER-MOCK');
     IF (SELECT status_code FROM rfq WHERE id=a_rfq)='SUPERSEDED'
        AND (SELECT is_current FROM rfq WHERE id=a_rfq)=false
     THEN RAISE NOTICE 'PASS pos3a: old revision superseded'; pass:=pass+1;
@@ -121,6 +118,10 @@ BEGIN
     SELECT count(*) INTO hist_cnt FROM rfq_status_history WHERE rfq_id=a_rfq AND to_status_code='SUPERSEDED';
     IF hist_cnt=1 THEN RAISE NOTICE 'PASS pos3b: supersede logged (finding #1)'; pass:=pass+1;
     ELSE RAISE NOTICE 'FAIL pos3b: got % rows', hist_cnt; fail:=fail+1; END IF;
+    -- pos3c: revision ใหม่มี history NULL→DRAFT (M1 ทั้ง 2 ฝั่ง atomic)
+    IF EXISTS (SELECT 1 FROM rfq_status_history WHERE rfq_id=tmp AND from_status_code IS NULL AND to_status_code='DRAFT')
+    THEN RAISE NOTICE 'PASS pos3c: new revision DRAFT logged (M1)'; pass:=pass+1;
+    ELSE RAISE NOTICE 'FAIL pos3c'; fail:=fail+1; END IF;
 
     -- POS 4 (B2 happy path): AI evidence ที่มี extraction_run ที่ถูก → insert ได้
     INSERT INTO rfq_ai_extraction_run (id, rfq_id, source_attachment_id, execution_target,
