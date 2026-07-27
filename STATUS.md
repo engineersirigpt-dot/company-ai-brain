@@ -234,6 +234,33 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 
 เหตุผลที่เลือก API key ก่อน: duplicate กระทบคุณภาพ `top_k` แต่ role spoofing กระทบขอบเขตข้อมูลที่ caller เข้าถึงได้ จึงมี severity สูงกว่า
 
+### Hardening backlog (จาก GPT trace 2026-07-27 — accepted)
+
+**ทำแล้ว:**
+- [x] **Auth fail-closed** (commit ด้านล่าง) — GPT เจอบั๊ก: `enforce` + registry ว่าง เคย fail-open,
+      AUTH_MODE สะกดผิดตกไป warn เงียบๆ → แก้: validate AUTH_MODE + key registry ตอน startup,
+      enforce+ไม่มี key = refuse to start, `check_service_auth` ไม่พึ่ง `and keys` แล้ว
+      + `test_auth.py` 11 tests (มี regression ของบั๊กนี้) รันผ่านโดยไม่ต้อง model/Qdrant
+- [x] Input length cap: `query`/`question` min 1 / max 2000 (Pydantic Field)
+
+**ทำต่อได้เลย (mock/offline, $0, ไม่แตะ Qdrant):**
+- [ ] **Per-request budget cap /ask** — validate `LLM_MAX_TOKENS` ตอน startup, ตั้งเพดาน PoC ต่ำลง,
+      log token usage (ห้าม log question/context), unit test ด้วย fake LLM
+- [ ] **Citation integrity guard** — ปัจจุบัน `/ask` คืน retrieved docs ทุกฉบับใน `citations`
+      ไม่ว่าคำตอบใช้ `[n]` จริงหรือไม่ → parse `[n]` จาก answer, reject เลขนอกช่วง, คืนเฉพาะที่อ้างจริง
+      **⚠️ นัยต่อ eval: ค่า citation-hit 92% = ยืนยัน retrieval hit เท่านั้น ยังไม่ยืนยันว่า [n] ในข้อความถูก**
+- [ ] **Auth cutover telemetry** — structured log สรุป readiness ต่อ consumer ก่อน flip enforce
+      (นับ missing/invalid/out-of-scope แยก service; ไม่ log key/question/content)
+- [ ] **`/live` endpoint** — process-only (ไม่แตะ Qdrant) + docker healthcheck; `/health` เดิมคง readiness
+
+**รอ corpus นิ่ง (ตอนนี้นิ่งแล้วหลัง OCR):**
+- [ ] **Replacement protocol แบบ generation/staging** — ป้องกันช่วงข้อมูลหายถ้า upsert ล้มหลัง delete
+      (ทั้ง ingest.py upsert-only เหลือ chunk เก่า และ ocr_reingest delete-before-upsert)
+- [ ] Retrieval regression (eval เดิม + canary 6 ไฟล์ AFII) — $0 ไม่ผ่าน LLM
+- [ ] Corpus release manifest (source, hash, parser/OCR version, chunk count, RBAC, timestamp)
+- [ ] Snapshot restore drill ใน collection แยก (ไม่แตะ live)
+- [ ] Reranker benchmark (ด้วย corpus release เดียวกัน)
+
 ### งานใหญ่ / Production Readiness
 
 - Keycloak OIDC

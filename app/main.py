@@ -20,7 +20,7 @@ import torch
 import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchAny
@@ -62,10 +62,14 @@ async def lifespan(app: FastAPI):
     app.state.llm = anthropic.Anthropic() if os.getenv("ANTHROPIC_API_KEY") else None
     print(f"LLM: {LLM_MODEL if app.state.llm else 'not configured'}")
     # Service API keys — {sha256_hex: {"service": str, "allowed_roles": [...]}}
-    app.state.api_keys = {}
-    if API_KEYS_FILE and os.path.exists(API_KEYS_FILE):
-        with open(API_KEYS_FILE, encoding="utf-8") as f:
-            app.state.api_keys = json.load(f)
+    if AUTH_MODE not in ("off", "warn", "enforce"):
+        raise RuntimeError(
+            f"invalid AUTH_MODE={AUTH_MODE!r} (ต้องเป็น off|warn|enforce)")
+    app.state.api_keys = load_api_keys(API_KEYS_FILE)
+    # fail-closed: enforce แต่ไม่มี key ที่ใช้ได้ → ไม่ยอม start (กัน enforce กลายเป็น fail-open)
+    if AUTH_MODE == "enforce" and not app.state.api_keys:
+        raise RuntimeError(
+            "AUTH_MODE=enforce แต่โหลด API key ไม่ได้เลย — refusing to start (fail-closed)")
     print(f"Auth: mode={AUTH_MODE}, service keys={len(app.state.api_keys)}")
     print("API ready")
     yield
@@ -101,6 +105,29 @@ def embed(tokenizer, model, text: str) -> list[float]:
     return vec[0].tolist()
 
 
+def load_api_keys(path: str) -> dict:
+    """โหลด+validate service key registry — โครงผิดถือว่า fatal (จะไป fail-closed ตอน startup)
+
+    แต่ละ entry: key = sha256 hex 64 ตัว, service = str, allowed_roles = subset ของ VALID_ROLES
+    """
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"{path}: ต้องเป็น JSON object")
+    valid = set(VALID_ROLES) | {"admin"}
+    for k, v in raw.items():
+        if len(k) != 64 or any(c not in "0123456789abcdef" for c in k.lower()):
+            raise RuntimeError(f"{path}: key '{k[:12]}...' ไม่ใช่ sha256 hex 64 ตัว")
+        if not isinstance(v, dict) or not v.get("service"):
+            raise RuntimeError(f"{path}: entry ของ '{k[:12]}...' ต้องมี field 'service'")
+        bad = set(v.get("allowed_roles", [])) - valid
+        if bad:
+            raise RuntimeError(f"{path}: service '{v['service']}' มี role ไม่รู้จัก {bad}")
+    return raw
+
+
 def check_service_auth(request: Request, role: str, endpoint: str) -> str:
     """ตรวจ X-API-Key → service identity + role scope แล้วเขียน audit log
 
@@ -121,11 +148,12 @@ def check_service_auth(request: Request, role: str, endpoint: str) -> str:
         if role not in entry.get("allowed_roles", []):
             problem = f"role_out_of_scope:{role}"
 
-    # ยังไม่ config keys เลย (bootstrap) หรือ mode off → ไม่นับเป็นปัญหา
-    if problem and keys and AUTH_MODE != "off":
-        if AUTH_MODE == "enforce":
-            code = 401 if problem == "missing_or_invalid_key" else 403
-            raise HTTPException(status_code=code, detail=f"Auth failed: {problem}")
+    # enforce: registry ถูกการันตีว่าไม่ว่างตั้งแต่ startup (fail-closed) จึงบังคับได้เสมอ
+    # ไม่พึ่ง `and keys` แบบเดิม (บั๊ก fail-open เมื่อ registry ว่าง)
+    if problem and AUTH_MODE == "enforce":
+        code = 401 if problem == "missing_or_invalid_key" else 403
+        raise HTTPException(status_code=code, detail=f"Auth failed: {problem}")
+    if problem and AUTH_MODE == "warn":
         print(f"[AUTH-WARN] service={service} endpoint={endpoint} problem={problem}",
               flush=True)
 
@@ -181,7 +209,7 @@ def build_content(payload: dict) -> str:
 # ─── Schemas ───────────────────────────────────────────────────────────────────
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str = Field(min_length=1, max_length=2000)
     role: str
     top_k: int = 3
 
@@ -204,7 +232,7 @@ class SearchResponse(BaseModel):
 
 
 class AskRequest(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=2000)
     role: str
     top_k: int = 4
 
