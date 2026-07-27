@@ -162,7 +162,7 @@ Agent แต่ละตัวแตกต่างกันด้วย Mission
 | คำถาม | คำตอบ | สถานะ |
 |---|---|---|
 | งาน 3 ประเภทแรก | **เริ่มจาก Packaging (กล่อง)** — สอดคล้องระบบ Estimate Packaging ที่มีอยู่ + corpus มี QP/WI Packaging ครบ | ✅ ใช้ได้เลย |
-| Master Data owner/รหัส | ตรวจระบบ `RFQ_Estimate` แล้ว (read-only): **PostgreSQL** มีตระกูล **`tb_master_*`** ครบ (paper, std_paper, corrugated_board, coating, foilstamp, blockdiecut, waste, price_rate, machine info ฯลฯ) → v0.2 ให้ `*_ref` ชี้ตารางเหล่านี้ | ✅ เจอของจริง — เหลือยืนยัน owner (น่าจะทีมคุณอาร์ต) |
+| Master Data owner/รหัส | **[แก้ไข 2026-07-27 โดยผู้พัฒนา]** ตระกูล `tb_master_*` (paper, corrugated_board, coating, waste, price_rate, machine ฯลฯ) **ดึงจาก database จริงของบริษัทผ่าน API** — เว็บ RFQ_Estimate ไม่ได้เป็นเจ้าของ; **PostgreSQL local ของเว็บเก็บเฉพาะ RFQ list/เอกสาร RFQ** → v0.2 ให้ `*_ref` อ้างรหัสจาก company DB (ผ่าน API เดียวกับที่เว็บใช้) ไม่ copy master มาเก็บเอง | ✅ ยืนยันโดยผู้พัฒนา — เหลือหาว่า API/DB บริษัทใครดูแล |
 | เลข RFQ | ระบบเว็บ RFQ Estimate เดิมเป็นคนออกเลข (job_id) — format ที่แน่นอนต้องดูจาก DB จริง | 🔶 รอยืนยัน format |
 | ผู้ยืนยัน Ready for Estimate | ยังไม่รู้ — แต่ระบบเดิมมี status flow (Draft/Pending/Reject/Approved) + JWT roles อยู่แล้ว → ข้อเสนอ: reuse กลไก approve เดิม | 🔶 เปิดอยู่ — ถามเฮีย |
 | นโยบายข้อมูลเข้า Claude | **ผู้พัฒนาปรับ scope: ใช้ Claude เต็มที่กับข้อมูลปัจจุบันไปก่อน** (SOP/Internal — ไม่ severe) แล้วค่อยเพิ่มคัดกรองทีหลัง | ⚠️ มี tripwire ด้านล่าง |
