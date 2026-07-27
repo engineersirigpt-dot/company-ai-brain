@@ -171,7 +171,13 @@ Agent แต่ละตัวแตกต่างกันด้วย Mission
 แต่**ทันทีที่ RFQ จริงเริ่มไหลเข้าระบบ** (มีชื่อ/เบอร์/อีเมลลูกค้า = PDPA, ต้นทุน = ความลับการค้า)
 ต้องกลับมาเปิด redaction/local-LLM path หรือได้อนุมัติจากผู้บริหารก่อน — ห้ามปล่อยผ่านเงียบๆ
 
-**อัปเดต 2026-07-27:** RFQ Schema draft (Codex) ผ่าน cross-check review (Claude) แล้ว —
+**อัปเดต 2026-07-27 (รอบ 2):** **RFQ Schema v0.2 (Packaging-first) ผ่าน cross-check แล้ว — ✅ อนุมัติเริ่มเตรียม migration**
+ปิดครบ 3 blocker (Data Egress schema-enforced, stable UUID subject + DB guard, revision chain trigger)
+เหลือ 3 จุดเก็บตอน migration (trigger ข้าม status_history, CHECK subject_type ใน field_policy,
+audit child tables) + open decisions 8 ข้อใน `RFQ_SCHEMA_V0_2.md` ข้อ 11 = blocker list ของ migration
+ดูรายละเอียดใน `RFQ_SCHEMA_V0_2.md` ข้อ 13
+
+**อัปเดต 2026-07-27:** RFQ Schema draft v0.1 (Codex) ผ่าน cross-check review (Claude) แล้ว —
 verdict: อนุมัติทิศทาง, มี 3 จุดต้องแก้ก่อน migration (PDPA field classification,
 field_path stability, revision chain integrity) ดูรายละเอียดใน `RFQ_SCHEMA_DRAFT.md` ข้อ 13
 คำถาม business 12 ข้อในไฟล์เดียวกัน ข้อ 11 = วาระประชุมผู้บริหาร
