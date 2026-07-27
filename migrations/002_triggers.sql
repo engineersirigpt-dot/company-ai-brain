@@ -6,6 +6,9 @@
 -- Rollback: DROP TRIGGER ... ; DROP FUNCTION ...
 -- ============================================================================
 
+BEGIN;
+SET search_path TO rfq;
+
 -- ---- revision chain (บังคับ rfq_no/enquiry_ref เดิม + supersede atomic + log) ----
 CREATE OR REPLACE FUNCTION enforce_rfq_revision_chain()
 RETURNS trigger LANGUAGE plpgsql AS $$
@@ -148,3 +151,29 @@ CREATE TRIGGER trg_readiness_check_subject_membership
 BEFORE INSERT OR UPDATE OF rfq_id, subject_type, subject_id
 ON rfq_readiness_check
 FOR EACH ROW EXECUTE FUNCTION enforce_rfq_subject_membership();
+
+-- ---- estimate link guard (Blocker 1, DB-level defense) ----
+-- สร้าง handoff link ได้เฉพาะ RFQ ที่ READY_FOR_ESTIMATE + เป็น revision ปัจจุบัน
+-- (การบังคับ readiness rules เต็มชุด = หน้าที่ mark_ready() service — ดู STATUS decision)
+CREATE OR REPLACE FUNCTION enforce_estimate_link_ready()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE r rfq%ROWTYPE;
+BEGIN
+    SELECT * INTO r FROM rfq WHERE id = NEW.rfq_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'RFQ % not found', NEW.rfq_id;
+    END IF;
+    IF r.status_code <> 'READY_FOR_ESTIMATE' OR r.is_current IS NOT TRUE THEN
+        RAISE EXCEPTION
+            'estimate_link ต้องการ RFQ ที่ READY_FOR_ESTIMATE + current (พบ status=%, is_current=%)',
+            r.status_code, r.is_current USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_estimate_link_ready
+BEFORE INSERT ON rfq_estimate_link
+FOR EACH ROW EXECUTE FUNCTION enforce_estimate_link_ready();
+
+COMMIT;

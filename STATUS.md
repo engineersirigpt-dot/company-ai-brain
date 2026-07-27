@@ -261,6 +261,26 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [ ] Snapshot restore drill ใน collection แยก (ไม่แตะ live)
 - [ ] Reranker benchmark (ด้วย corpus release เดียวกัน)
 
+### RFQ Migration — Codex review commit 8149e64 (9 findings) → Claude แก้ 2026-07-27
+
+**แก้แล้วระดับ DDL + verify ด้วย test 17/17 (ephemeral postgres:16):**
+- [x] B2 — `rfq_field_evidence.extraction_run_id` + composite FK + CHECK (AI_INFERENCE ต้องมี run) → SEC-004 พิสูจน์ได้แล้ว
+- [x] M6 — `rfq_status_history.readiness_run_id` composite FK (กันอ้าง run ข้าม RFQ)
+- [x] Egress edge — CLOUD+BLOCKED บันทึกได้ (audit attempt ที่ถูกห้าม), REDACTED_ALLOW บังคับ manifest ไม่ว่าง
+- [x] Blocker 1 (DB-level) — trigger กัน `rfq_estimate_link` ให้สร้างได้เฉพาะ RFQ ที่ READY+current
+- [x] M5 — schema isolation (`CREATE SCHEMA rfq` + search_path) + ห่อ BEGIN/COMMIT ทุกไฟล์
+- [x] M4 — แยก prod (`003_field_policy.sql`) ออกจาก test fixtures (`migrations/test/`), ตั้ง `source_system='SYNTHETIC_TEST'`
+- [x] test gap — neg6 tightened (assert error = enquiry guard) + เพิ่ม neg8/9/10/11 + pos4/5
+
+**Accepted แต่ defer → เป็นงาน "RFQ service layer" (phase ถัดไป, ไม่ใช่ DDL):**
+- [ ] **Blocker 1/3 + M1/M2 เต็มรูป** — status/revision mutation ต้องผ่าน transactional service function
+      (`mark_ready()`, `create_rfq_revision()` ตาม v0.2 ข้อ 8) + **revoke raw DML จาก app role**
+      เพราะ BEFORE-INSERT trigger กัน `ON CONFLICT DO NOTHING` / raw UPDATE ไม่ได้ครบ (Codex ถูก)
+      → trigger ปัจจุบันเป็น defense-in-depth ไม่ใช่ primary guard
+- [ ] **M3** — subject delete/reparent orphan protection (soft-delete + guard + multi-connection test)
+- [ ] **Medium** — `rfq_external_ref_resolution` ทำเป็น append-only audit (ตอนนี้เก็บค่าล่าสุด overwrite)
+- [ ] concurrency tests (2 connections), rollback-after-trigger, migration runner + version tracking
+
 ### งานใหญ่ / Production Readiness
 
 - Keycloak OIDC

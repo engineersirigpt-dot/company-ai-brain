@@ -3,10 +3,16 @@
 -- ต้นทาง: RFQ_SCHEMA_V0_2.md ข้อ 6 | ใส่ finding #2 (field_policy subject_type CHECK)
 -- Triggers/functions อยู่ 002 | seed อยู่ 003
 -- รันบน PostgreSQL เปล่า (instance/DB แยก — ห้ามรวมกับ clinic/siriwattana)
--- Rollback: DROP SCHEMA rfq CASCADE;  (หรือ drop ตามลำดับย้อน)
+-- Rollback: DROP SCHEMA rfq CASCADE;
 -- ============================================================================
 
+BEGIN;
+
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- schema isolation (M5): ทุกตารางอยู่ใน schema `rfq` — ไม่ปนกับ public/DB อื่น
+CREATE SCHEMA IF NOT EXISTS rfq;
+SET search_path TO rfq;
 
 -- ---- lookup: RFQ status ----
 CREATE TABLE rfq_status (
@@ -410,6 +416,7 @@ CREATE TABLE rfq_field_evidence (
                          ('MANUAL','EMAIL','LINE','PDF','DOCX','XLSX','IMAGE',
                           'MASTER_DATA','PREVIOUS_JOB','AI_INFERENCE')),
     source_attachment_id uuid,
+    extraction_run_id    uuid,   -- (B2) ผูก AI evidence กับ extraction run ที่ผ่าน egress policy
     source_page          integer,
     source_excerpt       text,
     extractor_name       text,
@@ -425,7 +432,10 @@ CREATE TABLE rfq_field_evidence (
     CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
     CHECK (verification_status = 'UNVERIFIED'
            OR (verified_by_ref IS NOT NULL AND verified_at IS NOT NULL)),
+    -- (B2/SEC-004) AI_INFERENCE ต้องอ้าง extraction run เสมอ → พิสูจน์ผ่าน egress policy ได้
+    CHECK (source_type <> 'AI_INFERENCE' OR extraction_run_id IS NOT NULL),
     FOREIGN KEY (source_attachment_id, rfq_id) REFERENCES rfq_attachment(id, rfq_id)
+    -- composite FK ไป rfq_ai_extraction_run เพิ่มท้ายไฟล์ (ตารางนั้นนิยามทีหลัง)
 );
 CREATE INDEX ix_rfq_field_evidence_subject
     ON rfq_field_evidence (rfq_id, subject_type, subject_id, field_name, created_at DESC);
@@ -451,12 +461,19 @@ CREATE TABLE rfq_ai_extraction_run (
     started_at                timestamptz NOT NULL DEFAULT now(),
     completed_at              timestamptz,
     error_code                text,
+    -- egress edge case (Codex): CLOUD + BLOCKED ต้องบันทึกได้ (audit ของ attempt ที่ถูกห้าม)
+    -- อนุญาต CLOUD เมื่อ decision เป็น REDACTED_ALLOW/APPROVED_EXCEPTION (ส่งจริง) หรือ BLOCKED (ห้าม+log)
     CHECK (execution_target <> 'CLOUD'
-           OR egress_decision_code IN ('REDACTED_ALLOW','APPROVED_EXCEPTION')),
-    CHECK (egress_decision_code <> 'REDACTED_ALLOW' OR redaction_applied IS TRUE),
+           OR egress_decision_code IN ('REDACTED_ALLOW','APPROVED_EXCEPTION','BLOCKED')),
+    -- REDACTED_ALLOW ต้อง redact จริง + manifest ต้องไม่ว่าง (กันแอบส่งดิบโดยอ้างว่า redact แล้ว)
+    CHECK (egress_decision_code <> 'REDACTED_ALLOW'
+           OR (redaction_applied IS TRUE AND redaction_manifest <> '{}'::jsonb)),
+    -- BLOCKED = ห้ามเรียก provider จริง → ต้องไม่ SUCCEEDED
+    CHECK (egress_decision_code <> 'BLOCKED' OR status_code IN ('BLOCKED','FAILED','PENDING')),
     CHECK (egress_decision_code <> 'APPROVED_EXCEPTION'
            OR (exception_approved_by_ref IS NOT NULL
                AND NULLIF(btrim(exception_reason), '') IS NOT NULL)),
+    UNIQUE (id, rfq_id),   -- (B2) ให้ field_evidence อ้าง composite FK ได้
     FOREIGN KEY (source_attachment_id, rfq_id) REFERENCES rfq_attachment(id, rfq_id)
 );
 CREATE INDEX ix_rfq_ai_extraction_run ON rfq_ai_extraction_run (rfq_id, started_at DESC);
@@ -515,9 +532,11 @@ CREATE TABLE rfq_status_history (
     changed_by_ref   text NOT NULL,
     changed_at       timestamptz NOT NULL DEFAULT now(),
     reason           text,
-    readiness_run_id uuid REFERENCES rfq_readiness_run(id),
+    readiness_run_id uuid,
     idempotency_key  text,
-    UNIQUE (rfq_id, idempotency_key)
+    UNIQUE (rfq_id, idempotency_key),
+    -- (M6) composite FK: history ของ RFQ นี้ต้องอ้าง readiness run ของ RFQ เดียวกันเท่านั้น
+    FOREIGN KEY (readiness_run_id, rfq_id) REFERENCES rfq_readiness_run(id, rfq_id)
 );
 CREATE INDEX ix_rfq_status_history ON rfq_status_history (rfq_id, changed_at);
 
@@ -536,6 +555,14 @@ CREATE TABLE rfq_estimate_link (
 CREATE UNIQUE INDEX uq_rfq_primary_estimate
     ON rfq_estimate_link (rfq_id, estimate_system_code) WHERE is_primary;
 
+-- (B2) composite FK: field_evidence → ai_extraction_run (ตารางนิยามทีหลัง จึงผูกท้ายไฟล์)
+ALTER TABLE rfq_field_evidence
+    ADD CONSTRAINT fk_evidence_extraction_run
+    FOREIGN KEY (extraction_run_id, rfq_id)
+    REFERENCES rfq_ai_extraction_run(id, rfq_id);
+
 -- NOTE (finding #3 — child-table audit): ตารางลูกยังไม่มี updated_by_ref/audit ในตัว
 -- production ต้องมี durable audit/outbox ครอบ field-level change ของทุกตารางลูกก่อน go-live
 -- (ดู STATUS.md → Hardening backlog) — v1 นี้พึ่ง rfq_status_history + external_ref_resolution ไปก่อน
+
+COMMIT;
