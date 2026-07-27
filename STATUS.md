@@ -4,7 +4,7 @@
 > ให้อ่านไฟล์นี้ก่อนเริ่มวิเคราะห์ วางแผน หรือแก้ไขโปรเจกต์ เพื่อใช้ข้อเท็จจริงและการตัดสินใจล่าสุดร่วมกัน  
 > เมื่อพบหลักฐานใหม่ ให้แยกให้ชัดระหว่าง **ยืนยันแล้ว**, **ยังต้องตรวจสอบ** และ **ข้อเสนอ**
 
-**อัปเดตล่าสุด:** 2026-07-24
+**อัปเดตล่าสุด:** 2026-07-27
 
 ---
 
@@ -176,6 +176,36 @@ Agent แต่ละตัวแตกต่างกันด้วย Mission
 เหลือ 3 จุดเก็บตอน migration (trigger ข้าม status_history, CHECK subject_type ใน field_policy,
 audit child tables) + open decisions 8 ข้อใน `RFQ_SCHEMA_V0_2.md` ข้อ 11 = blocker list ของ migration
 ดูรายละเอียดใน `RFQ_SCHEMA_V0_2.md` ข้อ 13
+
+#### RFQ v0.2 — Migration TODO และ Decision Gate
+
+**Accepted findings จาก cross-check ข้อ 13:**
+
+- [ ] **Supersede audit ต้อง atomic:** ตอน clone revision ต้องบันทึกทั้ง
+      `READY_FOR_ESTIMATE → SUPERSEDED` ของ revision เดิมและการสร้าง `DRAFT`
+      revision ใหม่ใน transaction เดียวกัน ห้ามให้ trigger เปลี่ยนสถานะโดยไม่มี
+      `rfq_status_history`; migration ต้องจัดลำดับการสร้าง table/function/trigger
+      ให้รองรับ และมี concurrency/rollback test
+- [ ] **Field policy ต้อง validate ชื่อ:** เพิ่ม `CHECK`/reference validation สำหรับ
+      `rfq_field_policy.subject_type` ให้รับเฉพาะรายการที่รองรับกับ `ANY`;
+      `field_name` ต้องตรวจผ่าน versioned field registry ตอน seed/startup เพราะ
+      free text ที่สะกดผิดจะตก default `BLOCK` แบบปลอดภัยแต่ debug ยาก
+- [ ] **Child-table audit ต้องพิสูจน์ได้:** migration acceptance test ต้องยืนยันว่า
+      shared audit บันทึก field-level change ของ child tables ครบอย่างน้อย actor,
+      service, request_id, rfq_id, revision_no, stable subject ID, before/after,
+      reason และ changed_at; ถ้ายังไม่มี shared audit implementation ต้องสร้าง
+      durable audit/outbox ก่อนถือว่า migration ผ่าน
+
+**Open decisions ที่ block migration (จาก `RFQ_SCHEMA_V0_2.md` ข้อ 11):**
+
+- [ ] ระบุทีม/บุคคลที่เป็น Company API/Data Owner
+- [ ] ยืนยันว่า API คืน stable `ref` ของ Paper, Corrugated, Coating และ Box Template
+- [ ] ถ้า API ไม่มี stable ref ให้ระบุผู้อนุมัติ canonical key contract
+- [ ] ตัดสินใจว่า `job_id` reserve ตอนสร้าง Draft หรือออกตอน save/handoff
+- [ ] ระบุ Ready approver role และตัดสินใจว่าต้องแยกจากผู้จัดทำหรือไม่
+- [ ] กำหนด retention ของ Enquiry, Artwork, Dieline และข้อมูลผู้ติดต่อ
+- [ ] กำหนดกรณีที่อนุญาต Cloud extraction ของ RFQ จริงและผู้มีอำนาจอนุมัติ
+- [ ] เลือก physical PostgreSQL placement และ owner ของ backup/restore
 
 **อัปเดต 2026-07-27:** RFQ Schema draft v0.1 (Codex) ผ่าน cross-check review (Claude) แล้ว —
 verdict: อนุมัติทิศทาง, มี 3 จุดต้องแก้ก่อน migration (PDPA field classification,
