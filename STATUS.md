@@ -157,6 +157,20 @@ Agent แต่ละตัวแตกต่างกันด้วย Mission
 
 ### งานถัดไปที่เสนอ — ยังไม่ได้เริ่ม
 
+### คำตอบ Business รอบแรก (2026-07-27 — จากผู้พัฒนา ยังไม่ใช่มติทางการจากผู้บริหาร)
+
+| คำถาม | คำตอบ | สถานะ |
+|---|---|---|
+| งาน 3 ประเภทแรก | **เริ่มจาก Packaging (กล่อง)** — สอดคล้องระบบ Estimate Packaging ที่มีอยู่ + corpus มี QP/WI Packaging ครบ | ✅ ใช้ได้เลย |
+| Master Data owner/รหัส | ตรวจระบบ `RFQ_Estimate` แล้ว (read-only): **PostgreSQL** มีตระกูล **`tb_master_*`** ครบ (paper, std_paper, corrugated_board, coating, foilstamp, blockdiecut, waste, price_rate, machine info ฯลฯ) → v0.2 ให้ `*_ref` ชี้ตารางเหล่านี้ | ✅ เจอของจริง — เหลือยืนยัน owner (น่าจะทีมคุณอาร์ต) |
+| เลข RFQ | ระบบเว็บ RFQ Estimate เดิมเป็นคนออกเลข (job_id) — format ที่แน่นอนต้องดูจาก DB จริง | 🔶 รอยืนยัน format |
+| ผู้ยืนยัน Ready for Estimate | ยังไม่รู้ — แต่ระบบเดิมมี status flow (Draft/Pending/Reject/Approved) + JWT roles อยู่แล้ว → ข้อเสนอ: reuse กลไก approve เดิม | 🔶 เปิดอยู่ — ถามเฮีย |
+| นโยบายข้อมูลเข้า Claude | **ผู้พัฒนาปรับ scope: ใช้ Claude เต็มที่กับข้อมูลปัจจุบันไปก่อน** (SOP/Internal — ไม่ severe) แล้วค่อยเพิ่มคัดกรองทีหลัง | ⚠️ มี tripwire ด้านล่าง |
+
+**Tripwire ข้อ 5 (สำคัญ):** นโยบาย "เต็มที่ไปก่อน" ใช้ได้กับ corpus ปัจจุบันซึ่งเป็น SOP/WI ล้วน
+แต่**ทันทีที่ RFQ จริงเริ่มไหลเข้าระบบ** (มีชื่อ/เบอร์/อีเมลลูกค้า = PDPA, ต้นทุน = ความลับการค้า)
+ต้องกลับมาเปิด redaction/local-LLM path หรือได้อนุมัติจากผู้บริหารก่อน — ห้ามปล่อยผ่านเงียบๆ
+
 **อัปเดต 2026-07-27:** RFQ Schema draft (Codex) ผ่าน cross-check review (Claude) แล้ว —
 verdict: อนุมัติทิศทาง, มี 3 จุดต้องแก้ก่อน migration (PDPA field classification,
 field_path stability, revision chain integrity) ดูรายละเอียดใน `RFQ_SCHEMA_DRAFT.md` ข้อ 13
