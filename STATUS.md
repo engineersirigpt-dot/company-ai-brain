@@ -149,7 +149,16 @@ Agent แต่ละตัวแตกต่างกันด้วย Mission
 
 - [x] เปลี่ยน fallback ใน `rbac_config.py` เป็น default-deny / `UNCLASSIFIED` — commit `8e6ea48`, verify บน server แล้ว
 - [x] แก้ตัวอย่าง `MatchAny(any=["production", "admin"])` ใน `rbac_matrix.md` พร้อมคำเตือน — commit `8e6ea48`
-- [ ] จัดการ duplicate logical documents 4 ฉบับหลังมี snapshot และ canonical identity
+- [~] จัดการ duplicate logical documents 4 ฉบับ — **วิเคราะห์เสร็จ 2026-07-27 รอยืนยัน canonical ก่อนลบ**
+      ผลตรวจ: ทั้ง 4 คู่**เนื้อหาต่างกันจริง** (คนละ parse/ต้นฉบับ ไม่ใช่สำเนาแท้) ห้ามลบมั่ว
+      Snapshot ถ่ายแล้ว: `company_docs-1219394608722843-2026-07-27-10-31-42.snapshot` (56MB ใน qdrant volume)
+      ข้อเสนอ canonical (เก็บตัวเนื้อหาสมบูรณ์กว่า — รอ human ยืนยัน):
+      | คู่ | เก็บ (แนะนำ) | เหตุผล |
+      |---|---|---|
+      | QP-741-03 | ฉบับ `...FSC` (ไม่มีวงเล็บ) | 6.7KB/4 headings vs 3.2KB/1 |
+      | WI-751-01-01 | ฉบับ `Flow_...` | 15.3KB vs 10.9KB ⚠️ ชื่อต่างกันมาก อาจเป็นคนละเอกสาร ให้คนเปิดดู |
+      | WI-760-01-02 | ฉบับชื่อเต็ม `...ที่ใช้ในการสอบเทียบ` | 34.3KB vs 29.5KB |
+      | WI-823-01-04 | ฉบับไม่มีช่องว่างหลัง Rev.00 | 9.5KB vs 8.3KB |
 - [x] ใช้ `STATUS.md` เป็นสถานะกลาง และให้ `AGENTS.md`/`CLAUDE.md` ชี้มาอ่านก่อนทำงาน
 - [x] รัน baseline evaluation กับ `/ask` — 2026-07-27 ผล: citation-hit 92%, no-answer honest 8/8,
       permission leak 0/5, latency p50 7.3s (รายละเอียด+วิเคราะห์ใน `ask_eval_results.md`)
@@ -313,7 +322,7 @@ API key พิสูจน์ได้เพียงว่า request มาจ
 |---|---|
 | 48 เอกสารอาจหายจาก corpus ปัจจุบัน | ❌ ปิดแล้ว 2026-07-24 — เลข 143 มาจากไฟล์ดิบซ้ำข้ามโฟลเดอร์+ไฟล์ขยะ ไม่มีเอกสารจริงหาย |
 | Voicebot อาจค้นความรู้ได้ไม่ครบ | ❌ ปิดแล้ว — corpus ครบ 95/95 |
-| ผู้เรียก API สามารถอ้าง `admin` เอง | ยืนยันแล้ว — รอ API key ต่อ service (ดูข้อ 6) |
+| ผู้เรียก API สามารถอ้าง `admin` เอง | 🟡 กลไกปิดพร้อมแล้ว 2026-07-27: X-API-Key + role scope + audit log **รันอยู่ใน mode `warn`** (commit `0b16bd5`) — ทดสอบ enforce branch ผ่าน (401/403) ขั้นสุดท้าย: แจก key ให้ voicebot (ค่า key อยู่ `~/company-ai-brain/api_keys_ISSUED.txt` บน server, chmod 600) แล้วเปลี่ยน `.env` เป็น `AUTH_MODE=enforce` + `docker restart brain_api` |
 | `/ask` ส่ง Question + Retrieved Context ไป Claude API | ยืนยันจากเส้นทางโค้ด — ต้องตัดสินใจ Data Egress Policy |
 | Unknown document fallback เป็น `PRODUCTION` | ✅ แก้แล้ว 2026-07-24 — เปลี่ยนเป็น UNCLASSIFIED (admin เท่านั้น) |
 | ตัวอย่าง RBAC ใน Markdown ใส่ `admin` ใน MatchAny | ✅ แก้แล้ว 2026-07-24 |
