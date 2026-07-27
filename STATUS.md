@@ -330,6 +330,7 @@ API key พิสูจน์ได้เพียงว่า request มาจ
 | Revision เก่า-ใหม่ซ้อนกัน | ยังไม่พบ |
 | `/ask` ผ่าน full evaluation | ✅ baseline ผ่านแล้ว 2026-07-27 (hit 92%, hallucination 0, leak 0) — เหลือ faithfulness judge + probes ชุดเต็ม |
 | **[ใหม่ 2026-07-27]** Estimate master_data API ตอบโดย**ไม่มี auth** บน port ภายใน (3099/4010) และเปิดเผยราคา (`price`, `price_import`, `rate`, `min_cost`) ให้ทุกเครื่องใน LAN | ยืนยันจาก probe — แจ้งทีม Estimate/API owner พิจารณา (เกี่ยวพันงาน inbound API key) |
+| **[ใหม่ 2026-07-27] เครดิต Anthropic API หมด → `/ask` ตอบ 502 ทุกคำถาม** (`/search` ที่ voicebot ใช้ไม่กระทบ — ไม่ผ่าน LLM) OCR 6 ไฟล์ AFII ก็ blocked ด้วย (ล้มก่อนแตะข้อมูล corpus ยังครบ 2,404) | ⛔ **รอมนุษย์: เติมเครดิตที่ Anthropic Console (Plans & Billing) ของบัญชี key เดิม หรือเปลี่ยน key ใหม่ใน `~/company-ai-brain/.env` แล้ว `docker restart brain_api`** จากนั้นสั่งรัน OCR ซ้ำได้ทันที (ทุกอย่าง staged ใน container แล้ว: `docker exec -d brain_api sh -c "python /tmp/ocr_reingest.py > /tmp/ocr.log 2>&1"`) ประมาณการใช้: OCR ~$2-4, /ask ~1 บาท/คำถาม |
 
 ---
 
