@@ -35,18 +35,21 @@ Enquiry → RFQ → ตรวจความครบถ้วน → อนุ�
 
 | # | Module (คำเฮีย) | สถานะเรา | หมายเหตุ |
 |---|---|---|---|
-| 12 | **AI Knowledge Brain** ("ความทรงจำองค์กร") | ✅ **สร้างเสร็จ รันจริง** | = company-ai-brain (2,263 chunks, /search+/ask, RBAC) — เฮียยังไม่รู้ว่ามีของแล้ว |
+| 12 | **AI Knowledge Brain** ("ความทรงจำองค์กร") | ✅ **PoC รันจริง** (เหลือ hardening) | = company-ai-brain (2,263 chunks, /search มี consumer จริง, /ask ใช้ได้, RBAC ทำงาน) — **ยังไม่ production-ready**: AUTH_MODE=warn, ยังไม่มี user auth, audit/monitoring ใน backlog, /ask ส่ง context ไป Claude |
 | 02 | **RFQ** (AI RFQ Agent V1) | 🔨 **กำลังทำ** | schema v0.2 + migration + test 17/17 ผ่าน (prototype) — เหลือ service layer + ENQ→RFQ AI extraction |
 | 01 | ENQ | ⬜ ถัดจาก RFQ | AE รับ ENQ → AI กรอก RFQ (ต่อกับ Module 02) |
 | 03 | AI Estimate | ⬜ ออกแบบไว้ | ต่อ RFQ → `/search`/`/ask` (SOP) + Costing deterministic (PostgreSQL, tb_master_* จริง) |
-| 11 | **Printing Doctor** (TCE + PAR) | 🟡 **ไพ่สำรอง** | **PAR-lite ทำได้เลยด้วย Brain** (ingest CAR เก่า → /ask "งานนี้เคยผิดอะไร"); TCE ต้องมี costing ก่อน (downstream) |
+| 11 | **Printing Doctor** (TCE + PAR) | 🟡 **ไพ่สำรอง** | **PAR-lite** (retrieval/root-cause/preventive checklist) ทำได้ด้วย Brain — แต่ต้อง **CAR สังเคราะห์/redact ก่อน** ไม่ ingest ของจริงที่มี PII/trade secret; **TCE** ต้องรอ Cost Data Contract + deterministic costing — ตัวเลขใน demo ต้องระบุชัดว่า simulated/illustrative |
 | 04–10 | Planning/Purchasing/Production/QC/Delivery/Finance/CEO Dashboard | ⬜ ยังไม่เริ่ม | roadmap เฮีย — อย่าเปิดพร้อมกัน (เฮียเองเตือน) |
 
 **Insight เชิงกลยุทธ์จากเอกสาร:**
 1. เฮีย emotionally สนใจ **Printing Doctor/True Cost of Error มากสุด** (วิสัยทัศน์ 20-30 ปี) + ย้ำอยากได้ **quick win เร็ว**
    → **PAR** (retrieval over CAR เก่า) = Brain ทำได้ทันที; **TCE** (คำนวณค่าเสียหาย) = ต้องมี costing engine ก่อน
-2. ChatGPT พูดเองว่า **deploy บน server ไม่ได้** (หน้า 17) → division ชัด: Codex/GPT = ออกแบบ/review, Claude = build+deploy+test บน server จริง, `STATUS.md` = ความจริงร่วม
+2. **Division of responsibility (operating constraint ของทีมนี้ ไม่ใช่ข้อจำกัดถาวรของโมเดล):**
+   ในช่องทางสนทนา ChatGPT เข้า server บริษัทเองไม่ได้ (หน้า 17) — แต่ agent ที่มี tools/credentials/authorization อาจ deploy ได้
+   ปัจจุบันทีมใช้: **GPT/Codex = ออกแบบ/review, Claude = build/test/deploy บน server จริง, `STATUS.md` = source of truth ร่วม**
 3. วินัย: **ลึก 1 โมดูล (RFQ) + เดโมถูกๆ 1 (PAR-lite) พอ** — ห้าม 12 โมดูลพร้อมกัน
+   PAR-lite guardrail: เริ่มด้วย synthetic/redacted CAR 20–50 เคส, `/search` เป็น default, ใช้ `/ask` เมื่อ auth/egress review ผ่าน, ห้ามคำนวณ TCE จริงจนกว่า costing contract พร้อม
 
 **แผนไม่ pivot:** เฮียยืนยันเอง (หน้า 16-18) ว่าก้าวแรก = RFQ Agent V1 → ทำ RFQ ให้จบก่อน, PAR-lite เก็บเป็นไพ่ถ้าเฮียกดดันอยากเห็นของเร็ว
 
