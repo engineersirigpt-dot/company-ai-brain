@@ -21,8 +21,15 @@ services:
       # LLM สำหรับ /ask — ค่าจริงอยู่ใน .env ข้างไฟล์นี้ (gitignored)
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-claude-opus-4-8}
+      # Inbound service auth (ดู STATUS.md ข้อ 6) — เปลี่ยนเป็น enforce เมื่อ consumer ใส่ key ครบ
+      - AUTH_MODE=${AUTH_MODE:-warn}
+      - API_KEYS_FILE=/app/api_keys.json
     volumes:
       - hf_cache:/root/.cache/huggingface
+      # โค้ด mount จาก repo — deploy ใหม่ = git pull + docker restart brain_api (ไม่ต้อง rebuild)
+      - ./app:/app/app:ro
+      # service API keys (hash) — สร้างไฟล์นี้บน server ก่อน compose up (gitignored)
+      - ./api_keys.json:/app/api_keys.json:ro
     depends_on:
       - qdrant
     restart: unless-stopped

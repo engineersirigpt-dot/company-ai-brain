@@ -12,6 +12,8 @@ parsed_output/
 api.txt
 .env
 *.key
+api_keys.json
+api_keys_ISSUED.txt
 
 # Raw documents (ไม่ commit เอกสารบริษัท)
 info/

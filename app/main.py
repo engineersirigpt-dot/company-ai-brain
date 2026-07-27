@@ -8,8 +8,11 @@ Endpoints:
     POST /ask            — ถาม-ตอบจากคลังความรู้ (retrieval + LLM เรียบเรียง + citation)
     GET  /collections    — สถิติแต่ละ collection (admin only)
 """
+import hashlib
+import json
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 
 import anthropic
@@ -30,6 +33,11 @@ MAX_CONTENT_CHARS = 2000  # จำกัดขนาด content ต่อ result
 # LLM สำหรับ /ask — จุดสลับ cloud↔local อยู่ที่ generate_answer() จุดเดียว
 LLM_MODEL = os.getenv("LLM_MODEL", "claude-opus-4-8")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))  # คำตอบสั้นโดยตั้งใจ (ใช้กับ voicebot)
+
+# Inbound service auth (แนวทางใน STATUS.md ข้อ 6) — key ต่อ service, เก็บเป็น sha256 hash
+# AUTH_MODE: off = ไม่ตรวจ | warn = ปล่อยผ่านแต่ log (ช่วงเปลี่ยนผ่าน) | enforce = block
+AUTH_MODE = os.getenv("AUTH_MODE", "warn")
+API_KEYS_FILE = os.getenv("API_KEYS_FILE", "")
 
 VALID_ROLES = [
     "admin", "management", "production", "prepress", "qc",
@@ -52,6 +60,12 @@ async def lifespan(app: FastAPI):
     # LLM client — ไม่มี key ก็รันได้ (/search ใช้ปกติ, /ask จะตอบ 503)
     app.state.llm = anthropic.Anthropic() if os.getenv("ANTHROPIC_API_KEY") else None
     print(f"LLM: {LLM_MODEL if app.state.llm else 'not configured'}")
+    # Service API keys — {sha256_hex: {"service": str, "allowed_roles": [...]}}
+    app.state.api_keys = {}
+    if API_KEYS_FILE and os.path.exists(API_KEYS_FILE):
+        with open(API_KEYS_FILE, encoding="utf-8") as f:
+            app.state.api_keys = json.load(f)
+    print(f"Auth: mode={AUTH_MODE}, service keys={len(app.state.api_keys)}")
     print("API ready")
     yield
 
@@ -73,6 +87,39 @@ def embed(tokenizer, model, text: str) -> list[float]:
     vec = out.last_hidden_state[:, 0, :]
     vec = F.normalize(vec, p=2, dim=1)
     return vec[0].tolist()
+
+
+def check_service_auth(request: Request, role: str, endpoint: str) -> str:
+    """ตรวจ X-API-Key → service identity + role scope แล้วเขียน audit log
+
+    - off:     ข้ามการตรวจ (log อย่างเดียว)
+    - warn:    key ผิด/เกิน scope → ปล่อยผ่านแต่ log [AUTH-WARN] (ช่วง migrate consumer เดิม)
+    - enforce: key ผิด → 401, role เกิน scope ของ service → 403
+    Client ห้ามเลือก role นอก scope ของ key ตนเอง (กัน role spoofing)
+    """
+    keys = request.app.state.api_keys
+    raw = request.headers.get("X-API-Key", "")
+    entry = keys.get(hashlib.sha256(raw.encode()).hexdigest()) if raw else None
+
+    service, problem = "unknown", None
+    if entry is None:
+        problem = "missing_or_invalid_key"
+    else:
+        service = entry.get("service", "unnamed")
+        if role not in entry.get("allowed_roles", []):
+            problem = f"role_out_of_scope:{role}"
+
+    # ยังไม่ config keys เลย (bootstrap) หรือ mode off → ไม่นับเป็นปัญหา
+    if problem and keys and AUTH_MODE != "off":
+        if AUTH_MODE == "enforce":
+            code = 401 if problem == "missing_or_invalid_key" else 403
+            raise HTTPException(status_code=code, detail=f"Auth failed: {problem}")
+        print(f"[AUTH-WARN] service={service} endpoint={endpoint} problem={problem}",
+              flush=True)
+
+    print(f"[AUDIT] ts={time.strftime('%Y-%m-%dT%H:%M:%S%z')} service={service} "
+          f"endpoint={endpoint} role={role}", flush=True)
+    return service
 
 
 def make_rbac_filter(role: str) -> Filter | None:
@@ -183,6 +230,7 @@ def health(request: Request):
 
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest, request: Request):
+    check_service_auth(request, req.role, "/search")
     if req.role not in VALID_ROLES:
         raise HTTPException(
             status_code=400,
@@ -224,6 +272,7 @@ def search(req: SearchRequest, request: Request):
 
 @app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest, request: Request):
+    check_service_auth(request, req.role, "/ask")
     llm = request.app.state.llm
     if llm is None:
         raise HTTPException(status_code=503,
@@ -297,6 +346,7 @@ def ask(req: AskRequest, request: Request):
 
 @app.get("/collections")
 def list_collections(role: str, request: Request):
+    check_service_auth(request, role, "/collections")
     if role != "admin":
         raise HTTPException(status_code=403, detail="admin only")
     qdrant = request.app.state.qdrant
