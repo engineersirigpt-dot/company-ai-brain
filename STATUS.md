@@ -199,8 +199,13 @@ audit child tables) + open decisions 8 ข้อใน `RFQ_SCHEMA_V0_2.md` ข�
 **Open decisions ที่ block migration (จาก `RFQ_SCHEMA_V0_2.md` ข้อ 11):**
 
 - [ ] ระบุทีม/บุคคลที่เป็น Company API/Data Owner
-- [ ] ยืนยันว่า API คืน stable `ref` ของ Paper, Corrugated, Coating และ Box Template
-- [ ] ถ้า API ไม่มี stable ref ให้ระบุผู้อนุมัติ canonical key contract
+- [x] ยืนยันว่า API คืน stable `ref` — **มีหลักฐานแล้ว (2026-07-27, Claude probe แบบ read-only):**
+      `GET /estimate/master_data` (port 3099/4010 บน server) คืน numeric `id` ครบทั้ง 5 type ที่ตรวจ
+      (paper 340 แถว, corrugated 1,522, coating 48, boxtemplate 12, process_type 18) —
+      corrugated มี `id` จริง ข้อกังวลใน v0.2 ข้อ 6.6 ตกไป; paper มี `is_enabled` ใช้เช็ค active ได้
+      **เหลือคำถามเดียวให้ API owner:** `id` คงที่ข้ามการ reload/re-import master หรือไม่
+      (ถ้า reload แล้ว serial เปลี่ยน ref จะพัง — ต้องยืนยันก่อน migration)
+- [ ] ถ้า `id` ไม่ stable ข้าม reload ให้ระบุผู้อนุมัติ canonical key contract
 - [ ] ตัดสินใจว่า `job_id` reserve ตอนสร้าง Draft หรือออกตอน save/handoff
 - [ ] ระบุ Ready approver role และตัดสินใจว่าต้องแยกจากผู้จัดทำหรือไม่
 - [ ] กำหนด retention ของ Enquiry, Artwork, Dieline และข้อมูลผู้ติดต่อ
@@ -315,6 +320,7 @@ API key พิสูจน์ได้เพียงว่า request มาจ
 | Duplicate logical documents แย่งพื้นที่ `top_k` | ยืนยันจาก Qdrant scan |
 | Revision เก่า-ใหม่ซ้อนกัน | ยังไม่พบ |
 | `/ask` ผ่าน full evaluation | ✅ baseline ผ่านแล้ว 2026-07-27 (hit 92%, hallucination 0, leak 0) — เหลือ faithfulness judge + probes ชุดเต็ม |
+| **[ใหม่ 2026-07-27]** Estimate master_data API ตอบโดย**ไม่มี auth** บน port ภายใน (3099/4010) และเปิดเผยราคา (`price`, `price_import`, `rate`, `min_cost`) ให้ทุกเครื่องใน LAN | ยืนยันจาก probe — แจ้งทีม Estimate/API owner พิจารณา (เกี่ยวพันงาน inbound API key) |
 
 ---
 
