@@ -19,6 +19,7 @@ import anthropic
 import torch
 import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
@@ -76,6 +77,17 @@ app = FastAPI(
     version="1.0.0-poc",
     lifespan=lifespan,
 )
+
+# CORS — default ปิด (server-to-server เช่น voicebot ไม่ต้องใช้)
+# เปิดให้ frontend เรียกตรงได้โดยตั้ง CORS_ORIGINS="http://host:3000,https://..." ใน .env
+_cors = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+if _cors:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors,           # ระบุ origin ชัดเจน ไม่ใช้ "*" คู่กับ header auth
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "X-API-Key"],
+    )
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
