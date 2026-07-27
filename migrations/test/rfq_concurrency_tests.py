@@ -245,7 +245,7 @@ def t04_role_privilege(sup):
     has_upd = sql1(sup, "SELECT has_table_privilege('rfq_app','rfq.rfq','UPDATE')")
     checks.append(('has_table_privilege UPDATE=false', has_upd is False, f'has_update={has_upd}'))
     # app ต้องเรียก mark_ready ได้ (EXECUTE granted) — ยืนยันว่าไม่ได้ปิดหมด
-    can_exec = sql1(sup, "SELECT has_function_privilege('rfq_app','mark_ready(uuid,int,text,text,text,text)','EXECUTE')")
+    can_exec = sql1(sup, "SELECT has_function_privilege('rfq_app','mark_ready(uuid,int,text)','EXECUTE')")
     checks.append(('app EXECUTE mark_ready=true', can_exec is True, f'exec={can_exec}'))
     app.close()
     allok = all(ok for _, ok, _ in checks)
@@ -345,10 +345,81 @@ def t08_clone_atomicity(sup):
     record('T08 revision clone atomicity', ok,
            f"injected={injected}, rev2={n_rev2}(want 0), old={old_status}, current={old_current}, super_hist={n_super}(want 0)")
 
+def t09_authz_separation(sup):
+    """Codex V1: rfq_ingest (ENQ worker) ต้องปลอม sign-off/Ready/revision ไม่ได้"""
+    f = seed_review_rfq(sup, 'T09')
+    rfq, so = f['rfq'], f['signoff']
+    ing = connect(role='rfq_ingest')
+    checks = []
+    def denied_exec(label, q, args=None):
+        try:
+            with ing.cursor() as cur:
+                cur.execute(q, args)
+            checks.append((label, False, 'ALLOWED(bad)'))
+        except psycopg2.Error as e:
+            checks.append((label, e.pgcode == errorcodes.INSUFFICIENT_PRIVILEGE, e.pgcode)); ing.rollback()
+    denied_exec('ingest mark_ready',          "SELECT mark_ready(%s,1,'forged')", (rfq,))
+    denied_exec('ingest add_signoff',         "SELECT add_signoff(%s,'REVIEWER','CONFIRMED','forged')", (rfq,))
+    denied_exec('ingest revoke_signoff',      "SELECT revoke_signoff(%s,'forged')", (so,))
+    denied_exec('ingest create_rfq_revision', "SELECT create_rfq_revision(%s,'r','forged')", (rfq,))
+    denied_exec('ingest resolve_clarification', "SELECT resolve_clarification(%s,'OPEN','forged')", (so,))
+    ing.close()
+    # rfq_app คงสิทธิ์ reviewer/Ready ไว้; rfq_ingest ต้องไม่มี
+    app_exec = sql1(sup, "SELECT has_function_privilege('rfq_app','mark_ready(uuid,int,text)','EXECUTE')")
+    ing_exec = sql1(sup, "SELECT has_function_privilege('rfq_ingest','mark_ready(uuid,int,text)','EXECUTE')")
+    ing_so = sql1(sup, "SELECT has_function_privilege('rfq_ingest','add_signoff(uuid,text,text,text,text)','EXECUTE')")
+    checks.append(('rfq_app EXECUTE mark_ready=true', app_exec is True, app_exec))
+    checks.append(('rfq_ingest EXECUTE mark_ready=false', ing_exec is False, ing_exec))
+    checks.append(('rfq_ingest EXECUTE add_signoff=false', ing_so is False, ing_so))
+    allok = all(ok for _, ok, _ in checks)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "ingest blocked from signoff/Ready/revision; app retains capability"
+    record('T09 authz separation (rfq_ingest)', allok, detail)
+
+def t10_catalog_and_policy(sup):
+    """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
+    svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
+           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input']
+    bad = []
+    for fn in svc:
+        row = None
+        with sup.cursor() as cur:
+            cur.execute("""SELECT r.rolname, p.prosecdef, array_to_string(p.proconfig,'|'),
+                    p.proacl IS NULL AS acl_null,
+                    EXISTS (SELECT 1 FROM aclexplode(p.proacl) a
+                            WHERE a.grantee=0 AND a.privilege_type='EXECUTE') AS pub_exec
+                FROM pg_proc p JOIN pg_roles r ON r.oid=p.proowner
+                JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='rfq' AND p.proname=%s LIMIT 1""", (fn,))
+            row = cur.fetchone()
+        if not row:
+            bad.append(f"{fn}:missing"); continue
+        owner, secdef, cfg, acl_null, pub_exec = row
+        if owner != 'rfq_owner': bad.append(f"{fn}:owner={owner}")
+        if secdef is not True:   bad.append(f"{fn}:prosecdef={secdef}")
+        if not cfg or 'search_path=pg_catalog, rfq, pg_temp' not in cfg: bad.append(f"{fn}:proconfig={cfg}")
+        # PUBLIC ต้องไม่มี EXECUTE (proacl NULL = default = PUBLIC execute ได้ = bad)
+        if acl_null or pub_exec: bad.append(f"{fn}:PUBLIC-execute(acl_null={acl_null})")
+    # _lock helper ต้องไม่เปิดให้ app/ingest
+    for role in ('rfq_app', 'rfq_ingest'):
+        if sql1(sup, "SELECT has_function_privilege(%s,'_lock_rfq_for_input(uuid)','EXECUTE')", (role,)):
+            bad.append(f"_lock:{role}-can-execute")
+    # policy spoof เชิงโครงสร้าง: mark_ready 6-arg (รับ policy version) ต้องไม่มีอยู่
+    six = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='rfq' AND p.proname='mark_ready' AND p.pronargs=6""")
+    if six and six > 0: bad.append("mark_ready-6arg-exists(policy-spoofable)")
+    # และ readiness_run ต้องบันทึก trusted version เสมอ
+    f = seed_review_rfq(sup, 'T10')
+    sql1(sup, "SELECT mark_ready(%s,%s,'x')", (f['rfq'], rowver(sup, f['rfq'])))
+    ver = sql1(sup, "SELECT validator_version FROM rfq_readiness_run WHERE rfq_id=%s", (f['rfq'],))
+    if ver != 'pkg-minimal-v1': bad.append(f"readiness_run.validator={ver}(not trusted)")
+    record('T10 catalog + policy-spoof structural', not bad, "; ".join(bad) or
+           "all 7 fns: owner=rfq_owner, secdef, pinned search_path, no PUBLIC exec; helper hidden; no 6-arg; trusted version recorded")
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
-             t04_role_privilege, t05_version_edge, t06_rollback, t07_idempotency, t08_clone_atomicity]
+             t04_role_privilege, t05_version_edge, t06_rollback, t07_idempotency, t08_clone_atomicity,
+             t09_authz_separation, t10_catalog_and_policy]
     for t in tests:
         try:
             t(sup)

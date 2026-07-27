@@ -14,6 +14,7 @@ DECLARE
     a_rfq uuid; a_item uuid; b_rfq uuid; b_item uuid; b_comp uuid;
     c_rfq uuid; rv int; newid uuid; clar uuid; so uuid;
     n_item int; n_qty int; n_comp int;
+    d_rfq uuid; d_i1 uuid; d_i2 uuid; d_c1 uuid; newid2 uuid; ok9 boolean;
 BEGIN
     ------------------------------------------------------------------
     -- helper fixture: RFQ พร้อม mark_ready (READY_FOR_REVIEW + signoff)
@@ -190,6 +191,66 @@ BEGIN
     EXCEPTION WHEN check_violation THEN
         RAISE NOTICE 'PASS st8: readiness input frozen on locked revision (F3)'; pass:=pass+1;
     END;
+
+    ------------------------------------------------------------------
+    -- ST9 (Codex #5): clone multi-item/multi-component success — source=target ทุก spec table
+    ------------------------------------------------------------------
+    INSERT INTO rfq (rfq_no, enquiry_ref, source_channel, customer_ref, sales_owner_ref,
+        status_code, created_by_ref, updated_by_ref)
+    VALUES ('SVC-D','ENQ-SVC-D','EMAIL','CUST-D','AE-D','READY_FOR_REVIEW','P','P') RETURNING id INTO d_rfq;
+    -- item 1: qty + 2 components (comp1 มี corrugated) + process(NULL component) + packing + delivery(NULL qty) + variant
+    INSERT INTO rfq_item (rfq_id, line_no, job_name, product_type_ref, finishing_state, packing_state, artwork_state)
+    VALUES (d_rfq,1,'box1','PT','SPECIFIED','SPECIFIED','RECEIVED') RETURNING id INTO d_i1;
+    INSERT INTO rfq_quantity_option (rfq_item_id, option_no, quantity, unit_ref, is_primary) VALUES (d_i1,1,1000,'PCS',true);
+    INSERT INTO rfq_component (rfq_item_id, component_no, box_template_ref, box_width_mm, box_length_mm, box_depth_mm)
+    VALUES (d_i1,1,'BT',50,50,50) RETURNING id INTO d_c1;
+    INSERT INTO rfq_component (rfq_item_id, component_no, box_template_ref, box_width_mm, box_length_mm, box_depth_mm)
+    VALUES (d_i1,2,'BT2',40,40,40);
+    INSERT INTO rfq_component_corrugated (rfq_component_id, flute_code_snapshot, layer_count_snapshot) VALUES (d_c1,'C',5);
+    INSERT INTO rfq_design_variant (rfq_item_id, variant_no, design_code) VALUES (d_i1,1,'DV1');
+    INSERT INTO rfq_process_requirement (rfq_item_id, rfq_component_id, sequence_no, process_ref) VALUES (d_i1,NULL,1,'PRC-NULL');
+    INSERT INTO rfq_packing_requirement (rfq_item_id, sequence_no, packing_ref) VALUES (d_i1,1,'PK');
+    INSERT INTO rfq_delivery (rfq_item_id, quantity_option_id, delivery_no, destination_ref) VALUES (d_i1,NULL,1,'DEST-NULL');
+    -- item 2: qty + 1 component
+    INSERT INTO rfq_item (rfq_id, line_no, job_name, product_type_ref, finishing_state, packing_state, artwork_state)
+    VALUES (d_rfq,2,'box2','PT','SPECIFIED','SPECIFIED','RECEIVED') RETURNING id INTO d_i2;
+    INSERT INTO rfq_quantity_option (rfq_item_id, option_no, quantity, unit_ref, is_primary) VALUES (d_i2,1,2000,'PCS',true);
+    INSERT INTO rfq_component (rfq_item_id, component_no, box_template_ref, box_width_mm, box_length_mm, box_depth_mm) VALUES (d_i2,1,'BT3',30,30,30);
+    INSERT INTO rfq_signoff (rfq_id, signoff_role, decision_code, actor_ref) VALUES (d_rfq,'REVIEWER','CONFIRMED','REV-D');
+
+    PERFORM mark_ready(d_rfq, (SELECT row_version FROM rfq WHERE id=d_rfq), 'REV-D');
+    newid2 := create_rfq_revision(d_rfq, 'multi-item revision', 'PREP-D');
+
+    SELECT bool_and(oldc = newc) INTO ok9 FROM (
+        SELECT (SELECT count(*) FROM rfq_item WHERE rfq_id=d_rfq) oldc, (SELECT count(*) FROM rfq_item WHERE rfq_id=newid2) newc
+        UNION ALL SELECT
+          (SELECT count(*) FROM rfq_quantity_option q JOIN rfq_item i ON i.id=q.rfq_item_id WHERE i.rfq_id=d_rfq),
+          (SELECT count(*) FROM rfq_quantity_option q JOIN rfq_item i ON i.id=q.rfq_item_id WHERE i.rfq_id=newid2)
+        UNION ALL SELECT
+          (SELECT count(*) FROM rfq_design_variant v JOIN rfq_item i ON i.id=v.rfq_item_id WHERE i.rfq_id=d_rfq),
+          (SELECT count(*) FROM rfq_design_variant v JOIN rfq_item i ON i.id=v.rfq_item_id WHERE i.rfq_id=newid2)
+        UNION ALL SELECT
+          (SELECT count(*) FROM rfq_component c JOIN rfq_item i ON i.id=c.rfq_item_id WHERE i.rfq_id=d_rfq),
+          (SELECT count(*) FROM rfq_component c JOIN rfq_item i ON i.id=c.rfq_item_id WHERE i.rfq_id=newid2)
+        UNION ALL SELECT
+          (SELECT count(*) FROM rfq_component_corrugated cc JOIN rfq_component c ON c.id=cc.rfq_component_id JOIN rfq_item i ON i.id=c.rfq_item_id WHERE i.rfq_id=d_rfq),
+          (SELECT count(*) FROM rfq_component_corrugated cc JOIN rfq_component c ON c.id=cc.rfq_component_id JOIN rfq_item i ON i.id=c.rfq_item_id WHERE i.rfq_id=newid2)
+        UNION ALL SELECT
+          (SELECT count(*) FROM rfq_process_requirement p JOIN rfq_item i ON i.id=p.rfq_item_id WHERE i.rfq_id=d_rfq),
+          (SELECT count(*) FROM rfq_process_requirement p JOIN rfq_item i ON i.id=p.rfq_item_id WHERE i.rfq_id=newid2)
+        UNION ALL SELECT
+          (SELECT count(*) FROM rfq_packing_requirement p JOIN rfq_item i ON i.id=p.rfq_item_id WHERE i.rfq_id=d_rfq),
+          (SELECT count(*) FROM rfq_packing_requirement p JOIN rfq_item i ON i.id=p.rfq_item_id WHERE i.rfq_id=newid2)
+        UNION ALL SELECT
+          (SELECT count(*) FROM rfq_delivery d JOIN rfq_item i ON i.id=d.rfq_item_id WHERE i.rfq_id=d_rfq),
+          (SELECT count(*) FROM rfq_delivery d JOIN rfq_item i ON i.id=d.rfq_item_id WHERE i.rfq_id=newid2)
+    ) t;
+    -- ยืนยัน optional FK NULL ยังคงเป็น NULL หลัง clone (ไม่ถูก map ผิดไปชี้ของเดิม)
+    IF ok9
+       AND (SELECT count(*) FROM rfq_process_requirement p JOIN rfq_item i ON i.id=p.rfq_item_id WHERE i.rfq_id=newid2 AND p.rfq_component_id IS NULL)=1
+       AND (SELECT count(*) FROM rfq_delivery d JOIN rfq_item i ON i.id=d.rfq_item_id WHERE i.rfq_id=newid2 AND d.quantity_option_id IS NULL)=1
+    THEN RAISE NOTICE 'PASS st9: multi-item/multi-component clone source=target ทุก spec table (optional FK NULL คงสภาพ)'; pass:=pass+1;
+    ELSE RAISE NOTICE 'FAIL st9: count mismatch or NULL FK remapped (ok9=%)', ok9; fail:=fail+1; END IF;
 
     RAISE NOTICE '========= SERVICE v2 RESULT: % passed, % failed =========', pass, fail;
     IF fail>0 THEN RAISE EXCEPTION 'SERVICE TESTS FAILED: %', fail; END IF;

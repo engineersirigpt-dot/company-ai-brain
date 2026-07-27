@@ -28,18 +28,25 @@ SET search_path TO rfq;
 -- ---------------------------------------------------------------------------
 -- 1) roles (idempotent) + ownership transfer + read-only grant สำหรับ app
 -- ---------------------------------------------------------------------------
+-- 3 roles (separation of duties — Codex V1):
+--   rfq_owner  = เจ้าของ table/function (SECURITY DEFINER รันด้วยสิทธิ์นี้)
+--   rfq_app    = FastAPI service (reviewer/Ready/revision capability — คน sign-off/Ready ผ่าน API นี้)
+--   rfq_ingest = ENQ AI worker — สร้าง initial DRAFT ได้อย่างเดียว (จะได้ EXECUTE create_rfq_draft ใน phase ENQ)
+--                **ห้าม** mark_ready/add_signoff/revoke_signoff/create_rfq_revision → ปลอมอนุมัติเองไม่ได้
 DO $roles$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rfq_owner') THEN
-        CREATE ROLE rfq_owner NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rfq_app') THEN
-        CREATE ROLE rfq_app NOLOGIN;
-    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rfq_owner')  THEN CREATE ROLE rfq_owner  NOLOGIN; END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rfq_app')    THEN CREATE ROLE rfq_app    NOLOGIN; END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rfq_ingest') THEN CREATE ROLE rfq_ingest NOLOGIN; END IF;
 END
 $roles$;
 
-GRANT USAGE ON SCHEMA rfq TO rfq_owner, rfq_app;
+-- V5: normalize role attributes แม้ role มีอยู่ก่อน migration (idempotent)
+ALTER ROLE rfq_owner  NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+ALTER ROLE rfq_app    NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+ALTER ROLE rfq_ingest NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+
+GRANT USAGE ON SCHEMA rfq TO rfq_owner, rfq_app, rfq_ingest;
 
 -- โอนสิทธิ์เจ้าของ table/sequence ให้ rfq_owner (SECURITY DEFINER function จะรันด้วยสิทธิ์นี้)
 -- ต้องรันด้วย superuser หรือสมาชิก rfq_owner (prototype รันเป็น postgres)
@@ -55,14 +62,14 @@ BEGIN
 END
 $own$;
 
--- app: อ่านได้ทุกตาราง แต่เขียนตรงไม่ได้ (นี่คือ boundary จริงของ F1/F2)
-GRANT SELECT ON ALL TABLES IN SCHEMA rfq TO rfq_app;
+-- app/ingest: อ่านได้ทุกตาราง แต่เขียนตรงไม่ได้ (นี่คือ boundary จริงของ F1/F2)
+GRANT SELECT ON ALL TABLES IN SCHEMA rfq TO rfq_app, rfq_ingest;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-    ON ALL TABLES IN SCHEMA rfq FROM rfq_app;
--- ตารางที่สร้างภายหลังก็ default read-only ให้ app
-ALTER DEFAULT PRIVILEGES IN SCHEMA rfq GRANT SELECT ON TABLES TO rfq_app;
--- ห้าม PUBLIC/app สร้าง object ใน schema
-REVOKE CREATE ON SCHEMA rfq FROM PUBLIC;
+    ON ALL TABLES IN SCHEMA rfq FROM rfq_app, rfq_ingest;
+-- ตารางที่สร้างภายหลังก็ default read-only
+ALTER DEFAULT PRIVILEGES IN SCHEMA rfq GRANT SELECT ON TABLES TO rfq_app, rfq_ingest;
+-- ห้ามสร้าง object ใน schema (revoke จาก PUBLIC + app/ingest ตรง ๆ — V5)
+REVOKE CREATE ON SCHEMA rfq FROM PUBLIC, rfq_app, rfq_ingest;
 
 -- ---------------------------------------------------------------------------
 -- 2) ทิ้ง guard แบบ flag ใน 004 (F1: bypass ได้ → ให้ความมั่นใจผิด ๆ)
@@ -103,15 +110,18 @@ $$;
 -- 3) mark_ready — ปิด F4 (NULL row_version, require is_current) + F1 (DEFINER)
 --    validator = pkg-minimal-v1 (F5: ยังไม่ครบ — ตั้งชื่อให้ตรง fail closed)
 -- ---------------------------------------------------------------------------
+-- signature = (rfq_id, expected_row_version, actor) เท่านั้น — V1: policy version **ไม่รับจาก caller**
 CREATE OR REPLACE FUNCTION mark_ready(
-    p_rfq_id uuid, p_expected_row_version int, p_actor text,
-    p_validator_version text DEFAULT 'pkg-minimal-v1',
-    p_master_policy_version text DEFAULT 'master-v1',
-    p_egress_policy_version text DEFAULT 'rfq-egress-v1'
+    p_rfq_id uuid, p_expected_row_version int, p_actor text
 ) RETURNS uuid LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = pg_catalog, rfq, pg_temp AS $$
 DECLARE
     r rfq%ROWTYPE; v_run uuid; v_block int := 0; it RECORD;
+    -- policy version มาจาก trusted source (constant ใน prototype; production อ่านจาก config table/registry)
+    -- caller spoof ไม่ได้ (Codex V1) — p_actor ยังต้องมาจาก authenticated server context (FastAPI ยืนยัน)
+    c_validator constant text := 'pkg-minimal-v1';
+    c_master    constant text := 'master-v1';
+    c_egress    constant text := 'rfq-egress-v1';
 BEGIN
     SELECT * INTO r FROM rfq WHERE id = p_rfq_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'RFQ % not found', p_rfq_id USING ERRCODE = '23503'; END IF;
@@ -136,8 +146,7 @@ BEGIN
     v_run := gen_random_uuid();
     INSERT INTO rfq_readiness_run (id, rfq_id, validator_version, master_policy_version,
         egress_policy_version, executed_by_ref, passed)
-    VALUES (v_run, p_rfq_id, p_validator_version, p_master_policy_version,
-        p_egress_policy_version, p_actor, false);
+    VALUES (v_run, p_rfq_id, c_validator, c_master, c_egress, p_actor, false);
 
     -- RFQ-006: ไม่มี blocking clarification ที่ยัง OPEN
     IF EXISTS (SELECT 1 FROM rfq_clarification
@@ -440,7 +449,7 @@ $$;
 -- 6) ownership + execute grant (F1: EXECUTE เท่านั้น, revoke จาก PUBLIC)
 -- ---------------------------------------------------------------------------
 ALTER FUNCTION _lock_rfq_for_input(uuid)                              OWNER TO rfq_owner;
-ALTER FUNCTION mark_ready(uuid, int, text, text, text, text)         OWNER TO rfq_owner;
+ALTER FUNCTION mark_ready(uuid, int, text)                           OWNER TO rfq_owner;
 ALTER FUNCTION create_rfq_revision(uuid, text, text)                 OWNER TO rfq_owner;
 ALTER FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text) OWNER TO rfq_owner;
 ALTER FUNCTION resolve_clarification(uuid, text, text, text, text)   OWNER TO rfq_owner;
@@ -450,14 +459,17 @@ ALTER FUNCTION revoke_signoff(uuid, text)                            OWNER TO rf
 -- _lock_rfq_for_input เป็น internal helper — ห้าม app เรียกตรง
 REVOKE ALL ON FUNCTION _lock_rfq_for_input(uuid) FROM PUBLIC;
 
-REVOKE ALL ON FUNCTION mark_ready(uuid, int, text, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mark_ready(uuid, int, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION create_rfq_revision(uuid, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION resolve_clarification(uuid, text, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION add_signoff(uuid, text, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION revoke_signoff(uuid, text) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION mark_ready(uuid, int, text, text, text, text) TO rfq_app;
+-- reviewer/Ready/revision capability = rfq_app เท่านั้น (ผ่าน FastAPI authorization)
+-- rfq_ingest **ไม่ได้** grant อะไรในนี้ → ปลอม sign-off/Ready/revision ไม่ได้ (V1)
+-- (create_rfq_draft ของ phase ENQ จะ grant EXECUTE ให้ rfq_ingest ตัวเดียว)
+GRANT EXECUTE ON FUNCTION mark_ready(uuid, int, text) TO rfq_app;
 GRANT EXECUTE ON FUNCTION create_rfq_revision(uuid, text, text) TO rfq_app;
 GRANT EXECUTE ON FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text) TO rfq_app;
 GRANT EXECUTE ON FUNCTION resolve_clarification(uuid, text, text, text, text) TO rfq_app;

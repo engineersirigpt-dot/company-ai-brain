@@ -29,8 +29,9 @@ reset_load() {   # reset schema+roles แล้วโหลด migration + (arg:
   $PSQL <<'SQL' >/dev/null 2>&1
 DROP SCHEMA IF EXISTS rfq CASCADE;
 DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_app')   THEN DROP OWNED BY rfq_app;   DROP ROLE rfq_app;   END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_owner') THEN DROP OWNED BY rfq_owner; DROP ROLE rfq_owner; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_app')    THEN DROP OWNED BY rfq_app;    DROP ROLE rfq_app;    END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_ingest') THEN DROP OWNED BY rfq_ingest; DROP ROLE rfq_ingest; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_owner')  THEN DROP OWNED BY rfq_owner;  DROP ROLE rfq_owner;  END IF;
 END $$;
 SQL
   for f in 001_rfq_core.sql 002_triggers.sql 003_field_policy.sql 005_service_layer_v2.sql "$@"; do

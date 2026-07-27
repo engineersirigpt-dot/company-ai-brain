@@ -320,16 +320,35 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [x] **F6** `create_rfq_revision` clone spec tree ครบ (item→qty/variant/component→corrugated/process/packing/
       delivery, remap FK ด้วย natural key) + atomic (T08: fail กลาง clone → rollback ครบ)
 - [x] **Blocker 1/3 + M1/M2** (รอบก่อน) คงอยู่: readiness rules, both-side history atomic, revision trigger validation-only
-- [x] **test**: `030` service 14/14 + `020` schema 18/18 + `rfq_concurrency_tests.py` (2-conn) T01-T08 9/9;
-      รันซ้ำได้ด้วย `migrations/test/run_all.sh` (สร้าง/ลบ container เอง)
+
+**Codex verification commit 3516564 → Verdict: boundary ผ่าน, พบ V1 BLOCKER → Claude แก้ (commit ด้านล่าง)**
+- [x] **V1 (BLOCKER)** authorization/separation-of-duties — `rfq_app` ปลอม REVIEWER/CONFIRMED sign-off + spoof
+      policy version + สั่ง Ready เองได้ → แก้:
+      - แยก role **`rfq_ingest`** (ENQ worker) — เรียก `mark_ready/add_signoff/revoke_signoff/create_rfq_revision`
+        **ไม่ได้** (T09 พิสูจน์: 42501); reviewer/Ready capability = `rfq_app` เท่านั้น (ผ่าน FastAPI authz)
+      - `mark_ready` **ตัด policy-version param** → ใช้ trusted constant ในตัว (T10: spoof เชิงโครงสร้างไม่ได้,
+        readiness_run บันทึก version ที่เชื่อถือได้เสมอ, ไม่มี 6-arg overload)
+      - **ค้าง (app-layer):** `p_actor` ต้องมาจาก authenticated server context (FastAPI) — DB บังคับไม่ได้ → เป็น contract ของ FastAPI
+- [x] **V5 (partial)** normalize role attributes (ALTER ROLE NOLOGIN/NOSUPERUSER/…) + explicit `REVOKE CREATE` จาก app/ingest
+- [x] **test**: `020` 18 + `030` 15 (เพิ่ม st9 multi-item clone) + `rfq_concurrency_tests.py` **T01-T10** =
+      **43 implemented checks + 1 gated skip (T07/F7)** — (แก้จากที่เคยเขียน "41 green": T07 คือ gated skip ไม่ใช่ test ที่รัน);
+      T09 authz-separation + T10 catalog assertion (owner/prosecdef/proconfig/PUBLIC-exec) เพิ่มตาม Codex; รันซ้ำได้ด้วย `run_all.sh`
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
-- [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — ต้องเติม master-gateway revalidate / egress gate / rules ครบ
-      ก่อน Ready/handoff จริงของ RFQ จริง (ตอนนี้ fail-closed + ตั้งชื่อ version ให้ตรง)
+- [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
+      ยังผ่าน) + `revoke_signoff` เป็น append-only/มี revoked_by/at/reason (ตอนนี้ DELETE ทิ้ง audit) → รวมใน F5 gate
+- [ ] **V3 (HIGH, ก่อน draft-edit)** เมื่อมี draft edit/upsert: ทุก readiness mutation ต้อง lock parent + reject terminal
+      + **bump parent `row_version`** (ตอนนี้ clarification/signoff lock parent แล้วแต่ยังไม่ bump version)
+- [ ] **V4 (MED, ก่อน revision endpoint)** attachment/field-evidence carry-forward policy — attachment ใช้ link/lineage ไม่ duplicate binary;
+      evidence สร้าง derivation provenance (map old subject→new) ไม่ copy UUID เก่า
+- [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — เติม master-gateway revalidate / egress gate / rules ครบก่อน Ready จริง
 - [ ] **F7** idempotency — ต้องมี `request_id`/outbox ก่อนเปิด **auto-retry/queue** (manual PoC ใช้ได้)
 - [ ] **F8** durable audit ของ readiness attempt ที่ fail (RAISE=rollback ทำหาย — v1 ยอมรับ)
-- [ ] **create_rfq_draft(jsonb)** → phase **ENQ** (รูป input = extraction output) — write path เดียวที่ app สร้าง RFQ ได้
-- [ ] role-based REVOKE จริงบน production cluster (prototype ทดสอบด้วย SET ROLE), migration runner + version tracking
+- [ ] **create_rfq_draft(jsonb)** → phase **ENQ** — grant EXECUTE ให้ `rfq_ingest` ตัวเดียว; strict payload contract
+      (server กำหนด revision_no=1/is_current/status/row_version, ห้าม payload override ready_*/sign-off/policy/actor,
+      link evidence↔extraction_run, size/depth limit, ห้าม dynamic SQL จาก JSON keys) — ดู Codex verification ข้อ 227-240
+- [ ] **V5 (เหลือ)** production migration: fixed migration owner + `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>`,
+      inspect effective privilege ของ login role จริง (ไม่ใช่แค่ SET ROLE), migration runner + version tracking
 - [ ] M3 orphan protection, external_ref append-only audit
 
 ### งานใหญ่ / Production Readiness
