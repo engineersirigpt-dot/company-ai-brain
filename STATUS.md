@@ -330,9 +330,24 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         readiness_run บันทึก version ที่เชื่อถือได้เสมอ, ไม่มี 6-arg overload)
       - **ค้าง (app-layer):** `p_actor` ต้องมาจาก authenticated server context (FastAPI) — DB บังคับไม่ได้ → เป็น contract ของ FastAPI
 - [x] **V5 (partial)** normalize role attributes (ALTER ROLE NOLOGIN/NOSUPERUSER/…) + explicit `REVOKE CREATE` จาก app/ingest
-- [x] **test**: `020` 18 + `030` 15 (เพิ่ม st9 multi-item clone) + `rfq_concurrency_tests.py` **T01-T10** =
-      **43 implemented checks + 1 gated skip (T07/F7)** — (แก้จากที่เคยเขียน "41 green": T07 คือ gated skip ไม่ใช่ test ที่รัน);
-      T09 authz-separation + T10 catalog assertion (owner/prosecdef/proconfig/PUBLIC-exec) เพิ่มตาม Codex; รันซ้ำได้ด้วย `run_all.sh`
+
+**Codex go/no-go commit 612eb2f → Verdict: CONDITIONAL GO → Claude ทำ ENQ→initial DRAFT (`006`)**
+- [x] **create_rfq_draft(jsonb, actor, service, request_id)** — ENQ write path v1 (`006_enq_ingest.sql`):
+      header + spec tree atomic ผ่าน single SECURITY DEFINER function; grant EXECUTE **เฉพาะ `rfq_ingest`**
+      - **#1** schema_version=`draft-v1` + reject unknown key ทุกชั้น (top/header/item/child) — allowlist strict, ไม่มี generic mapper
+      - **#2/#3** lifecycle server-controlled (revision_no=1/is_current/status=DRAFT/row_version=1, created_by=trusted actor);
+        payload ตั้ง status/row_version/actor/identity = โดน reject (unknown key)
+      - **#4/#10** atomic — fail กลาง insert → rollback ครบ ไม่มี partial draft (T12)
+      - **#7** limit: payload ≤1MB, items ≤100, child/array ≤200 (reject ก่อน expand)
+      - **#9** idempotency: `rfq_ingest_request` PK(service,request_id)+sha256 — replay เดิม→id เดิม, payload ต่าง→conflict
+      - FK resolve ด้วย natural key (process.component_no→component id, delivery.option_no→quantity id)
+- [x] **Codex go/no-go F1** เอา broad SELECT ของ `rfq_ingest` ออก → **create-only จริง** (T11: ไม่มี table SELECT/DML, EXECUTE แค่ create_rfq_draft)
+- [x] **fail-closed:** v1 ปฏิเสธ `extraction_runs`/`field_evidence` ใน payload → สร้าง AI evidence โดยไม่มี provenance ไม่ได้;
+      **#6** (validate run SUCCEEDED/ไม่ BLOCKED/policy allow) → v1.1 พร้อม extraction pipeline จริง
+- [x] payload contract → [`RFQ_DRAFT_PAYLOAD_V1.md`](RFQ_DRAFT_PAYLOAD_V1.md)
+- [x] **test**: `020` 18 + `030` 15 + `040` 15 (create_rfq_draft) + `rfq_concurrency_tests.py` **T01-T13** =
+      **61 implemented checks + 1 gated skip (T07/F7)** — T11 ingest-allowlist / T12 atomicity / T13 grant-scope เพิ่มตาม Codex;
+      รันซ้ำได้ด้วย `migrations/test/run_all.sh` (แก้ overclaim เดิม "41 green" — T07 = gated skip ไม่ใช่ test ที่รัน)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
@@ -342,11 +357,11 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [ ] **V4 (MED, ก่อน revision endpoint)** attachment/field-evidence carry-forward policy — attachment ใช้ link/lineage ไม่ duplicate binary;
       evidence สร้าง derivation provenance (map old subject→new) ไม่ copy UUID เก่า
 - [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — เติม master-gateway revalidate / egress gate / rules ครบก่อน Ready จริง
-- [ ] **F7** idempotency — ต้องมี `request_id`/outbox ก่อนเปิด **auto-retry/queue** (manual PoC ใช้ได้)
+- [ ] **F7 (partial done)** idempotency: sequential replay ปิดแล้ว (`rfq_ingest_request` PK+hash); **full concurrency**
+      (2 conn same request_id ชนกัน → loser abort) ยัง gate ก่อนเปิด auto-retry/queue จริง
 - [ ] **F8** durable audit ของ readiness attempt ที่ fail (RAISE=rollback ทำหาย — v1 ยอมรับ)
-- [ ] **create_rfq_draft(jsonb)** → phase **ENQ** — grant EXECUTE ให้ `rfq_ingest` ตัวเดียว; strict payload contract
-      (server กำหนด revision_no=1/is_current/status/row_version, ห้าม payload override ready_*/sign-off/policy/actor,
-      link evidence↔extraction_run, size/depth limit, ห้าม dynamic SQL จาก JSON keys) — ดู Codex verification ข้อ 227-240
+- [ ] **ENQ v1.1** — extraction_runs + field_evidence ใน payload (พร้อม #6: validate run SUCCEEDED/ไม่ BLOCKED/policy allow
+      ก่อน insert AI evidence) + resolve subject-ref เป็น UUID; ตอนนี้ v1 fail-closed (reject keys เหล่านี้)
 - [ ] **V5 (เหลือ)** production migration: fixed migration owner + `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>`,
       inspect effective privilege ของ login role จริง (ไม่ใช่แค่ SET ROLE), migration runner + version tracking
 - [ ] M3 orphan protection, external_ref append-only audit

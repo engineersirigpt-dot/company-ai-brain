@@ -62,12 +62,15 @@ BEGIN
 END
 $own$;
 
--- app/ingest: อ่านได้ทุกตาราง แต่เขียนตรงไม่ได้ (นี่คือ boundary จริงของ F1/F2)
-GRANT SELECT ON ALL TABLES IN SCHEMA rfq TO rfq_app, rfq_ingest;
+-- app: อ่านได้ทุกตาราง แต่เขียนตรงไม่ได้ (boundary จริงของ F1/F2)
+GRANT SELECT ON ALL TABLES IN SCHEMA rfq TO rfq_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA rfq GRANT SELECT ON TABLES TO rfq_app;
+-- ingest = **create-only** (Codex go/no-go F1): ไม่ให้ broad SELECT — กันอ่าน PII/trade-secret/
+--   evidence/attachment object_store_key ทั้งระบบถ้า credential รั่ว; อ่านผ่าน function/view เจาะจงเมื่อมี use case
+REVOKE SELECT ON ALL TABLES IN SCHEMA rfq FROM rfq_ingest;
+-- ทั้ง app + ingest เขียนตรงไม่ได้
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
     ON ALL TABLES IN SCHEMA rfq FROM rfq_app, rfq_ingest;
--- ตารางที่สร้างภายหลังก็ default read-only
-ALTER DEFAULT PRIVILEGES IN SCHEMA rfq GRANT SELECT ON TABLES TO rfq_app, rfq_ingest;
 -- ห้ามสร้าง object ใน schema (revoke จาก PUBLIC + app/ingest ตรง ๆ — V5)
 REVOKE CREATE ON SCHEMA rfq FROM PUBLIC, rfq_app, rfq_ingest;
 

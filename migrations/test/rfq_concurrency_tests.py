@@ -29,6 +29,9 @@ DSN = dict(
     password=os.environ.get("PGPASSWORD", "test"),
 )
 
+OK_PAYLOAD = ('{"schema_version":"draft-v1","header":{"enquiry_ref":"ENQ","source_channel":"EMAIL"},'
+              '"items":[{"line_no":1,"job_name":"box","components":[{"component_no":1,"box_template_ref":"BT"}]}]}')
+
 results = []  # (name, ok, detail)
 def record(name, ok, detail=""):
     results.append((name, ok, detail))
@@ -378,7 +381,8 @@ def t09_authz_separation(sup):
 def t10_catalog_and_policy(sup):
     """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
     svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
-           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input']
+           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input',
+           'create_rfq_draft', '_reject_unknown_keys']
     bad = []
     for fn in svc:
         row = None
@@ -399,10 +403,12 @@ def t10_catalog_and_policy(sup):
         if not cfg or 'search_path=pg_catalog, rfq, pg_temp' not in cfg: bad.append(f"{fn}:proconfig={cfg}")
         # PUBLIC ต้องไม่มี EXECUTE (proacl NULL = default = PUBLIC execute ได้ = bad)
         if acl_null or pub_exec: bad.append(f"{fn}:PUBLIC-execute(acl_null={acl_null})")
-    # _lock helper ต้องไม่เปิดให้ app/ingest
+    # internal helper ต้องไม่เปิดให้ app/ingest
     for role in ('rfq_app', 'rfq_ingest'):
         if sql1(sup, "SELECT has_function_privilege(%s,'_lock_rfq_for_input(uuid)','EXECUTE')", (role,)):
             bad.append(f"_lock:{role}-can-execute")
+        if sql1(sup, "SELECT has_function_privilege(%s,'_reject_unknown_keys(jsonb,text[],text)','EXECUTE')", (role,)):
+            bad.append(f"_reject_unknown_keys:{role}-can-execute")
     # policy spoof เชิงโครงสร้าง: mark_ready 6-arg (รับ policy version) ต้องไม่มีอยู่
     six = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND p.proname='mark_ready' AND p.pronargs=6""")
@@ -413,13 +419,92 @@ def t10_catalog_and_policy(sup):
     ver = sql1(sup, "SELECT validator_version FROM rfq_readiness_run WHERE rfq_id=%s", (f['rfq'],))
     if ver != 'pkg-minimal-v1': bad.append(f"readiness_run.validator={ver}(not trusted)")
     record('T10 catalog + policy-spoof structural', not bad, "; ".join(bad) or
-           "all 7 fns: owner=rfq_owner, secdef, pinned search_path, no PUBLIC exec; helper hidden; no 6-arg; trusted version recorded")
+           "all 9 fns: owner=rfq_owner, secdef, pinned search_path, no PUBLIC exec; helpers hidden; no 6-arg; trusted version recorded")
+
+def t11_ingest_allowlist(sup):
+    """Codex go/no-go #2/F1: rfq_ingest = create-only (EXECUTE create_rfq_draft เท่านั้น, ไม่มี SELECT/DML/fn อื่น)"""
+    ing = connect(role='rfq_ingest')
+    checks = []
+    try:
+        rid = sql1(ing, "SELECT create_rfq_draft(%s::jsonb,'enq-extractor','enq','treq1')", (OK_PAYLOAD,))
+        checks.append(('ingest CAN create_rfq_draft', rid is not None, rid))
+    except psycopg2.Error as e:
+        checks.append(('ingest CAN create_rfq_draft', False, e.pgcode)); ing.rollback()
+    def denied(label, q):
+        try:
+            with ing.cursor() as cur: cur.execute(q)
+            checks.append((label, False, 'ALLOWED(bad)'))
+        except psycopg2.Error as e:
+            checks.append((label, e.pgcode == errorcodes.INSUFFICIENT_PRIVILEGE, e.pgcode)); ing.rollback()
+    denied('ingest !mark_ready',          "SELECT mark_ready(gen_random_uuid(),1,'x')")
+    denied('ingest !add_signoff',         "SELECT add_signoff(gen_random_uuid(),'REVIEWER','CONFIRMED','x')")
+    denied('ingest !create_rfq_revision', "SELECT create_rfq_revision(gen_random_uuid(),'r','x')")
+    denied('ingest !SELECT rfq',          "SELECT * FROM rfq LIMIT 1")
+    denied('ingest !SELECT attachment',   "SELECT object_store_key FROM rfq_attachment LIMIT 1")
+    denied('ingest !INSERT rfq',          "INSERT INTO rfq (rfq_no,created_by_ref,updated_by_ref) VALUES ('X','a','a')")
+    ing.close()
+    sel = sql1(sup, "SELECT has_table_privilege('rfq_ingest','rfq.rfq','SELECT')")
+    ex_draft = sql1(sup, "SELECT has_function_privilege('rfq_ingest','create_rfq_draft(jsonb,text,text,text)','EXECUTE')")
+    ex_mr = sql1(sup, "SELECT has_function_privilege('rfq_ingest','mark_ready(uuid,int,text)','EXECUTE')")
+    checks.append(('ingest table SELECT=false', sel is False, sel))
+    checks.append(('ingest EXECUTE create_rfq_draft=true', ex_draft is True, ex_draft))
+    checks.append(('ingest EXECUTE mark_ready=false', ex_mr is False, ex_mr))
+    allok = all(ok for _, ok, _ in checks)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "exact allowlist: create_rfq_draft only; no other fn, no table SELECT/DML"
+    record('T11 ingest exact allowlist', allok, detail)
+
+def t12_ingest_atomicity(sup):
+    """Codex #10: fail กลาง insert → ไม่มี partial draft"""
+    with sup.cursor() as cur:
+        cur.execute("SET search_path TO rfq")
+        cur.execute("CREATE OR REPLACE FUNCTION zz_fail_comp() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'zz inject' USING ERRCODE='22000'; END $$;")
+        cur.execute("CREATE TRIGGER zz_fail BEFORE INSERT ON rfq_component FOR EACH ROW EXECUTE FUNCTION zz_fail_comp()")
+    n0_rfq = sql1(sup, "SELECT count(*) FROM rfq")
+    n0_req = sql1(sup, "SELECT count(*) FROM rfq_ingest_request")
+    injected = False
+    ing = connect(role='rfq_ingest')
+    try:
+        sql1(ing, "SELECT create_rfq_draft(%s::jsonb,'a','enq','tatom')", (OK_PAYLOAD,))
+    except psycopg2.Error as e:
+        injected = 'zz inject' in (e.pgerror or ''); ing.rollback()
+    ing.close()
+    with sup.cursor() as cur:
+        cur.execute("DROP TRIGGER zz_fail ON rfq_component"); cur.execute("DROP FUNCTION zz_fail_comp()")
+    n1_rfq = sql1(sup, "SELECT count(*) FROM rfq")
+    n1_req = sql1(sup, "SELECT count(*) FROM rfq_ingest_request")
+    partial = sql1(sup, "SELECT count(*) FROM rfq_ingest_request WHERE request_id='tatom'")
+    ok = injected and n1_rfq == n0_rfq and n1_req == n0_req and partial == 0
+    record('T12 ingest atomicity (no partial draft)', ok,
+           f"injected={injected}, rfq {n0_rfq}->{n1_rfq}, req {n0_req}->{n1_req}, tatom_rows={partial}")
+
+def t13_ingest_grant_scope(sup):
+    """Codex #9: create_rfq_draft ไม่มี PUBLIC execute; rfq_app เรียกไม่ได้ (ingest-only)"""
+    checks = []
+    pub = sql1(sup, """SELECT p.proacl IS NULL OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a
+        WHERE a.grantee=0 AND a.privilege_type='EXECUTE')
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='rfq' AND p.proname='create_rfq_draft'""")
+    checks.append(('no PUBLIC execute', pub is False, pub))
+    app_exec = sql1(sup, "SELECT has_function_privilege('rfq_app','create_rfq_draft(jsonb,text,text,text)','EXECUTE')")
+    checks.append(('rfq_app EXECUTE=false', app_exec is False, app_exec))
+    app = connect(role='rfq_app')
+    try:
+        with app.cursor() as cur:
+            cur.execute("SELECT create_rfq_draft('{}'::jsonb,'a','enq','x')")
+        checks.append(('rfq_app call denied', False, 'ALLOWED(bad)'))
+    except psycopg2.Error as e:
+        checks.append(('rfq_app call denied', e.pgcode == errorcodes.INSUFFICIENT_PRIVILEGE, e.pgcode)); app.rollback()
+    app.close()
+    allok = all(ok for _, ok, _ in checks)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "create_rfq_draft: no PUBLIC exec, rfq_app denied, ingest-only"
+    record('T13 create_rfq_draft grant scope', allok, detail)
 
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
              t04_role_privilege, t05_version_edge, t06_rollback, t07_idempotency, t08_clone_atomicity,
-             t09_authz_separation, t10_catalog_and_policy]
+             t09_authz_separation, t10_catalog_and_policy,
+             t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope]
     for t in tests:
         try:
             t(sup)

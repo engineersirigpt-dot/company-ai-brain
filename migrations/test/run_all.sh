@@ -34,7 +34,7 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_owner')  THEN DROP OWNED BY rfq_owner;  DROP ROLE rfq_owner;  END IF;
 END $$;
 SQL
-  for f in 001_rfq_core.sql 002_triggers.sql 003_field_policy.sql 005_service_layer_v2.sql "$@"; do
+  for f in 001_rfq_core.sql 002_triggers.sql 003_field_policy.sql 005_service_layer_v2.sql 006_enq_ingest.sql "$@"; do
     $PSQL < "$f" >/dev/null
   done
 }
@@ -56,7 +56,11 @@ echo "== 030 service layer v2 =="
 reset_load
 run_sql_test test/030_service_tests.sql
 
-echo "== concurrency harness T01-T08 (2 connections) =="
+echo "== 040 ENQ ingest (create_rfq_draft) =="
+reset_load
+run_sql_test test/040_ingest_tests.sql
+
+echo "== concurrency + security harness T01-T13 (2 connections) =="
 reset_load
 PYTHONIOENCODING=utf-8 "$PY" test/rfq_concurrency_tests.py || fail=1
 
