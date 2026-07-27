@@ -1,4 +1,10 @@
 -- ============================================================================
+-- ⚠️ SUPERSEDED by 005_service_layer_v2.sql (2026-07-27)
+--    Codex review 489c5f0 (F1) พิสูจน์ว่า guard แบบ session flag `rfq.privileged`
+--    ด้านล่าง bypass ได้ (ใครก็ SET flag เองแล้ว raw UPDATE ผ่าน) → 005 ทิ้ง guard นี้
+--    แล้วใช้ ROLE + REVOKE DML + SECURITY DEFINER เป็น boundary จริง
+--    เก็บไฟล์นี้ไว้เพื่อ history เท่านั้น — end state ใช้ 001+002+003+005
+-- ============================================================================
 -- 004_service_functions.sql — RFQ service layer (ปิด Blocker 1/3, M1, M2)
 -- ต้นทาง: RFQ_SCHEMA_V0_2.md ข้อ 8 + Codex review + STATUS "RFQ service layer"
 --

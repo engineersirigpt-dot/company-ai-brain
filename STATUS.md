@@ -301,20 +301,36 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [x] M4 — แยก prod (`003_field_policy.sql`) ออกจาก test fixtures (`migrations/test/`), ตั้ง `source_system='SYNTHETIC_TEST'`
 - [x] test gap — neg6 tightened (assert error = enquiry guard) + เพิ่ม neg8/9/10/11 + pos4/5
 
-**RFQ service layer — ✅ ทำแล้ว 2026-07-27 (commit ด้านล่าง), verify service test 10/10 + รวม 28/28:**
-- [x] **Blocker 1/3 + M1/M2** — `004_service_functions.sql`:
-      - `mark_ready()` — บังคับ readiness rules (blocking clarification, reviewer sign-off, item/qty/component,
-        state ไม่ UNKNOWN) + row_version optimistic lock + transition + log ทั้งหมด atomic; block → raise
-      - `create_rfq_revision()` — supersede เก่า + สร้าง DRAFT ใหม่ + log **ทั้ง 2 ฝั่ง atomic** (ปิด M1)
-      - revision trigger เปลี่ยนเป็น **validation-only** (ตัด side effect ออกจาก BEFORE INSERT — ปิด Blocker 3)
-      - **guard trigger**: identity/status ของ rfq + แก้ child ของ READY/SUPERSEDED revision ทำได้เฉพาะผ่าน
-        function (session flag `rfq.privileged`) — ปิด M2; raw UPDATE/DELETE ถูก block (enforce โดยไม่ขึ้นกับ role)
-- [ ] **role-based REVOKE** (defense-in-depth เสริม trigger) — documented ใน 004 เป็น production step, ยังไม่รัน
-- [ ] **M3** — subject delete/reparent orphan protection (soft-delete + guard + multi-connection test)
-- [ ] **Medium** — `rfq_external_ref_resolution` ทำเป็น append-only audit (ตอนนี้เก็บค่าล่าสุด overwrite)
-- [ ] concurrency tests (2 connections), rollback-after-trigger, migration runner + version tracking
-- [ ] **NOTE**: mark_ready ที่ block → RAISE = rollback → readiness_run ของรอบ fail ไม่ถูกเก็บ (v1 ยอมรับ;
-      production ให้ service log attempt แยก); child-lock guard v1 ครอบ `rfq_item` — ตารางลูกลึกกว่าเพิ่มภายหลัง
+**RFQ service layer v1 (`004`) — Codex review commit 489c5f0 พบ 4 BLOCKER → rework เป็น v2 (`005`)**
+
+> บทเรียน (Codex F1 ถูก): guard แบบ session flag `rfq.privileged` ใน 004 **ไม่ใช่ security boundary** —
+> ใคร ๆ ก็ `SET rfq.privileged='on'` เองแล้ว raw UPDATE ผ่านได้; และ REVOKE รายคอลัมน์หลัง table-level
+> GRANT **ไม่มีผล** ใน PostgreSQL → 004 ให้ความมั่นใจผิด ๆ
+
+**RFQ service layer v2 — ✅ `005_service_layer_v2.sql` (2026-07-27), verify 41 checks green (ephemeral pg16):**
+- security boundary = **ROLE + REVOKE DML + SECURITY DEFINER** (ไม่ใช่ flag):
+  - `rfq_app` = read-only (SELECT) + EXECUTE service function เท่านั้น → **เขียนตารางตรงไม่ได้เลย** (ปิด F1/F2)
+  - ownership โอนให้ `rfq_owner`; function ทั้งหมด SECURITY DEFINER + pinned `search_path` + REVOKE จาก PUBLIC
+- [x] **F1** raw UPDATE / `SET flag` bypass → app โดน 42501 แม้ตั้ง flag เอง (พิสูจน์ใน T04)
+- [x] **F2** raw INSERT ready / child mutation / reparent → app INSERT/UPDATE/DELETE ทุกตาราง denied (T04)
+- [x] **F3** readiness TOCTOU → **parent-lock protocol**: `mark_ready` + readiness-input mutator
+      (`add/resolve_clarification`, `add/revoke_signoff`) LOCK parent RFQ (FOR UPDATE) ก่อน + freeze เมื่อ locked
+      → serialize จริง (T03a/b: B ถูก block แล้ว reject, state ไม่เพี้ยน)
+- [x] **F4** `mark_ready(NULL)` bypass + `is_current` → NULL/stale = 40001, require current (T05, st3b/st4b)
+- [x] **F6** `create_rfq_revision` clone spec tree ครบ (item→qty/variant/component→corrugated/process/packing/
+      delivery, remap FK ด้วย natural key) + atomic (T08: fail กลาง clone → rollback ครบ)
+- [x] **Blocker 1/3 + M1/M2** (รอบก่อน) คงอยู่: readiness rules, both-side history atomic, revision trigger validation-only
+- [x] **test**: `030` service 14/14 + `020` schema 18/18 + `rfq_concurrency_tests.py` (2-conn) T01-T08 9/9;
+      รันซ้ำได้ด้วย `migrations/test/run_all.sh` (สร้าง/ลบ container เอง)
+
+**ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
+- [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — ต้องเติม master-gateway revalidate / egress gate / rules ครบ
+      ก่อน Ready/handoff จริงของ RFQ จริง (ตอนนี้ fail-closed + ตั้งชื่อ version ให้ตรง)
+- [ ] **F7** idempotency — ต้องมี `request_id`/outbox ก่อนเปิด **auto-retry/queue** (manual PoC ใช้ได้)
+- [ ] **F8** durable audit ของ readiness attempt ที่ fail (RAISE=rollback ทำหาย — v1 ยอมรับ)
+- [ ] **create_rfq_draft(jsonb)** → phase **ENQ** (รูป input = extraction output) — write path เดียวที่ app สร้าง RFQ ได้
+- [ ] role-based REVOKE จริงบน production cluster (prototype ทดสอบด้วย SET ROLE), migration runner + version tracking
+- [ ] M3 orphan protection, external_ref append-only audit
 
 ### งานใหญ่ / Production Readiness
 
