@@ -157,6 +157,11 @@ Agent แต่ละตัวแตกต่างกันด้วย Mission
 
 ### งานถัดไปที่เสนอ — ยังไม่ได้เริ่ม
 
+**อัปเดต 2026-07-27:** RFQ Schema draft (Codex) ผ่าน cross-check review (Claude) แล้ว —
+verdict: อนุมัติทิศทาง, มี 3 จุดต้องแก้ก่อน migration (PDPA field classification,
+field_path stability, revision chain integrity) ดูรายละเอียดใน `RFQ_SCHEMA_DRAFT.md` ข้อ 13
+คำถาม business 12 ข้อในไฟล์เดียวกัน ข้อ 11 = วาระประชุมผู้บริหาร
+
 ลำดับที่ Codex แนะนำ ณ 2026-07-24:
 
 1. **API key ต่อ service** — ปิดช่องที่ caller อ้าง `admin` เอง เนื่องจาก API มี consumer จริงแล้ว
