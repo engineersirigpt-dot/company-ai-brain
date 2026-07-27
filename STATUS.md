@@ -33,7 +33,7 @@ Enquiry → RFQ → ตรวจความครบถ้วน → อนุ�
 - Deploy บน Ubuntu server ภายในองค์กร
 - Quick Wins ชุด RBAC ล่าสุดอยู่ที่ commit `8e6ea48` — push ขึ้น GitHub และ server pull แล้วเมื่อ 2026-07-24
 - Qdrant collection: `company_docs`
-- สถานะที่รายงานล่าสุด: **2,404 chunks / 95 เอกสาร**
+- สถานะที่รายงานล่าสุด: **2,263 chunks / 95 เอกสาร** (2,404 → 2,263 หลัง re-ingest 6 ไฟล์ AFII ด้วย OCR เมื่อ 2026-07-27; จำนวนเอกสารเท่าเดิม)
 - `POST /search` ใช้งานโดย Voicebot อีกโปรเจกต์แล้ว
 - `POST /ask` ทำ Retrieval → Claude API → คำตอบภาษาไทยพร้อม Citation ได้
 - Retrieval บังคับ Qdrant payload filter ก่อนค้นหา
@@ -330,7 +330,8 @@ API key พิสูจน์ได้เพียงว่า request มาจ
 | Revision เก่า-ใหม่ซ้อนกัน | ยังไม่พบ |
 | `/ask` ผ่าน full evaluation | ✅ baseline ผ่านแล้ว 2026-07-27 (hit 92%, hallucination 0, leak 0) — เหลือ faithfulness judge + probes ชุดเต็ม |
 | **[ใหม่ 2026-07-27]** Estimate master_data API ตอบโดย**ไม่มี auth** บน port ภายใน (3099/4010) และเปิดเผยราคา (`price`, `price_import`, `rate`, `min_cost`) ให้ทุกเครื่องใน LAN | ยืนยันจาก probe — แจ้งทีม Estimate/API owner พิจารณา (เกี่ยวพันงาน inbound API key) |
-| **[ใหม่ 2026-07-27] เครดิต Anthropic API หมด → `/ask` ตอบ 502 ทุกคำถาม** (`/search` ที่ voicebot ใช้ไม่กระทบ — ไม่ผ่าน LLM) OCR 6 ไฟล์ AFII ก็ blocked ด้วย (ล้มก่อนแตะข้อมูล corpus ยังครบ 2,404) | ⛔ **รอมนุษย์: เติมเครดิตที่ Anthropic Console (Plans & Billing) ของบัญชี key เดิม หรือเปลี่ยน key ใหม่ใน `~/company-ai-brain/.env` แล้ว `docker restart brain_api`** จากนั้นสั่งรัน OCR ซ้ำได้ทันที (ทุกอย่าง staged ใน container แล้ว: `docker exec -d brain_api sh -c "python /tmp/ocr_reingest.py > /tmp/ocr.log 2>&1"`) ประมาณการใช้: OCR ~$2-4, /ask ~1 บาท/คำถาม |
+| เครดิต Anthropic API หมด → `/ask` 502 (เคยเกิด 2026-07-27) | ✅ แก้แล้ว — เติมเครดิต, `/ask` กลับมา 200; **บทเรียน: ตั้ง billing alert ใน Console** |
+| เอกสารไทยเพี้ยนกลุ่ม AFII 6 ไฟล์ (text layer พัง) | ✅ **แก้แล้ว 2026-07-27** — OCR ด้วย Claude vision → re-ingest 114 chunks; scan corpus แล้ว afii=0, mojibake=0; `/ask` ตอบเนื้อหา FSC ได้; markdown สะอาด sync กลับ `parsed_output/` local แล้ว |
 
 ---
 
