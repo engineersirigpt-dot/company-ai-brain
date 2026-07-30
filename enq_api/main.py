@@ -8,9 +8,9 @@ Codex transport review (BFFA702) → ปิดครบ B1/B2/B3 + H1-H5
 Codex re-review (8EB6C41) → ปิดเพิ่ม:
   B1  ตัด unauthenticated dev mode ทิ้ง — บังคับ API key แม้ local dev (secrets.compare_digest);
       auth เป็น router-wide dependency (route ใหม่ fail-closed อัตโนมัติ ไม่ต้องใส่ทีละตัว)
-  B2  error map แบบ operation-aware ตาม SQLSTATE: class 22 + 23502/23503/23514 → 422,
-      23505 → 409, 54000 → 413, transient (57014/55P03/40001/40P01/class 08) → 503, อื่น → 500;
-      log เฉพาะ schema identifier (constraint/column/table) ไม่ log message_primary ดิบ (กันค่า ENQ จริงหลุด)
+  B2  error map แบบ operation-aware ตาม SQLSTATE (ดู ENQ_EXTRACTION_ERROR_TAXONOMY.md): custom RFS01/RFN01/RFR01/RFI01
+      + class 22/23502/23503/23514 → 422, RFI01 → 409, real 23505 (dup key) → 422/500 ตาม op, 54000 → 413,
+      transient (57014/55P03/40001/40P01/class 08) → 503, อื่น → 500; log เฉพาะ schema identifier (ไม่ log ค่าดิบ)
   M1  middleware: http.disconnect → return ทันที ไม่ส่งต่อ downstream
 """
 from __future__ import annotations
@@ -238,6 +238,67 @@ def get_rfq(rfq_id: str, actor: str = Depends(require_actor)):   # B1: GET ก�
             it["deliveries"] = cur.fetchall()
         rfq["items"] = items
         return json.loads(json.dumps(rfq, default=str))
+
+
+# ---- extraction orchestration (Codex-approved slice) — server policy v1 = LOCAL-only ----
+# public POST → begin (short txn) → 202 ; durable worker (enq_api/worker.py) claim→provider→apply/fail
+# client ส่งได้เฉพาะ source reference + correlation ; target/provider/model/purpose = server policy
+POLICY = {"target": "LOCAL", "provider": "typhoon", "model": "v1", "purpose": "enq"}   # cloud routing = increment ถัดไป
+
+
+class ExtractionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    source_ingest_id: str                                      # reference ไป trusted source (client เลือกได้)
+    correlation: dict[str, Any] = Field(default_factory=dict)  # begin allowlist: enquiry_ref/source_channel[_other]
+
+
+@enq.post("/extractions", status_code=202)
+def create_extraction(
+    req: ExtractionRequest,
+    actor: str = Depends(require_actor),
+    x_request_id: str | None = Header(default=None),
+):
+    request_id = (x_request_id or "").strip()
+    if not request_id:                                        # idempotency key required (เหมือน draft)
+        raise HTTPException(status_code=400, detail="X-Request-Id header required")
+    if len(request_id) > 200:
+        raise HTTPException(status_code=400, detail="X-Request-Id too long")
+    import uuid as _uuid
+    try:
+        _uuid.UUID(req.source_ingest_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="source_ingest_id must be a uuid")
+    _check_depth(req.correlation)
+    try:
+        with db(WRITE_DSN) as conn, conn.cursor() as cur:
+            # server policy: target/provider/model/purpose = constants ฝั่ง server ; attestation/approval = NULL (LOCAL)
+            cur.execute(
+                "SELECT begin_rfq_extraction(%s, %s, %s, %s, %s, NULL, NULL, %s::jsonb, %s, %s, %s)",
+                (req.source_ingest_id, POLICY["target"], POLICY["provider"], POLICY["model"], POLICY["purpose"],
+                 json.dumps(req.correlation, ensure_ascii=False), actor, SERVICE, request_id))
+            out = cur.fetchone()[0]
+    except psycopg2.Error as e:
+        _raise_db(e, request_id, "begin")
+    # ไม่เผย provider_input_ref / input_sha256 / lease — คืนเฉพาะ handle + status
+    return {"run_id": out.get("run_id"), "rfq_id": out.get("rfq_id"),
+            "status": out.get("status"), "request_id": request_id, "actor": actor}
+
+
+@enq.get("/extractions/{run_id}")
+def get_extraction(run_id: str, actor: str = Depends(require_actor)):   # B1: auth ผ่าน router
+    import uuid as _uuid
+    try:
+        _uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="run_id must be a uuid")
+    with db(READ_DSN) as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        # get_extraction_status = definer projection ปลอดภัย (ไม่มี lease/ref/hash/provider)
+        cur.execute("SELECT run_id, rfq_id, status_code, attempt_no FROM get_extraction_status(%s)", (run_id,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="extraction run not found")
+    return {"run_id": str(row["run_id"]), "rfq_id": str(row["rfq_id"]),
+            "status": row["status_code"], "attempt_no": row["attempt_no"]}
 
 
 app.include_router(enq)

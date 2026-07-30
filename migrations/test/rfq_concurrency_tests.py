@@ -384,6 +384,7 @@ def t10_catalog_and_policy(sup):
            'add_signoff', 'revoke_signoff', '_lock_rfq_for_input',
            'create_rfq_draft', '_reject_unknown_keys', '_child_array',
            'begin_rfq_extraction', 'claim_rfq_extraction', 'apply_rfq_extraction', 'fail_rfq_extraction',
+           'list_claimable_extractions', 'get_extraction_status',
            '_egress_decide', '_norm_ctx', '_ext_collect', '_resolve_subject']
     invoker_ok = {'_reject_unknown_keys', '_child_array', '_norm_ctx', '_ext_collect', '_resolve_subject'}   # pure helper = INVOKER ตั้งใจ
     bad = []
@@ -453,12 +454,14 @@ def t11_ingest_allowlist(sup):
     sel = sql1(sup, "SELECT has_table_privilege('rfq_ingest','rfq.rfq','SELECT')")
     checks.append(('ingest table SELECT=false', sel is False, sel))
     # effective allowlist (F8): enumerate ทุก function ใน schema rfq ที่ rfq_ingest execute ได้
-    # ตอนนี้ = create_rfq_draft (006) + begin/claim/apply/fail_rfq_extraction (007 ENQ write path)
+    # = create_rfq_draft (006) + begin/claim/apply/fail_rfq_extraction (007) + list_claimable_extractions (008 worker poll)
+    #   (get_extraction_status = rfq_app เท่านั้น จึงไม่อยู่ในชุดนี้)
     eff = sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p
         JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND has_function_privilege('rfq_ingest', p.oid, 'EXECUTE')""")
-    expect = ['apply_rfq_extraction','begin_rfq_extraction','claim_rfq_extraction','create_rfq_draft','fail_rfq_extraction']
-    checks.append(('ingest effective EXECUTE = ENQ write functions only', eff == expect, eff))
+    expect = ['apply_rfq_extraction','begin_rfq_extraction','claim_rfq_extraction','create_rfq_draft',
+              'fail_rfq_extraction','list_claimable_extractions']
+    checks.append(('ingest effective EXECUTE = ENQ write + worker-poll functions only', eff == expect, eff))
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "exact allowlist: create_rfq_draft only; no other fn, no table SELECT/DML"
     record('T11 ingest exact allowlist', allok, detail)

@@ -34,27 +34,51 @@ ENQ_API_KEY=dev-local-key uvicorn enq_api.main:app --host 127.0.0.1 --port 8090
 | method | path | ทำอะไร | DB role |
 |---|---|---|---|
 | GET | `/health` | เช็ค DB | rfq_app |
-| POST | `/enq/draft` | สร้าง RFQ DRAFT จาก payload `draft-v1` | **rfq_ingest** (write) |
+| POST | `/enq/draft` | สร้าง RFQ DRAFT จาก payload `draft-v1` (manual) | **rfq_ingest** (write) |
 | GET | `/enq/rfq/{id}` | อ่าน RFQ tree กลับ | **rfq_app** (read) |
+| POST | `/enq/extractions` | เริ่ม AI extraction (begin) → `202` durable run | **rfq_ingest** (write) |
+| GET | `/enq/extractions/{run_id}` | สถานะ run (projection ปลอดภัย) | **rfq_app** (read) |
 
 ```bash
-curl -X POST localhost:8090/enq/draft -H 'Content-Type: application/json' \
-  -H 'X-Request-Id: job-123' \
-  -H 'X-API-Key: dev-local-key' \
+# manual draft
+curl -X POST localhost:8090/enq/draft -H 'X-API-Key: dev-local-key' -H 'X-Request-Id: job-123' \
+  -H 'Content-Type: application/json' \
   --data '{"schema_version":"draft-v1","items":[{"line_no":1,"job_name":"box",
            "quantity_options":[{"option_no":1,"quantity":5000,"unit_ref":"PCS","is_primary":true}]}]}'
 # → {"rfq_id":"...","request_id":"job-123","actor":"enq-api"}
+
+# AI extraction (server policy = LOCAL/typhoon/v1/enq ; client ส่งแค่ source ref + correlation)
+curl -X POST localhost:8090/enq/extractions -H 'X-API-Key: dev-local-key' -H 'X-Request-Id: enq-1' \
+  -H 'Content-Type: application/json' --data '{"source_ingest_id":"<uuid>","correlation":{"enquiry_ref":"E1"}}'
+# → 202 {"run_id":"...","rfq_id":"...","status":"PENDING",...}   (worker จะ claim→provider→apply)
 ```
+
+## extraction orchestration (Codex-approved flow)
+
+```
+POST /enq/extractions → begin (short txn) → 202 (run = durable work record)
+  ↓
+enq_api/worker.py (durable poller, แยก process — ไม่ใช่ BackgroundTasks):
+  list_claimable_extractions → claim (short txn, commit) → provider **นอก DB txn** (เฉพาะ should_execute=true)
+  → apply / fail (txn ใหม่) ; lease หมด → reclaim + old-lease ถูก fence (RFS01)
+```
+- **server-controlled ทั้งหมด:** actor/service/target/provider/model/purpose/`provider_input_ref`/`input_sha256`/lease/egress — client ส่งได้แค่ source ref + correlation
+- **provider สังเคราะห์** ([`provider.py`](provider.py)) — LOCAL mock, deterministic, **ไม่เรียก cloud/ข้อมูลจริง**
+- รัน worker: `ENQ_API_KEY=... RFQ_WRITE_DSN=... python -m enq_api.worker`
 
 ## tests
 
 ```bash
-# ephemeral PG (loopback + Docker-assigned port ต่อ process) + migrations + login roles → test_api.py (50 checks)
+# transport/mapper/auth (50 checks)
 PY=/path/to/python bash enq_api/run_api_tests.sh
+# extraction orchestration end-to-end (21 checks — Codex acceptance checklist)
+PY=/path/to/python bash enq_api/run_orchestration_tests.sh
 ```
-ครอบ: auth ทุก route + wrong-key + non-ASCII-key + startup fail-closed + no dev-bypass, idempotency required/replay/conflict,
-operation-aware SQLSTATE mapper (RFS01/RFN01/RFR01 + 22/23xxx/54000/transient, ไม่รั่ว DB message),
-oversize + multi-frame + disconnect (middleware), schema_version required, login least-privilege
+transport ครอบ: auth ทุก route + wrong-key + non-ASCII-key + startup fail-closed + no dev-bypass, idempotency,
+operation-aware SQLSTATE mapper (RFS01/RFN01/RFR01/RFI01 + 22/23xxx/54000/transient, ไม่รั่ว DB message),
+oversize + multi-frame + disconnect, schema strict, login least-privilege
+orchestration ครอบ: POST→202 durable, replay no-dup, forge trusted field→422, worker poll→claim→provider→apply→SUCCEEDED,
+GET safe projection (no leak), should_execute=false→no provider, reclaim + old-lease fencing (RFS01)
 
 ## Codex transport fixes ที่ยึด (BFFA702 + 8EB6C41 + confirm 397AB59)
 - **B1** auth ทุก `/enq/*` ผ่าน **router-wide dependency** (route ใหม่ fail-closed อัตโนมัติ) + `secrets.compare_digest`;
@@ -73,5 +97,6 @@ error mapping ครบ → ดู [`ENQ_EXTRACTION_ERROR_TAXONOMY.md`](../ENQ_E
 class`22`/`235xx`→`422` (label ตาม op), `54000`→`413`, transient→`503`, อื่น→`500`
 
 ## ยังไม่ทำ (increment ถัดไป)
-- **begin/claim/apply/fail** (AI extraction path) — ต้อง seed trusted tables + mock provider loop + `provider_input_ref`/`should_execute` handling (guardrails #6-8)
-- auth จริง (JWT/Keycloak → map principal → actor), deploy, ข้อมูลจริง/Cloud (รอ Data Owner/DPO)
+- **cloud routing** — server policy v1 = LOCAL-only; CLOUD (REDACT/ALLOW → attestation/approval lookup) ยังไม่เปิด
+- **provider จริง** (vLLM/Typhoon local, Cloud) แทน synthetic mock — gated ตาม Data Owner/DPO/Legal
+- auth จริง (JWT/Keycloak → map principal → actor + RFQ authz), deploy, ข้อมูลจริง/Cloud

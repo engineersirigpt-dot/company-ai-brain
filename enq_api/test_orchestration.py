@@ -1,0 +1,135 @@
+"""
+Extraction orchestration tests — Codex acceptance checklist (local + synthetic)
+รันผ่าน enq_api/run_orchestration_tests.sh (ephemeral PG + migrations 001-008 + login roles + seed)
+ครอบ: POST→202 durable run, replay no-dup, client forge trusted fields, durable worker
+       (poll→claim→provider นอก txn→apply/fail), GET safe projection (no leak), BLOCKED no-provider,
+       reclaim + old-lease fencing (RFS01)
+"""
+import os, sys, json, uuid
+os.environ.setdefault("ENQ_API_KEY", "test-key")
+os.environ.pop("ENQ_DEV_MODE", None)
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+
+import psycopg2
+from fastapi.testclient import TestClient
+from enq_api import main as m, worker as w, provider as prov
+
+client = TestClient(m.app)
+KEY = {"X-API-Key": "test-key"}
+WDSN = w.WRITE_DSN                                              # rfq_ingest_login (worker/write)
+SUPER_DSN = os.environ["SUPER_DSN"]                            # superuser — seed trusted tables + toggles
+WORKER = "w-test"
+H64 = "a" * 64
+res = []
+def check(name, cond, detail=""):
+    res.append(cond); print(("PASS " if cond else "FAIL ") + name + ("" if cond else "  :: " + str(detail)[:300]))
+
+def claim_ids():
+    return [str(x) for x in w.claimable(WDSN)]
+
+# ---- seed (superuser): LOCAL provider + CLEAN source + malware source ----
+sup = psycopg2.connect(SUPER_DSN); sup.autocommit = True
+with sup.cursor() as cur:
+    cur.execute("SET search_path TO rfq")
+    cur.execute("INSERT INTO rfq_ai_provider(provider_code,model_code,execution_target,policy_version) "
+                "VALUES ('typhoon','v1','LOCAL','pol-v1') ON CONFLICT DO NOTHING")
+    cur.execute("INSERT INTO rfq_source_ingest(object_store_key,source_sha256,malware_scan_status,classification_status,"
+                "classification_code,contains_personal_data,contains_trade_secret,cloud_action_code,policy_version,registered_by_ref) "
+                "VALUES ('s3://ok',%s,'CLEAN','CONFIRMED','INTERNAL',true,false,'LOCAL_ONLY','pol-v1','sc') RETURNING id", (H64,))
+    S_OK = cur.fetchone()[0]
+    cur.execute("INSERT INTO rfq_source_ingest(object_store_key,source_sha256,malware_scan_status,classification_status,"
+                "classification_code,contains_personal_data,contains_trade_secret,cloud_action_code,policy_version,registered_by_ref) "
+                "VALUES ('s3://mal',%s,'BLOCKED','CONFIRMED','INTERNAL',true,false,'LOCAL_ONLY','pol-v1','sc') RETURNING id", (H64,))
+    S_MAL = cur.fetchone()[0]
+
+# ---- T1: POST → 202 + durable PENDING run ----
+r = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "x1"})
+check("POST → 202 + PENDING + run_id", r.status_code == 202 and r.json().get("status") == "PENDING" and r.json().get("run_id"), r.text)
+run1 = r.json().get("run_id")
+check("POST response ไม่เผย lease/ref/hash", all(k not in r.text for k in ("lease_token", "input_sha256", "provider_input_ref")), r.text)
+
+# ---- T2: replay same X-Request-Id → same run (no duplicate work) ----
+r2 = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "x1"})
+check("replay same key → same run_id (idempotent)", r2.status_code == 202 and r2.json().get("run_id") == run1, r2.text)
+
+# ---- T3: auth + client can't forge trusted fields (extra=forbid) ----
+check("POST no-auth → 401", client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={"X-Request-Id": "z"}).status_code == 401)
+check("POST no X-Request-Id → 400", client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers=KEY).status_code == 400)
+rf = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK), "provider": "evil", "actor": "root", "lease_token": "x"},
+                 headers={**KEY, "X-Request-Id": "xf"})
+check("forge trusted field (provider/actor/lease) → 422", rf.status_code == 422, rf.text)
+
+# ---- T4: durable worker (poll → claim → provider นอก txn → apply) ; provider called once, server-controlled input ----
+check("run1 durable in claimable (worker restart-safe)", run1 in claim_ids())
+calls = []; orig = prov.extract
+prov.extract = lambda **kw: (calls.append(kw), orig(**kw))[1]
+try:
+    out = w.process_run(run1, WORKER, WDSN)
+finally:
+    prov.extract = orig
+check("worker apply → SUCCEEDED", out.get("action") == "apply" and out.get("status") == "SUCCEEDED", out)
+check("provider called exactly once (happy path)", len(calls) == 1, len(calls))
+check("provider input = server-controlled (input_sha256 จาก claim, ไม่ใช่ client)", calls and calls[0].get("input_sha256") == H64, calls)
+
+# ---- T5: no double-processing — SUCCEEDED run ไม่ claimable ----
+check("SUCCEEDED run ไม่ claimable (no double work)", run1 not in claim_ids())
+
+# ---- T6: GET status = safe projection (no lease/ref/hash leak) ----
+g = client.get(f"/enq/extractions/{run1}", headers=KEY); gj = g.json()
+check("GET → SUCCEEDED + rfq_id", g.status_code == 200 and gj.get("status") == "SUCCEEDED" and gj.get("rfq_id"), g.text)
+check("GET ไม่เผย lease/ref/hash/provider", all(k not in g.text for k in ("lease_token", "input_sha256", "provider_input_ref", "provider_name")), g.text)
+check("GET extractions no-auth → 401", client.get(f"/enq/extractions/{run1}").status_code == 401)
+check("GET unknown run → 404", client.get(f"/enq/extractions/{uuid.uuid4()}", headers=KEY).status_code == 404)
+
+# ---- T7: extraction landed ใน RFQ tree จริง ----
+tree = client.get(f"/enq/rfq/{gj['rfq_id']}", headers=KEY).json()
+_qo = tree["items"][0].get("quantity_options", [])
+check("extraction tree มี synthetic item + quantity",
+      tree["items"][0]["job_name"] == "synthetic extracted job"
+      and _qo and float(_qo[0].get("quantity")) == 1000.0, tree)
+
+# ---- T8: should_execute=false (provider disabled หลัง begin) → skipped, provider ไม่ถูกเรียก ----
+rb = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xblk"})
+run_b = rb.json()["run_id"]
+with sup.cursor() as cur: cur.execute("UPDATE rfq.rfq_ai_provider SET is_active=false WHERE provider_code='typhoon'")
+calls2 = []; prov.extract = lambda **kw: (calls2.append(kw), orig(**kw))[1]
+try:
+    outb = w.process_run(run_b, WORKER, WDSN)
+finally:
+    prov.extract = orig
+    with sup.cursor() as cur: cur.execute("UPDATE rfq.rfq_ai_provider SET is_active=true WHERE provider_code='typhoon'")
+check("should_execute=false → skipped + provider NOT called", outb.get("action") == "skipped" and len(calls2) == 0, (outb, len(calls2)))
+
+# ---- T9: malware source → begin 202 BLOCKED, run ไม่ claimable (ไม่เข้า worker) ----
+rm = client.post("/enq/extractions", json={"source_ingest_id": str(S_MAL)}, headers={**KEY, "X-Request-Id": "xmal"})
+check("malware source → 202 BLOCKED", rm.status_code == 202 and rm.json().get("status") == "BLOCKED", rm.text)
+check("BLOCKED run ไม่ claimable", rm.json().get("run_id") not in claim_ids())
+
+# ---- T10: unknown source → begin 23503 → 422 invalid_request ----
+ru = client.post("/enq/extractions", json={"source_ingest_id": str(uuid.uuid4())}, headers={**KEY, "X-Request-Id": "xun"})
+check("unknown source → 422 invalid_request", ru.status_code == 422, ru.text)
+
+# ---- T11: lease หมด → reclaim (attempt+1) + old-lease apply ถูก fence (RFS01) ----
+rl = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xlease"})
+run_l = rl.json()["run_id"]
+c1 = w._call_json(WDSN, "SELECT claim_rfq_extraction(%s,%s,%s,%s)", (run_l, "wA", "enq", "claimA"))
+lease_old = c1["lease_token"]
+with sup.cursor() as cur:
+    cur.execute("UPDATE rfq.rfq_ai_extraction_run SET lease_expires_at=now()-interval '1 min' WHERE id=%s", (run_l,))
+check("expired-lease run กลับมา claimable (reclaim)", run_l in claim_ids())
+outl = w.process_run(run_l, "wB", WDSN)                        # reclaim (attempt2) → provider → apply
+check("reclaim → apply SUCCEEDED", outl.get("action") == "apply" and outl.get("status") == "SUCCEEDED", outl)
+fenced = False
+try:
+    w._call_json(WDSN, "SELECT apply_rfq_extraction(%s,%s,%s::jsonb,%s,%s,%s)",
+                 (run_l, lease_old, json.dumps(orig(input_ref=None, input_sha256=H64, execution_target="LOCAL")),
+                  "wA", "enq", "apAold"))
+except psycopg2.Error as e:
+    fenced = e.pgcode == "RFS01"
+check("old-lease apply fenced → RFS01", fenced)
+
+sup.close()
+nfail = res.count(False)
+print(f"===== ORCHESTRATION TEST: {res.count(True)} passed, {nfail} failed =====")
+sys.exit(1 if nfail else 0)

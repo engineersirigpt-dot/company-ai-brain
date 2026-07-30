@@ -414,7 +414,7 @@ BEGIN
         claimed_service=p_service, lease_expires_at=v_lease_exp, attempt_no=attempt_no+1 WHERE id=p_run_id;
     v_out := jsonb_build_object('should_execute', true, 'lease_token', v_lease, 'provider_input_ref', r.provider_input_ref,
         'input_sha256', r.input_sha256, 'provider_code', r.provider_name, 'model_code', r.model_name,
-        'execution_target', r.execution_target, 'run_id', p_run_id);
+        'execution_target', r.execution_target, 'lease_expires_at', v_lease_exp, 'run_id', p_run_id);
     INSERT INTO rfq_extraction_request(service,operation_code,request_id,rfq_id,run_id,actor_ref,payload_sha256,outcome)
     VALUES (p_service,'CLAIM',p_request_id,r.rfq_id,p_run_id,p_worker,v_reqhash,v_out);
     RETURN v_out;
