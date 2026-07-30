@@ -94,47 +94,45 @@ CREATE TABLE rfq_extraction_request (
 );
 
 -- ---- ALTER run: RUNNING + lease + trusted ids + provider_input_ref + blocked_reason ----
--- add RUNNING to status enum (dynamic drop of old CHECK — ชื่อ auto)
-DO $status$
-DECLARE c record;
-BEGIN
-    FOR c IN SELECT conname, pg_get_constraintdef(oid) def FROM pg_constraint
-             WHERE conrelid = 'rfq.rfq_ai_extraction_run'::regclass AND contype='c'
-    LOOP
-        IF c.def LIKE '%status_code%ANY%' OR c.def LIKE '%status_code%IN%' THEN
-            EXECUTE format('ALTER TABLE rfq.rfq_ai_extraction_run DROP CONSTRAINT %I', c.conname);
-        END IF;
-    END LOOP;
-END
-$status$;
+-- B1/M1: drop เฉพาะ status-enum CHECK ตัวเดียวด้วยชื่อแน่นอน (ห้าม match กว้าง — เดิมเผลอลบ
+--   invariant 'egress BLOCKED ⇒ status IN (BLOCKED,FAILED,PENDING)' จาก 001 ไปด้วย)
+ALTER TABLE rfq_ai_extraction_run DROP CONSTRAINT IF EXISTS rfq_ai_extraction_run_status_code_check;
 ALTER TABLE rfq_ai_extraction_run
     ADD CONSTRAINT rfq_ai_extraction_run_status_code_check
     CHECK (status_code IN ('PENDING','RUNNING','SUCCEEDED','FAILED','BLOCKED'));
+-- invariant เดิม (001) ยังต้องอยู่: assert ว่าไม่ถูกลบโดยไม่ตั้งใจ
+DO $assert$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='rfq.rfq_ai_extraction_run'::regclass
+        AND contype='c' AND pg_get_constraintdef(oid) LIKE '%egress_decision_code%BLOCKED%status_code%') THEN
+        RAISE EXCEPTION 'invariant BLOCKED-decision status CHECK หายไป (B1 regression)';
+    END IF;
+END
+$assert$;
 
 ALTER TABLE rfq_ai_extraction_run
     ADD COLUMN source_ingest_id        uuid REFERENCES rfq_source_ingest(id),
     ADD COLUMN redaction_attestation_id uuid REFERENCES rfq_redaction_attestation(id),
     ADD COLUMN egress_approval_id      uuid REFERENCES rfq_egress_approval(id),
     ADD COLUMN provider_input_ref      text,
+    ADD COLUMN purpose_code            text,           -- B3: ให้ claim re-bind purpose
     ADD COLUMN blocked_reason_code     text,
     ADD COLUMN lease_token             uuid,
     ADD COLUMN claimed_by_ref          text,
+    ADD COLUMN claimed_service         text,           -- B6: bind service ที่ claim
     ADD COLUMN lease_expires_at        timestamptz,
     ADD COLUMN attempt_no              integer NOT NULL DEFAULT 0 CHECK (attempt_no >= 0);
 
 -- ---- ALTER evidence: derivation_type (F5/R5) + ล้าง AI_INFERENCE จาก source_type enum ----
--- drop เดิม: source_type enum check + AI_INFERENCE→run check (หา dynamic กัน name เพี้ยน)
+-- M1: drop เจาะจง — source_type enum ด้วยชื่อ column-check แน่นอน; AI_INFERENCE→run check
+--   ด้วย def ที่มี "AI_INFERENCE" + "extraction_run_id" พร้อมกัน (ไม่แตะ CHECK อื่น)
+ALTER TABLE rfq_field_evidence DROP CONSTRAINT IF EXISTS rfq_field_evidence_source_type_check;
 DO $ev$
-DECLARE c record;
+DECLARE c text;
 BEGIN
-    FOR c IN SELECT conname, pg_get_constraintdef(oid) def FROM pg_constraint
-             WHERE conrelid = 'rfq.rfq_field_evidence'::regclass AND contype='c'
-    LOOP
-        IF (c.def LIKE '%source_type%' AND c.def LIKE '%ANY%')
-        OR (c.def LIKE '%AI_INFERENCE%') THEN
-            EXECUTE format('ALTER TABLE rfq.rfq_field_evidence DROP CONSTRAINT %I', c.conname);
-        END IF;
-    END LOOP;
+    SELECT conname INTO c FROM pg_constraint WHERE conrelid='rfq.rfq_field_evidence'::regclass AND contype='c'
+        AND pg_get_constraintdef(oid) LIKE '%AI_INFERENCE%' AND pg_get_constraintdef(oid) LIKE '%extraction_run_id%';
+    IF c IS NOT NULL THEN EXECUTE format('ALTER TABLE rfq.rfq_field_evidence DROP CONSTRAINT %I', c); END IF;
 END
 $ev$;
 -- source_type = medium ล้วน (ไม่มี AI_INFERENCE)
@@ -160,13 +158,10 @@ ALTER TABLE rfq_extraction_request    OWNER TO rfq_owner;
 REVOKE ALL ON rfq_source_ingest, rfq_ai_provider, rfq_redaction_attestation,
               rfq_egress_approval, rfq_extraction_request FROM rfq_app, rfq_ingest;
 
-COMMIT;
-
 -- ============================================================================
 -- PART 2 — service functions: begin / claim / fail  (apply อยู่ท้ายไฟล์)
+-- B2: ทั้ง 007 = transaction เดียว (ไม่มี COMMIT กลาง) → พังกลางทาง rollback หมด ไม่มี PUBLIC EXECUTE ค้าง
 -- ============================================================================
-BEGIN;
-SET search_path TO rfq;
 
 -- ---- helper: normalize+validate trusted args (เหมือน create_rfq_draft) ----
 CREATE OR REPLACE FUNCTION _norm_ctx(INOUT p_actor text, INOUT p_service text, INOUT p_request_id text)
@@ -248,7 +243,8 @@ BEGIN
             SELECT * INTO att FROM rfq_redaction_attestation WHERE id=p_attestation_id;
             IF NOT FOUND THEN RAISE EXCEPTION 'attestation % ไม่พบ', p_attestation_id USING ERRCODE='23503'; END IF;
             IF NOT att.is_active OR att.revoked_at IS NOT NULL OR att.expires_at <= now()
-               OR att.source_ingest_id <> src.id OR att.source_sha256 <> src.source_sha256 THEN
+               OR att.source_ingest_id <> src.id OR att.source_sha256 <> src.source_sha256
+               OR att.purpose_code <> p_purpose_code THEN   -- B3: bind purpose
                 v_dec:='BLOCKED'; v_blk:='attestation invalid';
             ELSE v_dec:='REDACTED_ALLOW'; v_ref:=att.redacted_object_store_key; v_hash:=att.redacted_sha256;
                  v_red_applied:=true; v_manifest:=att.redaction_manifest; v_att_id:=att.id; END IF;
@@ -292,11 +288,11 @@ BEGIN
     INSERT INTO rfq_ai_extraction_run (rfq_id, source_attachment_id, source_ingest_id, input_sha256,
         execution_target, provider_name, model_name, egress_policy_version, egress_decision_code,
         redaction_applied, redaction_manifest, exception_approved_by_ref, exception_reason,
-        redaction_attestation_id, egress_approval_id, provider_input_ref, blocked_reason_code, status_code)
+        redaction_attestation_id, egress_approval_id, provider_input_ref, purpose_code, blocked_reason_code, status_code)
     VALUES (v_rfq, v_att, src.id, v_hash,
         p_target, p_provider_code, p_model_code, c_policy, v_dec,
         v_red_applied, v_manifest, v_exc_by, v_exc_reason,
-        v_att_id, v_apr_id, v_ref, v_blk,
+        v_att_id, v_apr_id, v_ref, p_purpose_code, v_blk,
         CASE WHEN v_dec='BLOCKED' THEN 'BLOCKED' ELSE 'PENDING' END)
     RETURNING id INTO v_run;
 
@@ -355,13 +351,19 @@ BEGIN
     ELSIF prov.provider_code IS NULL OR NOT prov.is_active OR prov.execution_target<>r.execution_target
           OR prov.policy_version<>src.policy_version THEN v_blk:='provider invalid at claim';
     ELSIF r.egress_decision_code='REDACTED_ALLOW' THEN
+        -- B3: re-bind attestation ครบทุก field กับ snapshot ใน run (กัน trusted record ถูกแก้หลัง begin)
         SELECT * INTO att FROM rfq_redaction_attestation WHERE id=r.redaction_attestation_id;
-        IF att.id IS NULL OR NOT att.is_active OR att.revoked_at IS NOT NULL OR att.expires_at < v_lease_exp THEN
-            v_blk:='attestation invalid/expiring before lease'; END IF;
+        IF att.id IS NULL OR NOT att.is_active OR att.revoked_at IS NOT NULL OR att.expires_at < v_lease_exp
+           OR att.source_ingest_id <> r.source_ingest_id OR att.source_sha256 <> src.source_sha256
+           OR att.redacted_sha256 <> r.input_sha256 OR att.redacted_object_store_key <> r.provider_input_ref
+           OR att.purpose_code <> r.purpose_code THEN
+            v_blk:='attestation invalid/mutated/expiring before lease'; END IF;
     ELSIF r.egress_decision_code='APPROVED_EXCEPTION' THEN
         SELECT * INTO apr FROM rfq_egress_approval WHERE id=r.egress_approval_id;
-        IF apr.id IS NULL OR NOT apr.is_active OR apr.revoked_at IS NOT NULL OR apr.expires_at < v_lease_exp THEN
-            v_blk:='approval invalid/expiring before lease'; END IF;
+        IF apr.id IS NULL OR NOT apr.is_active OR apr.revoked_at IS NOT NULL OR apr.expires_at < v_lease_exp
+           OR apr.source_ingest_id <> r.source_ingest_id OR apr.provider_code <> r.provider_name
+           OR apr.model_code <> r.model_name OR apr.purpose_code <> r.purpose_code THEN
+            v_blk:='approval invalid/mutated/expiring before lease'; END IF;
     ELSIF r.egress_decision_code='BLOCKED' THEN v_blk:='run already blocked at begin';
     END IF;
 
@@ -374,7 +376,7 @@ BEGIN
 
     v_lease := gen_random_uuid();
     UPDATE rfq_ai_extraction_run SET status_code='RUNNING', lease_token=v_lease, claimed_by_ref=p_worker,
-        lease_expires_at=v_lease_exp, attempt_no=attempt_no+1 WHERE id=p_run_id;
+        claimed_service=p_service, lease_expires_at=v_lease_exp, attempt_no=attempt_no+1 WHERE id=p_run_id;
     v_out := jsonb_build_object('should_execute', true, 'lease_token', v_lease, 'provider_input_ref', r.provider_input_ref,
         'input_sha256', r.input_sha256, 'provider_code', r.provider_name, 'model_code', r.model_name,
         'execution_target', r.execution_target, 'run_id', p_run_id);
@@ -404,10 +406,11 @@ BEGIN
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='23503'; END IF;
-    -- C4: RUNNING + lease token/service ตรง + ยังไม่หมดอายุ
+    -- C4/B6: RUNNING + lease token + actor + service ตรง + ยังไม่หมดอายุ
     IF r.status_code<>'RUNNING' OR r.lease_token IS DISTINCT FROM p_lease_token
-       OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.lease_expires_at <= now() THEN
-        RAISE EXCEPTION 'fail ต้อง RUNNING + lease ตรง + ยังไม่หมดอายุ' USING ERRCODE='23514';
+       OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.claimed_service IS DISTINCT FROM p_service
+       OR r.lease_expires_at <= now() THEN
+        RAISE EXCEPTION 'fail ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='23514';
     END IF;
     UPDATE rfq_ai_extraction_run SET status_code='FAILED', error_code=p_error_code, completed_at=now() WHERE id=p_run_id;
     v_out := jsonb_build_object('status','FAILED','run_id',p_run_id);
@@ -418,13 +421,24 @@ END;
 $$;
 ALTER FUNCTION fail_rfq_extraction(uuid,uuid,text,text,text,text) OWNER TO rfq_owner;
 
-COMMIT;
-
 -- ============================================================================
 -- PART 3 — apply_rfq_extraction: tree + evidence (set equality) atomic
 -- ============================================================================
-BEGIN;
-SET search_path TO rfq;
+
+-- ---- helper: collect .fields keys → written-set (reject JSON null — B4) ----
+CREATE OR REPLACE FUNCTION _ext_collect(p_written jsonb, p_subject text, p_sid uuid, p_fields jsonb, p_row jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, rfq, pg_temp AS $c$
+DECLARE k text; w jsonb := p_written;
+BEGIN
+    FOR k IN SELECT jsonb_object_keys(p_fields) LOOP
+        IF jsonb_typeof(p_fields->k)='null' THEN
+            RAISE EXCEPTION 'field %.% ห้ามเป็น JSON null (ใช้ omit-key)', p_subject, k USING ERRCODE='22023'; END IF;
+        w := w || jsonb_build_object(p_subject||'|'||p_sid||'|'||k, p_row->k);
+    END LOOP;
+    RETURN w;
+END;
+$c$;
+ALTER FUNCTION _ext_collect(jsonb,text,uuid,jsonb,jsonb) OWNER TO rfq_owner;
 
 CREATE OR REPLACE FUNCTION apply_rfq_extraction(
     p_run_id uuid, p_lease_token uuid, p_payload jsonb, p_actor text, p_service text, p_request_id text
@@ -459,7 +473,8 @@ DECLARE
     v_prev jsonb; v_prev_hash char(64); v_prev_actor text; v_reqhash char(64);
     v_rfq uuid; v_items jsonb; hdr jsonb; f jsonb; it jsonb; ch jsonb; comp jsonb; corr jsonb; ev jsonb; cl jsonb;
     v_item uuid; v_comp uuid; v_q uuid; v_row jsonb; k text; v_sid uuid; v_ref jsonb; v_att uuid;
-    v_wcount int; v_ecount int; v_diff int;
+    v_written jsonb := '{}'::jsonb; v_evseen jsonb := '{}'::jsonb; v_infer jsonb := '{}'::jsonb;
+    v_clar jsonb := '{}'::jsonb; keystr text; v_deriv text; v_stype text; v_miss int;
 BEGIN
     SELECT * INTO p_actor, p_service, p_request_id FROM _norm_ctx(p_actor, p_service, p_request_id);
     v_reqhash := encode(sha256((p_run_id::text||'|'||md5(p_payload::text))::bytea),'hex');
@@ -475,10 +490,11 @@ BEGIN
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='23503'; END IF;
-    -- C4: RUNNING + lease token/service ตรง + ยังไม่หมดอายุ
+    -- C4/B6: RUNNING + lease token + actor + service ตรง + ยังไม่หมดอายุ
     IF r.status_code<>'RUNNING' OR r.lease_token IS DISTINCT FROM p_lease_token
-       OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.lease_expires_at <= now() THEN
-        RAISE EXCEPTION 'apply ต้อง RUNNING + lease ตรง + ยังไม่หมดอายุ' USING ERRCODE='23514';
+       OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.claimed_service IS DISTINCT FROM p_service
+       OR r.lease_expires_at <= now() THEN
+        RAISE EXCEPTION 'apply ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='23514';
     END IF;
     v_rfq := r.rfq_id; v_att := r.source_attachment_id;
 
@@ -489,12 +505,9 @@ BEGIN
     IF p_payload->>'input_sha256' IS DISTINCT FROM r.input_sha256 THEN RAISE EXCEPTION 'input_sha256 ไม่ตรง run' USING ERRCODE='22023'; END IF;
     PERFORM _reject_unknown_keys(p_payload, c_top, 'payload');
 
-    CREATE TEMP TABLE IF NOT EXISTS _w (subject_type text, subject_id uuid, field_name text, snap jsonb) ON COMMIT DROP;
-    CREATE TEMP TABLE IF NOT EXISTS _e (subject_type text, subject_id uuid, field_name text,
-        derivation_type text, source_type text, source_page int, source_excerpt text, confidence numeric) ON COMMIT DROP;
-    TRUNCATE _w; TRUNCATE _e;
+    -- B5: ไม่ใช้ caller-visible temp table ใน SECURITY DEFINER — ใช้ jsonb accumulator แทน (กัน temp-table hijack)
 
-    -- ---- header.fields → update shell + _w (RFQ) ----
+    -- ---- header.fields → update shell + written-set (RFQ) ----
     hdr := p_payload->'header'; f := COALESCE(hdr->'fields','{}'::jsonb);
     IF hdr IS NOT NULL THEN PERFORM _reject_unknown_keys(hdr, ARRAY['fields'], 'header'); END IF;
     PERFORM _reject_unknown_keys(f, c_hdr, 'header.fields');
@@ -509,7 +522,7 @@ BEGIN
         updated_at=now(), updated_by_ref=p_actor
     WHERE id=v_rfq;
     SELECT to_jsonb(x.*) INTO v_row FROM rfq x WHERE x.id=v_rfq;
-    FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('RFQ', v_rfq, k, v_row->k); END LOOP;
+    v_written := _ext_collect(v_written, 'RFQ', v_rfq, f, v_row);
 
     -- ---- items + spec tree ----
     v_items := _child_array(p_payload,'items',c_max_items,'items');
@@ -530,7 +543,7 @@ BEGIN
             f->>'sample_description', f->>'notes')
         RETURNING id INTO v_item;
         SELECT to_jsonb(x.*) INTO v_row FROM rfq_item x WHERE x.id=v_item;
-        FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('ITEM', v_item, k, v_row->k); END LOOP;
+        v_written := _ext_collect(v_written, 'ITEM', v_item, f, v_row);
 
         FOR ch IN SELECT * FROM jsonb_array_elements(_child_array(it,'quantity_options',c_max_child,'quantity_options')) LOOP
             PERFORM _reject_unknown_keys(ch, ARRAY['option_no','fields'], 'quantity_option');
@@ -540,7 +553,7 @@ BEGIN
                 f->>'unit_name_snapshot', f->>'unit_raw', COALESCE((f->>'is_primary')::boolean,false), f->>'notes')
             RETURNING id INTO v_q;
             SELECT to_jsonb(x.*) INTO v_row FROM rfq_quantity_option x WHERE x.id=v_q;
-            FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('QUANTITY', v_q, k, v_row->k); END LOOP;
+            v_written := _ext_collect(v_written, 'QUANTITY', v_q, f, v_row);
         END LOOP;
 
         FOR ch IN SELECT * FROM jsonb_array_elements(_child_array(it,'design_variants',c_max_child,'design_variants')) LOOP
@@ -550,7 +563,7 @@ BEGIN
             VALUES (v_item, (ch->>'variant_no')::smallint, f->>'design_code', (f->>'quantity')::numeric, f->>'unit_ref', f->>'unit_code_snapshot', f->>'notes')
             RETURNING id INTO v_sid;
             SELECT to_jsonb(x.*) INTO v_row FROM rfq_design_variant x WHERE x.id=v_sid;
-            FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('DESIGN_VARIANT', v_sid, k, v_row->k); END LOOP;
+            v_written := _ext_collect(v_written, 'DESIGN_VARIANT', v_sid, f, v_row);
         END LOOP;
 
         FOR comp IN SELECT * FROM jsonb_array_elements(_child_array(it,'components',c_max_child,'components')) LOOP
@@ -568,7 +581,7 @@ BEGIN
                 (f->>'box_depth_mm')::numeric, (f->>'flap_mm')::numeric, (f->>'glue_mm')::numeric, (f->>'tuck_mm')::numeric, f->>'notes')
             RETURNING id INTO v_comp;
             SELECT to_jsonb(x.*) INTO v_row FROM rfq_component x WHERE x.id=v_comp;
-            FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('COMPONENT', v_comp, k, v_row->k); END LOOP;
+            v_written := _ext_collect(v_written, 'COMPONENT', v_comp, f, v_row);
             corr := comp->'corrugated';
             IF corr IS NOT NULL AND jsonb_typeof(corr)<>'null' THEN
                 IF jsonb_typeof(corr)<>'object' THEN RAISE EXCEPTION 'corrugated ต้องเป็น object' USING ERRCODE='22023'; END IF;
@@ -580,7 +593,7 @@ BEGIN
                     (f->>'layer_count_snapshot')::smallint, f->>'flute_code_snapshot', f->>'notes')
                 RETURNING id INTO v_sid;
                 SELECT to_jsonb(x.*) INTO v_row FROM rfq_component_corrugated x WHERE x.id=v_sid;
-                FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('CORRUGATED', v_sid, k, v_row->k); END LOOP;
+                v_written := _ext_collect(v_written, 'CORRUGATED', v_sid, f, v_row);
             END IF;
         END LOOP;
 
@@ -601,10 +614,10 @@ BEGIN
                 (f->>'depth_mm')::numeric, f->>'color_ref', f->>'color_code_snapshot', f->>'color_name_snapshot', f->>'notes')
             RETURNING id INTO v_sid;
             SELECT to_jsonb(x.*) INTO v_row FROM rfq_process_requirement x WHERE x.id=v_sid;
-            FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('PROCESS', v_sid, k, v_row->k); END LOOP;
+            v_written := _ext_collect(v_written, 'PROCESS', v_sid, f, v_row);
             -- relationship key (R4/C2): component_no → natural key ของ target
             IF v_comp IS NOT NULL THEN
-                INSERT INTO _w VALUES ('PROCESS', v_sid, 'component_no', to_jsonb((ch->>'component_no')::smallint)); END IF;
+                v_written := v_written || jsonb_build_object('PROCESS|'||v_sid||'|component_no', to_jsonb((ch->>'component_no')::smallint)); END IF;
         END LOOP;
 
         FOR ch IN SELECT * FROM jsonb_array_elements(_child_array(it,'packings',c_max_child,'packings')) LOOP
@@ -616,7 +629,7 @@ BEGIN
                 f->>'packing_name_raw', (f->>'quantity_per_pack')::numeric, f->>'unit_ref', f->>'unit_code_snapshot', f->>'specification')
             RETURNING id INTO v_sid;
             SELECT to_jsonb(x.*) INTO v_row FROM rfq_packing_requirement x WHERE x.id=v_sid;
-            FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('PACKING', v_sid, k, v_row->k); END LOOP;
+            v_written := _ext_collect(v_written, 'PACKING', v_sid, f, v_row);
         END LOOP;
 
         FOR ch IN SELECT * FROM jsonb_array_elements(_child_array(it,'deliveries',c_max_child,'deliveries')) LOOP
@@ -634,47 +647,46 @@ BEGIN
                 f->>'unit_ref', f->>'unit_code_snapshot', COALESCE((f->>'is_split_delivery')::boolean,false), f->>'notes')
             RETURNING id INTO v_sid;
             SELECT to_jsonb(x.*) INTO v_row FROM rfq_delivery x WHERE x.id=v_sid;
-            FOR k IN SELECT jsonb_object_keys(f) LOOP INSERT INTO _w VALUES ('DELIVERY', v_sid, k, v_row->k); END LOOP;
+            v_written := _ext_collect(v_written, 'DELIVERY', v_sid, f, v_row);
             IF v_q IS NOT NULL THEN
-                INSERT INTO _w VALUES ('DELIVERY', v_sid, 'option_no', to_jsonb((ch->>'option_no')::smallint)); END IF;
+                v_written := v_written || jsonb_build_object('DELIVERY|'||v_sid||'|option_no', to_jsonb((ch->>'option_no')::smallint)); END IF;
         END LOOP;
     END LOOP;
 
-    -- ---- resolve evidence refs → _e ----
+    -- ---- evidence: extra-check + B4 (AI derivation, source_type required, no default) + insert + accumulate ----
     FOR ev IN SELECT * FROM jsonb_array_elements(COALESCE(p_payload->'evidence','[]'::jsonb)) LOOP
         PERFORM _reject_unknown_keys(ev, c_evk, 'evidence');
-        v_ref := ev->'ref'; v_sid := _resolve_subject(v_rfq, v_item /*unused*/, ev->>'subject_type', v_ref);
-        INSERT INTO _e VALUES (ev->>'subject_type', v_sid, ev->>'field_name',
-            COALESCE(ev->>'derivation_type','AI_EXTRACTED'), COALESCE(ev->>'source_type','PDF'),
-            (ev->>'source_page')::int, ev->>'source_excerpt', (ev->>'confidence')::numeric);
+        v_sid := _resolve_subject(v_rfq, v_item, ev->>'subject_type', ev->'ref');
+        keystr := (ev->>'subject_type') || '|' || v_sid || '|' || (ev->>'field_name');
+        IF NOT (v_written ? keystr) THEN
+            RAISE EXCEPTION 'evidence อ้าง field ที่ไม่ได้เขียน (%)', keystr USING ERRCODE='23514'; END IF;
+        v_deriv := COALESCE(ev->>'derivation_type','AI_EXTRACTED');
+        IF v_deriv NOT IN ('AI_EXTRACTED','AI_INFERENCE') THEN
+            RAISE EXCEPTION 'apply evidence ต้องเป็น AI derivation (พบ %)', v_deriv USING ERRCODE='23514'; END IF;
+        v_stype := ev->>'source_type';
+        IF v_stype IS NULL THEN RAISE EXCEPTION 'evidence.source_type ต้องระบุ (ห้าม default)' USING ERRCODE='22023'; END IF;
+        INSERT INTO rfq_field_evidence (rfq_id, subject_type, subject_id, field_name, value_snapshot, source_type,
+            extraction_run_id, source_attachment_id, derivation_type, source_page, source_excerpt, confidence)
+        VALUES (v_rfq, ev->>'subject_type', v_sid, ev->>'field_name', v_written->keystr, v_stype,
+            p_run_id, v_att, v_deriv, (ev->>'source_page')::int, ev->>'source_excerpt', (ev->>'confidence')::numeric);
+        v_evseen := v_evseen || jsonb_build_object(keystr, true);
+        IF v_deriv='AI_INFERENCE' THEN v_infer := v_infer || jsonb_build_object(keystr, true); END IF;
     END LOOP;
 
-    -- ---- set equality: _w == _e (F4/R3/R4) ----
-    SELECT count(*) INTO v_wcount FROM _w;
-    SELECT count(*) INTO v_ecount FROM _e;
-    SELECT count(*) INTO v_diff FROM (
-        SELECT subject_type, subject_id, field_name FROM _w
-        EXCEPT SELECT subject_type, subject_id, field_name FROM _e) d;
-    IF v_diff > 0 THEN RAISE EXCEPTION 'AI-written field ไม่มี evidence (% field)', v_diff USING ERRCODE='23514'; END IF;
-    SELECT count(*) INTO v_diff FROM (
-        SELECT subject_type, subject_id, field_name FROM _e
-        EXCEPT SELECT subject_type, subject_id, field_name FROM _w) d;
-    IF v_diff > 0 THEN RAISE EXCEPTION 'evidence อ้าง field ที่ไม่ได้เขียน (% field)', v_diff USING ERRCODE='23514'; END IF;
+    -- ---- set equality: ทุก written field ต้องมี evidence (F4/R3/R4) ----
+    SELECT count(*) INTO v_miss FROM jsonb_object_keys(v_written) w WHERE NOT (v_evseen ? w);
+    IF v_miss > 0 THEN RAISE EXCEPTION 'AI-written field ไม่มี evidence (% field)', v_miss USING ERRCODE='23514'; END IF;
 
-    -- ---- insert evidence (value_snapshot จาก _w.snap = to_jsonb(actual) — C2) ----
-    INSERT INTO rfq_field_evidence (rfq_id, subject_type, subject_id, field_name, value_snapshot, source_type,
-        extraction_run_id, source_attachment_id, derivation_type, source_page, source_excerpt, confidence)
-    SELECT v_rfq, w.subject_type, w.subject_id, w.field_name, w.snap, e.source_type,
-        p_run_id, v_att, e.derivation_type, e.source_page, e.source_excerpt, e.confidence
-    FROM _w w JOIN _e e ON e.subject_type=w.subject_type AND e.subject_id=w.subject_id AND e.field_name=w.field_name;
-
-    -- ---- clarifications (question/reason only — R5) ----
+    -- ---- clarifications (question/reason only — R5) + AI_INFERENCE ต้องมี clarification subject+field เดียวกัน (B4) ----
     FOR cl IN SELECT * FROM jsonb_array_elements(COALESCE(p_payload->'clarifications','[]'::jsonb)) LOOP
         PERFORM _reject_unknown_keys(cl, c_clrk, 'clarification');
         v_sid := _resolve_subject(v_rfq, v_item, cl->>'subject_type', cl->'ref');
+        v_clar := v_clar || jsonb_build_object((cl->>'subject_type')||'|'||v_sid||'|'||(cl->>'field_name'), true);
         INSERT INTO rfq_clarification (rfq_id, subject_type, subject_id, field_name, question, reason, is_blocking, raised_by_type, raised_by_ref)
         VALUES (v_rfq, cl->>'subject_type', v_sid, cl->>'field_name', cl->>'question', cl->>'reason', true, 'AI', p_actor);
     END LOOP;
+    SELECT count(*) INTO v_miss FROM jsonb_object_keys(v_infer) i WHERE NOT (v_clar ? i);
+    IF v_miss > 0 THEN RAISE EXCEPTION 'AI_INFERENCE ต้องมี blocking clarification subject+field เดียวกัน (% field)', v_miss USING ERRCODE='23514'; END IF;
 
     UPDATE rfq_ai_extraction_run SET status_code='SUCCEEDED', completed_at=now() WHERE id=p_run_id;
     v_prev := jsonb_build_object('rfq_id', v_rfq, 'run_id', p_run_id, 'status', 'SUCCEEDED');
@@ -712,8 +724,28 @@ END;
 $$;
 ALTER FUNCTION _resolve_subject(uuid,uuid,text,jsonb) OWNER TO rfq_owner;
 
+-- ---- H1: กัน RFQ ที่มี extraction run ยังไม่ SUCCEEDED เข้า READY_FOR_ESTIMATE ----
+-- (blocked/failed/pending/running extraction shell จะเข้า Ready path ไม่ได้; manual draft ไม่มี run → ผ่าน)
+CREATE OR REPLACE FUNCTION rfq_block_ready_open_extraction()
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, rfq, pg_temp AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM rfq_ai_extraction_run WHERE rfq_id=NEW.id AND status_code <> 'SUCCEEDED') THEN
+        RAISE EXCEPTION 'RFQ มี extraction run ที่ยังไม่ SUCCEEDED — เข้า READY_FOR_ESTIMATE ไม่ได้ (H1)'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+ALTER FUNCTION rfq_block_ready_open_extraction() OWNER TO rfq_owner;
+CREATE TRIGGER trg_rfq_block_ready_open_extraction
+    BEFORE UPDATE OF status_code ON rfq
+    FOR EACH ROW WHEN (NEW.status_code = 'READY_FOR_ESTIMATE')
+    EXECUTE FUNCTION rfq_block_ready_open_extraction();
+
 -- ---- grants: EXECUTE เฉพาะ rfq_ingest; helper hidden ----
 REVOKE ALL ON FUNCTION _norm_ctx(text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION _ext_collect(jsonb,text,uuid,jsonb,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION rfq_block_ready_open_extraction() FROM PUBLIC;   -- trigger fn: ไม่ให้โผล่ใน effective allowlist
 REVOKE ALL ON FUNCTION _resolve_subject(uuid,uuid,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION begin_rfq_extraction(uuid,text,text,text,text,uuid,uuid,jsonb,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION claim_rfq_extraction(uuid,text,text,text) FROM PUBLIC;

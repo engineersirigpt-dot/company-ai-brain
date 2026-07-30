@@ -64,7 +64,7 @@ echo "== 050 ENQ extraction (begin/claim/apply/fail) =="
 reset_load
 run_sql_test test/050_extraction_tests.sql
 
-echo "== concurrency + security harness T01-T16 (2 connections) =="
+echo "== concurrency + security harness T01-T18 (2 connections) =="
 reset_load
 PYTHONIOENCODING=utf-8 "$PY" test/rfq_concurrency_tests.py || fail=1
 

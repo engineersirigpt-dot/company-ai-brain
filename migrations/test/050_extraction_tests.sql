@@ -10,7 +10,7 @@ DECLARE
     pass int := 0; fail int := 0;
     h64 constant char(64) := repeat('a',64); rh64 constant char(64) := repeat('b',64);
     s_ok uuid; s_cloud_r uuid; s_cloud_a uuid; s_bad_mal uuid; s_unclass uuid; s_revoked uuid;
-    att uuid; apr uuid; v_run uuid; v_lease uuid; v_res jsonb; v_dec text;
+    att uuid; att_badp uuid; apr uuid; v_run uuid; v_lease uuid; v_res jsonb; v_dec text; v_shell uuid;
     p_ok jsonb;
 BEGIN
     INSERT INTO rfq_ai_provider (provider_code, model_code, execution_target, policy_version) VALUES
@@ -32,6 +32,8 @@ BEGIN
         VALUES (s_cloud_r,'enq','redgw','v1',h64,rh64,'s3://cr.redacted','{"dropped":["contact_phone"]}'::jsonb, now()+interval '1 day') RETURNING id INTO att;
     INSERT INTO rfq_egress_approval (source_ingest_id,provider_code,model_code,purpose_code,approved_by_ref,reason,expires_at)
         VALUES (s_cloud_a,'claude','v1','enq','dpo','pilot approved', now()+interval '1 day') RETURNING id INTO apr;
+    INSERT INTO rfq_redaction_attestation (source_ingest_id,purpose_code,redactor_ref,redactor_version,source_sha256,redacted_sha256,redacted_object_store_key,redaction_manifest,expires_at)
+        VALUES (s_cloud_r,'other','redgw','v1',h64,rh64,'s3://cr.redacted','{"x":1}'::jsonb, now()+interval '1 day') RETURNING id INTO att_badp;
 
     -- ES1: begin LOCAL → LOCAL_ONLY/PENDING, input=source hash
     v_res := begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{"enquiry_ref":"E1"}'::jsonb,'w','enq','b1');
@@ -148,6 +150,53 @@ BEGIN
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"EVIL":1}}],"evidence":[]}')::jsonb,'w1','enq','a17');
         RAISE NOTICE 'FAIL es17: unknown fields key allowed'; fail:=fail+1;
     EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS es17: unknown fields key → reject'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es17 %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ES18 (B1): direct UPDATE BLOCKED run → SUCCEEDED ถูก invariant เดิม (001) reject
+    v_run := (begin_rfq_extraction(s_bad_mal,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b18')->>'run_id')::uuid;
+    BEGIN UPDATE rfq_ai_extraction_run SET status_code='SUCCEEDED' WHERE id=v_run;
+        RAISE NOTICE 'FAIL es18: BLOCKED→SUCCEEDED allowed'; fail:=fail+1;
+    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es18: BLOCKED→SUCCEEDED blocked (B1 invariant คงอยู่)'; pass:=pass+1; END;
+
+    -- ES19 (B3): attestation purpose ไม่ตรง → BLOCKED
+    IF begin_rfq_extraction(s_cloud_r,'CLOUD','claude','v1','enq',att_badp,NULL,'{}'::jsonb,'w','enq','b19')->>'status'='BLOCKED'
+    THEN RAISE NOTICE 'PASS es19: attestation purpose mismatch → BLOCKED'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es19'; fail:=fail+1; END IF;
+
+    -- ES20 (B3): mutate attestation hash หลัง begin → claim BLOCKED (re-bind snapshot)
+    v_run := (begin_rfq_extraction(s_cloud_r,'CLOUD','claude','v1','enq',att,NULL,'{}'::jsonb,'w','enq','b20')->>'run_id')::uuid;
+    UPDATE rfq_redaction_attestation SET redacted_sha256=repeat('c',64) WHERE id=att;
+    v_res := claim_rfq_extraction(v_run,'w1','enq','c20');
+    IF v_res->>'should_execute'='false' AND v_res->>'status'='BLOCKED'
+    THEN RAISE NOTICE 'PASS es20: attestation mutated หลัง begin → claim BLOCKED'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es20 %',v_res; fail:=fail+1; END IF;
+    UPDATE rfq_redaction_attestation SET redacted_sha256=rh64 WHERE id=att;
+
+    -- ES21 (B4): evidence ไม่ระบุ source_type → reject (ห้าม default)
+    v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b21')->>'run_id')::uuid;
+    v_lease := (claim_rfq_extraction(v_run,'w1','enq','c21')->>'lease_token')::uuid;
+    BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name"}]}')::jsonb,'w1','enq','a21');
+        RAISE NOTICE 'FAIL es21: missing source_type allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS es21: evidence missing source_type → reject'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es21 %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ES22 (B4): evidence derivation HUMAN_EXTRACTED ใน apply → reject (ต้องเป็น AI)
+    BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF","derivation_type":"HUMAN_EXTRACTED"}]}')::jsonb,'w1','enq','a22');
+        RAISE NOTICE 'FAIL es22: HUMAN derivation allowed'; fail:=fail+1;
+    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es22: HUMAN/SYSTEM derivation ใน apply → reject'; pass:=pass+1; END;
+
+    -- ES23 (B4): business field JSON null → reject
+    BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":null}}],"evidence":[]}')::jsonb,'w1','enq','a23');
+        RAISE NOTICE 'FAIL es23: JSON null field allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS es23: JSON null business field → reject'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es23 %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ES24 (B4): AI_INFERENCE evidence โดยไม่มี matching blocking clarification → reject
+    BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF","derivation_type":"AI_INFERENCE"}]}')::jsonb,'w1','enq','a24');
+        RAISE NOTICE 'FAIL es24: AI_INFERENCE without clarification allowed'; fail:=fail+1;
+    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es24: AI_INFERENCE ต้องมี blocking clarification'; pass:=pass+1; END;
+
+    -- ES25 (H1): blocked shell (มี extraction run ไม่ SUCCEEDED) → เข้า READY_FOR_ESTIMATE ไม่ได้
+    v_run := (begin_rfq_extraction(s_bad_mal,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b25')->>'run_id')::uuid;
+    SELECT rfq_id INTO v_shell FROM rfq_ai_extraction_run WHERE id=v_run;
+    BEGIN UPDATE rfq SET status_code='READY_FOR_ESTIMATE', rfq_no='H1-X', ready_at=now(), ready_by_ref='x' WHERE id=v_shell;
+        RAISE NOTICE 'FAIL es25: blocked shell → Ready allowed'; fail:=fail+1;
+    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es25: blocked shell → Ready blocked (H1)'; pass:=pass+1; END;
 
     RAISE NOTICE '========= EXTRACTION RESULT: % passed, % failed =========', pass, fail;
     IF fail>0 THEN RAISE EXCEPTION 'EXTRACTION TESTS FAILED: %', fail; END IF;

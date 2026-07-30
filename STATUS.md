@@ -355,8 +355,8 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [x] **F8.1** `_reject_unknown_keys`/`_child_array` เป็น SECURITY INVOKER (ลด surface); **F9** doc: "006 ไม่มี dependency ต่อ pgcrypto" (ไม่ใช่ 'เลี่ยงทั้ง repo')
 - [x] **F1/F6** AI-derived values ต้องมี provenance → **ปิดใน ENQ v1.1 (`007`)** — create_rfq_draft (`006`) = manual/synthetic DRAFT; AI path = begin/claim/apply (`007`)
 - [x] payload contract → [`RFQ_DRAFT_PAYLOAD_V1.md`](RFQ_DRAFT_PAYLOAD_V1.md) (v1) + [`RFQ_EXTRACTION_PAYLOAD_V1_1.md`](RFQ_EXTRACTION_PAYLOAD_V1_1.md) (v1.1 rev3+C1-C4)
-- [x] **test รวม**: `020` 18 + `030` 15 + `040` 27 + `050` 17 + `rfq_concurrency_tests.py` **T01-T16** =
-      **93 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
+- [x] **test รวม**: `020` 18 + `030` 15 + `040` 27 + `050` 25 + `rfq_concurrency_tests.py` **T01-T18** =
+      **103 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
@@ -381,8 +381,16 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         relationship (`process.component_no`/`delivery.option_no`) = business field ต้องมี evidence; `value_snapshot=to_jsonb(actual)` natural key (C2)
       - **derivation_type** แยกผู้เขียนจาก medium (F5/R5); **idempotency ledger** `(service,operation,request_id)` (F7/R7)
       - fail-closed จาก v1: create_rfq_draft ไม่รับ evidence แล้ว; AI path มาทางนี้เท่านั้น
-- [x] **test 007**: `050` 17 (begin decision/claim revalidate/apply set-equality/lease/idempotency) +
-      harness **T15** (2-worker claim → exactly-one executor) + **T16** (reclaim fencing, old lease rejected)
+- [x] **Codex impl-review `b0d5b80` → B1-B6+H1 (bug จริง) ปิดครบ:**
+      - **B1** dynamic DROP กว้างไปลบ invariant `BLOCKED⇏SUCCEEDED` ของ 001 → drop เจาะจงชื่อ + assert invariant คงอยู่ (es18)
+      - **B2** migration 3 txn อาจค้าง PUBLIC EXECUTE → รวมเป็น **1 transaction**
+      - **B3** attestation ไม่เช็ค purpose + claim ไม่ re-bind → เพิ่ม purpose + **re-bind hash/artifact/source/provider ตอน claim** (es19/es20)
+      - **B4** apply รับ HUMAN derivation/source_type default/JSON null ได้ → บังคับ AI derivation + source_type required + reject null + AI_INFERENCE ต้องมี clarification (es21-24)
+      - **B5** temp-table hijack ใน SECURITY DEFINER → เลิก temp table เปลี่ยนเป็น **jsonb accumulator** (T18 พิสูจน์ caller temp ไม่กระทบ)
+      - **B6** C4 ไม่ bind service → เพิ่ม `claimed_service`, apply/fail require service ตรง (T17)
+      - **H1** blocked shell เป็น DRAFT หลุด Ready ได้ → trigger กัน READY เมื่อมี extraction run ไม่ SUCCEEDED (es25)
+- [x] **test 007**: `050` 25 (decision/claim revalidate/apply set-equality/lease/B1-B4/H1) +
+      harness **T15-T18** (claim race / reclaim fencing / service binding / temp-table no-hijack)
 - [ ] **ENQ v1.1 gated ต่อ**: scanner/redactor/approver **ingest functions** (007 seed ด้วย owner); production writer roles + audit;
       Cloud extraction ของ RFQ จริง (รอ Data Owner/DPO/Legal); source_type enum cleanup done ใน 007
 - [ ] **V5 (เหลือ)** production migration: fixed migration owner + `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>`,

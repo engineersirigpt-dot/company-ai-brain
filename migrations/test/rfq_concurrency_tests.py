@@ -382,8 +382,10 @@ def t10_catalog_and_policy(sup):
     """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
     svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
            'add_signoff', 'revoke_signoff', '_lock_rfq_for_input',
-           'create_rfq_draft', '_reject_unknown_keys', '_child_array']
-    invoker_ok = {'_reject_unknown_keys', '_child_array'}   # pure helper (ไม่แตะ table) = INVOKER ตั้งใจ (Codex F8.1)
+           'create_rfq_draft', '_reject_unknown_keys', '_child_array',
+           'begin_rfq_extraction', 'claim_rfq_extraction', 'apply_rfq_extraction', 'fail_rfq_extraction',
+           '_norm_ctx', '_ext_collect', '_resolve_subject']
+    invoker_ok = {'_reject_unknown_keys', '_child_array', '_norm_ctx', '_ext_collect', '_resolve_subject'}   # pure helper = INVOKER ตั้งใจ
     bad = []
     for fn in svc:
         row = None
@@ -598,13 +600,52 @@ def t16_reclaim_fencing(sup):
     ok = reclaimed and attempt == 2 and fenced
     record('T16 reclaim fencing (old lease rejected)', ok, f"reclaimed={reclaimed}, attempt={attempt}, old_lease_fenced={fenced}")
 
+def t17_service_binding(sup):
+    """Codex B6: claim ด้วย service A แล้ว apply ด้วย service B → reject (lease bind service)"""
+    run = _seed_ext_run(sup, 't17')
+    c = connect(role='rfq_ingest'); lease = None; denied = False
+    with c.cursor() as cur:
+        cur.execute("SELECT (claim_rfq_extraction(%s,'wA','svc-a','cl17'))->>'lease_token'", (run,))
+        lease = cur.fetchone()[0]
+    payload = ('{"schema_version":"extract-v1.1","input_sha256":"'+('a'*64)+'","items":[{"line_no":1,'
+               '"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},'
+               '"field_name":"job_name","source_type":"PDF"}]}')
+    try:
+        with c.cursor() as cur:
+            cur.execute("SELECT apply_rfq_extraction(%s,%s,%s::jsonb,'wA','svc-b','ap17')", (run, lease, payload))
+    except psycopg2.Error as e:
+        denied = e.pgcode == errorcodes.CHECK_VIOLATION; c.rollback()
+    c.close()
+    record('T17 apply service binding (svc-a claim → svc-b apply reject)', denied, f"denied={denied}")
+
+def t18_temptable_no_hijack(sup):
+    """Codex B5: caller (rfq_ingest) สร้าง temp _w/_e ก่อน → ไม่กระทบ SECURITY DEFINER apply (เลิกใช้ temp table แล้ว)"""
+    run = _seed_ext_run(sup, 't18')
+    c = connect(role='rfq_ingest'); ok = False
+    with c.cursor() as cur:
+        cur.execute("CREATE TEMP TABLE _w (x int)")   # attacker pre-creates hostile-shaped temp tables
+        cur.execute("CREATE TEMP TABLE _e (y int)")
+        cur.execute("SELECT (claim_rfq_extraction(%s,'wA','enq','cl18'))->>'lease_token'", (run,))
+        lease = cur.fetchone()[0]
+    payload = ('{"schema_version":"extract-v1.1","input_sha256":"'+('a'*64)+'","items":[{"line_no":1,'
+               '"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},'
+               '"field_name":"job_name","source_type":"PDF"}]}')
+    try:
+        with c.cursor() as cur:
+            cur.execute("SELECT apply_rfq_extraction(%s,%s,%s::jsonb,'wA','enq','ap18')", (run, lease, payload))
+            ok = cur.fetchone()[0].get('status') == 'SUCCEEDED'
+    except psycopg2.Error as e:
+        ok = False
+    c.close()
+    record('T18 temp-table no-hijack (caller _w/_e ไม่กระทบ apply)', ok, f"apply_succeeded_despite_hostile_temp={ok}")
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
              t04_role_privilege, t05_version_edge, t06_rollback, t07_idempotency, t08_clone_atomicity,
              t09_authz_separation, t10_catalog_and_policy,
              t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
-             t15_claim_race, t16_reclaim_fencing]
+             t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack]
     for t in tests:
         try:
             t(sup)
