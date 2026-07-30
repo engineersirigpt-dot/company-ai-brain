@@ -365,13 +365,18 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       ผ่าน HTTP; role boundary (rfq_ingest write / rfq_app read), actor server-side, idempotency, validate 2 ชั้น;
       **local + synthetic เท่านั้น ยังไม่ deploy**
 - [x] **transport hardening (commit `8eb6c41`) — ปิด Codex review BFFA702 (FIX-THEN-GO) ครบ B1/B2/B3 + H1-H5**
-      B1 auth ทุก route (รวม GET) + **fail-closed** startup (ต้องมี `ENQ_API_KEY` เว้นแต่ `ENQ_DEV_MODE=1`);
-      B2 ASGI body-limit นับ bytes ก่อน parse (กัน chunked bypass, 413) + JSON depth; B3 connect ด้วย login role
-      **non-superuser** (`rfq_ingest_login`/`rfq_app_login`, `enq_api/dev_roles.sql`) ไม่ใช่ postgres;
-      H1 `X-Request-Id` required (key เดิม+payload ต่าง→409); H2 sync def+timeouts; H3 `schema_version` required+`extra=forbid`;
-      H4 ไม่ส่ง raw DB message (pgcode→stable code); **H5 `test_api.py`+`run_api_tests.sh` = 14 เทสต์เขียวบน ephemeral PG**
-      → รอ Codex **targeted re-review transport** (CODEX_INBOX) ก่อนเริ่ม extraction orchestration
-      → ถัดไป: extraction endpoints (begin/claim/apply/fail) + auth จริง (JWT/Keycloak→principal→actor)
+      B1 auth ทุก route + fail-closed startup; B2 ASGI body-limit นับ bytes ก่อน parse (กัน chunked, 413) + JSON depth;
+      B3 login role **non-superuser** (`rfq_ingest_login`/`rfq_app_login`, `enq_api/dev_roles.sql`); H1 idempotency required;
+      H2 sync def+timeouts; H3 strict schema; H4 no DB-message leak; H5 automated tests บน ephemeral PG
+- [x] **transport re-review (commit `397ab59`) — ปิด Codex re-review 8EB6C41 (B1/B2/M1) + M2 tests**
+      B1 **ตัด unauthenticated dev mode ทิ้ง** (ไม่มี bypass — `ENQ_DEV_MODE` ใช้ไม่ได้แล้ว) + auth เป็น **router-wide dependency**
+      (route ใหม่ fail-closed อัตโนมัติ) + `secrets.compare_digest`; B2 **operation-aware SQLSTATE map** (class22/23502/23503/23514→422,
+      23505→409, 54000→413, transient/class08→503) — invalid payload ไม่กลายเป็น 500 อีก + log เฉพาะ schema identifier
+      (ไม่ log ค่าดิบ); M1 middleware `http.disconnect`→หยุด ไม่เรียก downstream; M2 runner ชื่อ/พอร์ตต่อ process + **32 เทสต์เขียว**
+      (เพิ่ม no-dev-bypass, SQLSTATE→422, disconnect/multi-frame, login least-privilege)
+      → **gate ก่อน extraction orchestration ปิดครบ** (B1/B2/M1 + regression) — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
+      → ถัดไป (หลัง confirm): extraction endpoints ผ่าน internal-worker pattern (public POST /enq/extractions → worker
+      begin/claim → provider นอก DB txn → apply/fail), auth จริง (JWT/Keycloak→principal→actor)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
