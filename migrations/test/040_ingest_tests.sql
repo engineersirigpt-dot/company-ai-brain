@@ -63,14 +63,18 @@ BEGIN
         RAISE NOTICE 'FAIL is4'; fail:=fail+1;
     EXCEPTION WHEN others THEN RAISE NOTICE 'PASS is4: bad schema_version rejected'; pass:=pass+1; END;
 
-    -- ST5: idempotency — replay เดิม = id เดิม; request เดิม + payload ต่าง = conflict
-    v_rfq2 := create_rfq_draft(p_ok, 'x', 'enq', 'r1');   -- request r1 มีแล้ว (payload เดิม)
-    IF v_rfq2 = v_rfq THEN RAISE NOTICE 'PASS is5a: replay same request → same id'; pass:=pass+1;
+    -- ST5: idempotency — replay (actor+payload เดิม)=id เดิม; payload ต่าง=conflict; actor ต่าง=conflict (F4B)
+    v_rfq2 := create_rfq_draft(p_ok, 'enq-extractor', 'enq', 'r1');   -- replay: actor เดิม+payload เดิม
+    IF v_rfq2 = v_rfq THEN RAISE NOTICE 'PASS is5a: replay same request+actor+payload → same id'; pass:=pass+1;
     ELSE RAISE NOTICE 'FAIL is5a'; fail:=fail+1; END IF;
     BEGIN
-        PERFORM create_rfq_draft(p_ok || '{"header":{"enquiry_ref":"CHANGED"}}'::jsonb, 'x', 'enq', 'r1');
+        PERFORM create_rfq_draft(p_ok || '{"header":{"enquiry_ref":"CHANGED"}}'::jsonb, 'enq-extractor', 'enq', 'r1');
         RAISE NOTICE 'FAIL is5b: request reuse with different payload allowed'; fail:=fail+1;
-    EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'PASS is5b: request_id reuse w/ different payload → conflict'; pass:=pass+1; END;
+    EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'PASS is5b: same request + different payload → conflict'; pass:=pass+1; END;
+    BEGIN
+        PERFORM create_rfq_draft(p_ok, 'different-actor', 'enq', 'r1');   -- payload เดิม แต่ actor ต่าง
+        RAISE NOTICE 'FAIL is5c: request reuse with different actor allowed'; fail:=fail+1;
+    EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'PASS is5c: same request + different actor → conflict (F4B)'; pass:=pass+1; END;
 
     -- ST6: item-count limit (>100) → reject ก่อน expand
     BEGIN
@@ -102,6 +106,50 @@ BEGIN
     BEGIN PERFORM create_rfq_draft(p_ok,'','enq','r9');
         RAISE NOTICE 'FAIL is9'; fail:=fail+1;
     EXCEPTION WHEN others THEN RAISE NOTICE 'PASS is9: empty actor rejected'; pass:=pass+1; END;
+
+    -- ST10 (F2): reference ที่ระบุแล้ว resolve ไม่ได้ → reject 23503 (ไม่เงียบเป็น NULL)
+    BEGIN PERFORM create_rfq_draft('{"schema_version":"draft-v1","items":[{"line_no":1,"components":[{"component_no":1,"box_template_ref":"B"}],"processes":[{"sequence_no":1,"process_ref":"P","component_no":999}]}]}'::jsonb,'a','enq','r10a');
+        RAISE NOTICE 'FAIL is10a: bad component_no allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='23503' THEN RAISE NOTICE 'PASS is10a: unresolved process.component_no rejected'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is10a wrong: %',SQLERRM; fail:=fail+1; END IF; END;
+    BEGIN PERFORM create_rfq_draft('{"schema_version":"draft-v1","items":[{"line_no":1,"quantity_options":[{"option_no":1,"quantity":100,"unit_ref":"PCS"}],"deliveries":[{"delivery_no":1,"destination_ref":"D","option_no":999}]}]}'::jsonb,'a','enq','r10b');
+        RAISE NOTICE 'FAIL is10b: bad option_no allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='23503' THEN RAISE NOTICE 'PASS is10b: unresolved delivery.option_no rejected'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is10b wrong: %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ST11 (F3): child array >200 ทุกชนิด (ตัวแทน design_variants + deliveries) → 54000
+    BEGIN PERFORM create_rfq_draft(jsonb_build_object('schema_version','draft-v1','items',
+        jsonb_build_array(jsonb_build_object('line_no',1,'design_variants',
+            (SELECT jsonb_agg(jsonb_build_object('variant_no',g,'design_code','D'||g)) FROM generate_series(1,201) g)))),'a','enq','r11a');
+        RAISE NOTICE 'FAIL is11a: 201 design_variants allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='54000' THEN RAISE NOTICE 'PASS is11a: design_variants limit enforced'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is11a wrong: %',SQLERRM; fail:=fail+1; END IF; END;
+    BEGIN PERFORM create_rfq_draft(jsonb_build_object('schema_version','draft-v1','items',
+        jsonb_build_array(jsonb_build_object('line_no',1,'deliveries',
+            (SELECT jsonb_agg(jsonb_build_object('delivery_no',g,'destination_ref','D')) FROM generate_series(1,201) g)))),'a','enq','r11b');
+        RAISE NOTICE 'FAIL is11b: 201 deliveries allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='54000' THEN RAISE NOTICE 'PASS is11b: deliveries limit enforced'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is11b wrong: %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ST12 (F5): corrugated ผิดชนิด (array) → reject 22023 (ไม่ข้ามเงียบ)
+    BEGIN PERFORM create_rfq_draft('{"schema_version":"draft-v1","items":[{"line_no":1,"components":[{"component_no":1,"corrugated":[]}]}]}'::jsonb,'a','enq','r12');
+        RAISE NOTICE 'FAIL is12: malformed corrugated allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS is12: malformed corrugated rejected'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is12 wrong: %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ST13 (F5B/F7): opaque field ถูกตัดจาก v1 → เป็น unknown key
+    BEGIN PERFORM create_rfq_draft('{"schema_version":"draft-v1","items":[{"line_no":1,"components":[{"component_no":1,"corrugated":{"grade_spec_snapshot":{"x":1}}}]}]}'::jsonb,'a','enq','r13a');
+        RAISE NOTICE 'FAIL is13a: grade_spec_snapshot allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN RAISE NOTICE 'PASS is13a: opaque grade_spec_snapshot rejected'; pass:=pass+1; END;
+    BEGIN PERFORM create_rfq_draft('{"schema_version":"draft-v1","items":[{"line_no":1,"processes":[{"sequence_no":1,"process_ref":"P","specification_extra":{"x":1}}]}]}'::jsonb,'a','enq','r13b');
+        RAISE NOTICE 'FAIL is13b: specification_extra allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN RAISE NOTICE 'PASS is13b: opaque specification_extra rejected'; pass:=pass+1; END;
+
+    -- ST14 (F8): arg limit/normalize — tab-only / too-long / control char → reject 22023
+    BEGIN PERFORM create_rfq_draft(p_ok, E'\t', 'enq', 'r14a');
+        RAISE NOTICE 'FAIL is14a: tab-only actor allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS is14a: tab-only actor rejected'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is14a wrong: %',SQLERRM; fail:=fail+1; END IF; END;
+    BEGIN PERFORM create_rfq_draft(p_ok, 'ok', 'enq', repeat('x',300));
+        RAISE NOTICE 'FAIL is14b: over-long request_id allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS is14b: over-long request_id rejected'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is14b wrong: %',SQLERRM; fail:=fail+1; END IF; END;
+    BEGIN PERFORM create_rfq_draft(p_ok, E'a\tb', 'enq', 'r14c');
+        RAISE NOTICE 'FAIL is14c: control-char actor allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS is14c: control-char actor rejected'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is14c wrong: %',SQLERRM; fail:=fail+1; END IF; END;
 
     RAISE NOTICE '========= INGEST RESULT: % passed, % failed =========', pass, fail;
     IF fail>0 THEN RAISE EXCEPTION 'INGEST TESTS FAILED: %', fail; END IF;

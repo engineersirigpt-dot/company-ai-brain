@@ -60,7 +60,7 @@ echo "== 040 ENQ ingest (create_rfq_draft) =="
 reset_load
 run_sql_test test/040_ingest_tests.sql
 
-echo "== concurrency + security harness T01-T13 (2 connections) =="
+echo "== concurrency + security harness T01-T14 (2 connections) =="
 reset_load
 PYTHONIOENCODING=utf-8 "$PY" test/rfq_concurrency_tests.py || fail=1
 

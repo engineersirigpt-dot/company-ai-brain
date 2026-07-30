@@ -339,15 +339,24 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         payload ตั้ง status/row_version/actor/identity = โดน reject (unknown key)
       - **#4/#10** atomic — fail กลาง insert → rollback ครบ ไม่มี partial draft (T12)
       - **#7** limit: payload ≤1MB, items ≤100, child/array ≤200 (reject ก่อน expand)
-      - **#9** idempotency: `rfq_ingest_request` PK(service,request_id)+sha256 — replay เดิม→id เดิม, payload ต่าง→conflict
+      - **#9** idempotency: `rfq_ingest_request` PK(service,request_id)+sha256 — replay เดิม→id เดิม, payload/actor ต่าง→conflict
       - FK resolve ด้วย natural key (process.component_no→component id, delivery.option_no→quantity id)
-- [x] **Codex go/no-go F1** เอา broad SELECT ของ `rfq_ingest` ออก → **create-only จริง** (T11: ไม่มี table SELECT/DML, EXECUTE แค่ create_rfq_draft)
+- [x] **Codex go/no-go F1** เอา broad SELECT ของ `rfq_ingest` ออก → **create-only จริง** (T11: ไม่มี table SELECT/DML, effective EXECUTE = [create_rfq_draft] เท่านั้น)
 - [x] **fail-closed:** v1 ปฏิเสธ `extraction_runs`/`field_evidence` ใน payload → สร้าง AI evidence โดยไม่มี provenance ไม่ได้;
       **#6** (validate run SUCCEEDED/ไม่ BLOCKED/policy allow) → v1.1 พร้อม extraction pipeline จริง
+
+**Codex 006 review commit 28cfd79 → FIX-THEN-PROCEED, พบ F1-F9 → Claude harden (commit ด้านล่าง)**
+- [x] **F2** internal ref ที่ระบุแล้ว resolve ไม่ได้ (process.component_no/delivery.option_no) → **reject 23503** (เดิมเงียบเป็น NULL) — is10a/b
+- [x] **F3** child-array limit ≤200 ครอบ **ทุก 6 arrays** (เดิมแค่ 2) ผ่าน `_child_array` helper (type+count) — is11a/b
+- [x] **F4A** idempotency concurrency: **advisory-xact-lock claim** ก่อนสร้าง tree → concurrent same key ได้ id เดียวกัน (ไม่ใช่ loser 23505) — T14
+- [x] **F4B** idempotency bind actor: replay ที่ actor ต่าง = conflict (เดิมเทียบแค่ payload) — is5c
+- [x] **F5A** corrugated ผิดชนิด = reject (เดิมข้ามเงียบ) — is12; **F5B/F7** ตัด opaque JSON (`grade_spec_snapshot`/`specification_extra`) ออกจาก draft-v1 — is13a/b
+- [x] **F8** arg length/charset limit + normalize (tab/control char/ยาวเกิน = reject) — is14a/b/c; effective allowlist: REVOKE PUBLIC จาก legacy trigger fn (owner→rfq_owner กัน trigger chain พัง) — T11 enumerate
+- [x] **F8.1** `_reject_unknown_keys`/`_child_array` เป็น SECURITY INVOKER (ลด surface); **F9** doc: "006 ไม่มี dependency ต่อ pgcrypto" (ไม่ใช่ 'เลี่ยงทั้ง repo')
+- [ ] **F1/F6 (gated)** AI-derived values ยังไม่มี provenance ใน v1 → v1 = **manual/synthetic DRAFT เท่านั้น**; ก่อนต่อ AI extractor จริงต้องทำ **ENQ v1.1** (extraction run + evidence atomic)
 - [x] payload contract → [`RFQ_DRAFT_PAYLOAD_V1.md`](RFQ_DRAFT_PAYLOAD_V1.md)
-- [x] **test**: `020` 18 + `030` 15 + `040` 15 (create_rfq_draft) + `rfq_concurrency_tests.py` **T01-T13** =
-      **61 implemented checks + 1 gated skip (T07/F7)** — T11 ingest-allowlist / T12 atomicity / T13 grant-scope เพิ่มตาม Codex;
-      รันซ้ำได้ด้วย `migrations/test/run_all.sh` (แก้ overclaim เดิม "41 green" — T07 = gated skip ไม่ใช่ test ที่รัน)
+- [x] **test**: `020` 18 + `030` 15 + `040` **26** + `rfq_concurrency_tests.py` **T01-T14** =
+      **73 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED

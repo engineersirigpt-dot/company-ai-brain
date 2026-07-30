@@ -382,7 +382,8 @@ def t10_catalog_and_policy(sup):
     """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
     svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
            'add_signoff', 'revoke_signoff', '_lock_rfq_for_input',
-           'create_rfq_draft', '_reject_unknown_keys']
+           'create_rfq_draft', '_reject_unknown_keys', '_child_array']
+    invoker_ok = {'_reject_unknown_keys', '_child_array'}   # pure helper (ไม่แตะ table) = INVOKER ตั้งใจ (Codex F8.1)
     bad = []
     for fn in svc:
         row = None
@@ -399,7 +400,9 @@ def t10_catalog_and_policy(sup):
             bad.append(f"{fn}:missing"); continue
         owner, secdef, cfg, acl_null, pub_exec = row
         if owner != 'rfq_owner': bad.append(f"{fn}:owner={owner}")
-        if secdef is not True:   bad.append(f"{fn}:prosecdef={secdef}")
+        if fn in invoker_ok:
+            if secdef is not False: bad.append(f"{fn}:expected INVOKER got prosecdef={secdef}")
+        elif secdef is not True:   bad.append(f"{fn}:prosecdef={secdef}")
         if not cfg or 'search_path=pg_catalog, rfq, pg_temp' not in cfg: bad.append(f"{fn}:proconfig={cfg}")
         # PUBLIC ต้องไม่มี EXECUTE (proacl NULL = default = PUBLIC execute ได้ = bad)
         if acl_null or pub_exec: bad.append(f"{fn}:PUBLIC-execute(acl_null={acl_null})")
@@ -409,6 +412,8 @@ def t10_catalog_and_policy(sup):
             bad.append(f"_lock:{role}-can-execute")
         if sql1(sup, "SELECT has_function_privilege(%s,'_reject_unknown_keys(jsonb,text[],text)','EXECUTE')", (role,)):
             bad.append(f"_reject_unknown_keys:{role}-can-execute")
+        if sql1(sup, "SELECT has_function_privilege(%s,'_child_array(jsonb,text,int,text)','EXECUTE')", (role,)):
+            bad.append(f"_child_array:{role}-can-execute")
     # policy spoof เชิงโครงสร้าง: mark_ready 6-arg (รับ policy version) ต้องไม่มีอยู่
     six = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND p.proname='mark_ready' AND p.pronargs=6""")
@@ -419,7 +424,7 @@ def t10_catalog_and_policy(sup):
     ver = sql1(sup, "SELECT validator_version FROM rfq_readiness_run WHERE rfq_id=%s", (f['rfq'],))
     if ver != 'pkg-minimal-v1': bad.append(f"readiness_run.validator={ver}(not trusted)")
     record('T10 catalog + policy-spoof structural', not bad, "; ".join(bad) or
-           "all 9 fns: owner=rfq_owner, secdef, pinned search_path, no PUBLIC exec; helpers hidden; no 6-arg; trusted version recorded")
+           "all 10 fns: owner=rfq_owner, definer/invoker ตามชนิด, pinned search_path, no PUBLIC exec; helpers hidden; no 6-arg; trusted version")
 
 def t11_ingest_allowlist(sup):
     """Codex go/no-go #2/F1: rfq_ingest = create-only (EXECUTE create_rfq_draft เท่านั้น, ไม่มี SELECT/DML/fn อื่น)"""
@@ -444,11 +449,12 @@ def t11_ingest_allowlist(sup):
     denied('ingest !INSERT rfq',          "INSERT INTO rfq (rfq_no,created_by_ref,updated_by_ref) VALUES ('X','a','a')")
     ing.close()
     sel = sql1(sup, "SELECT has_table_privilege('rfq_ingest','rfq.rfq','SELECT')")
-    ex_draft = sql1(sup, "SELECT has_function_privilege('rfq_ingest','create_rfq_draft(jsonb,text,text,text)','EXECUTE')")
-    ex_mr = sql1(sup, "SELECT has_function_privilege('rfq_ingest','mark_ready(uuid,int,text)','EXECUTE')")
     checks.append(('ingest table SELECT=false', sel is False, sel))
-    checks.append(('ingest EXECUTE create_rfq_draft=true', ex_draft is True, ex_draft))
-    checks.append(('ingest EXECUTE mark_ready=false', ex_mr is False, ex_mr))
+    # effective allowlist (F8): enumerate ทุก function ใน schema rfq ที่ rfq_ingest execute ได้ → ต้อง = [create_rfq_draft]
+    eff = sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p
+        JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='rfq' AND has_function_privilege('rfq_ingest', p.oid, 'EXECUTE')""")
+    checks.append(('ingest effective EXECUTE = [create_rfq_draft]', eff == ['create_rfq_draft'], eff))
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "exact allowlist: create_rfq_draft only; no other fn, no table SELECT/DML"
     record('T11 ingest exact allowlist', allok, detail)
@@ -499,12 +505,38 @@ def t13_ingest_grant_scope(sup):
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "create_rfq_draft: no PUBLIC exec, rfq_app denied, ingest-only"
     record('T13 create_rfq_draft grant scope', allok, detail)
 
+def t14_idempotency_concurrency(sup):
+    """Codex F4A: 2 conn same (service,request_id,actor,payload) → advisory lock serialize → ทั้งคู่ได้ id เดียว (ไม่ใช่ loser 23505)"""
+    A = connect(role='rfq_ingest'); B = connect(role='rfq_ingest')
+    A.autocommit = False; B.autocommit = False
+    pidA, pidB = A.info.backend_pid, B.info.backend_pid
+    curA = A.cursor(); curA.execute("SELECT create_rfq_draft(%s::jsonb,'enq-extractor','enq','tconc')", (OK_PAYLOAD,))
+    id_a = curA.fetchone()[0]                    # A สร้าง + ถือ advisory xact lock (ยังไม่ commit)
+    res = {}
+    def run_b():
+        try:
+            cb = B.cursor(); cb.execute("SELECT create_rfq_draft(%s::jsonb,'enq-extractor','enq','tconc')", (OK_PAYLOAD,))
+            res['id'] = cb.fetchone()[0]; B.commit()
+        except Exception as e:
+            res['err'] = e; B.rollback()
+    tb = threading.Thread(target=run_b); tb.start()
+    blocked = wait_blocked(sup, pidB, pidA)       # B รอ advisory lock ของ A
+    A.commit()
+    tb.join(15)
+    A.close(); B.close()
+    id_b = res.get('id')
+    n_req = sql1(sup, "SELECT count(*) FROM rfq_ingest_request WHERE request_id='tconc'")
+    n_rfq = sql1(sup, "SELECT count(*) FROM rfq WHERE id IN (SELECT rfq_id FROM rfq_ingest_request WHERE request_id='tconc')")
+    ok = blocked and res.get('err') is None and id_b == id_a and n_req == 1 and n_rfq == 1
+    record('T14 idempotency concurrency (same key→same id)', ok,
+           f"B blocked-by-A={blocked}, id_a==id_b={id_b == id_a}, B_err={getattr(res.get('err'),'pgcode',None)}, req_rows={n_req}, rfq_rows={n_rfq}")
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
              t04_role_privilege, t05_version_edge, t06_rollback, t07_idempotency, t08_clone_atomicity,
              t09_authz_separation, t10_catalog_and_policy,
-             t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope]
+             t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency]
     for t in tests:
         try:
             t(sup)

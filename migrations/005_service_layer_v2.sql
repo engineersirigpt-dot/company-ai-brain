@@ -479,4 +479,17 @@ GRANT EXECUTE ON FUNCTION resolve_clarification(uuid, text, text, text, text) TO
 GRANT EXECUTE ON FUNCTION add_signoff(uuid, text, text, text, text) TO rfq_app;
 GRANT EXECUTE ON FUNCTION revoke_signoff(uuid, text) TO rfq_app;
 
+-- ---- effective allowlist (Codex F8): เอา PUBLIC EXECUTE ออกจาก internal/trigger function เก่า (002) ----
+-- โอน owner → rfq_owner ก่อน (ให้ SECURITY DEFINER service function ที่รันเป็น rfq_owner เรียก
+--   rfq_subject_belongs_to ผ่าน subject-membership trigger ได้) แล้ว REVOKE PUBLIC
+-- trigger ยังยิงได้ (trigger ไม่ผ่าน EXECUTE privilege); app/ingest เรียก function เหล่านี้ตรง ๆ ไม่ได้อีก
+ALTER FUNCTION enforce_rfq_revision_chain()              OWNER TO rfq_owner;
+ALTER FUNCTION rfq_subject_belongs_to(uuid, text, uuid)  OWNER TO rfq_owner;
+ALTER FUNCTION enforce_rfq_subject_membership()          OWNER TO rfq_owner;
+ALTER FUNCTION enforce_estimate_link_ready()             OWNER TO rfq_owner;
+REVOKE ALL ON FUNCTION enforce_rfq_revision_chain()              FROM PUBLIC;
+REVOKE ALL ON FUNCTION rfq_subject_belongs_to(uuid, text, uuid)  FROM PUBLIC;
+REVOKE ALL ON FUNCTION enforce_rfq_subject_membership()          FROM PUBLIC;
+REVOKE ALL ON FUNCTION enforce_estimate_link_ready()             FROM PUBLIC;
+
 COMMIT;
