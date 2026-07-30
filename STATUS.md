@@ -36,8 +36,8 @@ Enquiry → RFQ → ตรวจความครบถ้วน → อนุ�
 | # | Module (คำเฮีย) | สถานะเรา | หมายเหตุ |
 |---|---|---|---|
 | 12 | **AI Knowledge Brain** ("ความทรงจำองค์กร") | ✅ **PoC รันจริง** (เหลือ hardening) | = company-ai-brain (2,263 chunks, /search มี consumer จริง, /ask ใช้ได้, RBAC ทำงาน) — **ยังไม่ production-ready**: AUTH_MODE=warn, ยังไม่มี user auth, audit/monitoring ใน backlog, /ask ส่ง context ไป Claude |
-| 02 | **RFQ** (AI RFQ Agent V1) | 🔨 **กำลังทำ** | schema v0.2 + migration + test 17/17 ผ่าน (prototype) — เหลือ service layer + ENQ→RFQ AI extraction |
-| 01 | ENQ | ⬜ ถัดจาก RFQ | AE รับ ENQ → AI กรอก RFQ (ต่อกับ Module 02) |
+| 02 | **RFQ** (AI RFQ Agent V1) | 🔨 **กำลังทำ (prototype ลึก)** | schema + service layer (005) + ENQ ingest (006) + two-phase extraction (007) + orchestration (008) — ทุก suite เขียว; **local + synthetic เท่านั้น ยังไม่ deploy** |
+| 01 | ENQ | 🔨 **PoC รันจริง (synthetic)** | `POST /enq/extractions` → durable worker → provider (mock LOCAL) → RFQ tree; provider จริง/cloud/auth จริง = increment ถัดไป (gated) |
 | 03 | AI Estimate | ⬜ ออกแบบไว้ | ต่อ RFQ → `/search`/`/ask` (SOP) + Costing deterministic (PostgreSQL, tb_master_* จริง) |
 | 11 | **Printing Doctor** (TCE + PAR) | 🟡 **ไพ่สำรอง** | **PAR-lite** (retrieval/root-cause/preventive checklist) ทำได้ด้วย Brain — แต่ต้อง **CAR สังเคราะห์/redact ก่อน** ไม่ ingest ของจริงที่มี PII/trade secret; **TCE** ต้องรอ Cost Data Contract + deterministic costing — ตัวเลขใน demo ต้องระบุชัดว่า simulated/illustrative |
 | 04–10 | Planning/Purchasing/Production/QC/Delivery/Finance/CEO Dashboard | ⬜ ยังไม่เริ่ม | roadmap เฮีย — อย่าเปิดพร้อมกัน (เฮียเองเตือน) |
@@ -387,9 +387,19 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       idempotency_conflict; `23505` จริง (unique constraint) → 422 (draft=invalid_payload, apply=invalid_extraction_result) /
       500 (begin·claim·fail ไม่ควรเกิด). regression 4 กลุ่มครบ (040 is5b/c/d, 050 es32/33/34, mapper units)
       → migration suite เขียว (**040 27→28, 050 33→36**, harness 19) + **API 46→50 เทสต์เขียว**
-      → **gate ก่อน extraction orchestration ปิดครบ** (F1+F1.1+H1+M1 + regression) — รอ Codex confirm F1.1 (CODEX_INBOX)
-      → ถัดไป (หลัง confirm): extraction endpoints ผ่าน internal-worker pattern (public POST /enq/extractions → begin+202 →
-      durable worker แยก process claim → provider นอก DB txn → apply/fail; คืน `lease_expires_at` จาก claim), auth จริง (JWT/Keycloak→principal→actor)
+      → **F1.1 = CLOSED (Codex GO `a3d20e0`)** — เริ่ม extraction orchestration ได้
+- [x] **extraction orchestration slice (commit `63d07bd`) — Codex GO, internal-worker pattern เสร็จ**
+      `POST /enq/extractions` (auth, router-wide) → server policy (LOCAL/typhoon/v1/enq) → `begin_rfq_extraction` (txn สั้น) →
+      **`202`** durable run; client ส่งแค่ `source_ingest_id`+correlation, `extra=forbid` กัน forge actor/provider/lease;
+      response ไม่เผย lease/ref/hash. `GET /enq/extractions/{run_id}` = `get_extraction_status` (projection ปลอดภัย)
+      **durable worker** (`enq_api/worker.py`, process แยก **ไม่ใช่ BackgroundTasks**): `list_claimable_extractions` →
+      claim (txn สั้น commit) → **provider นอก DB txn** (เฉพาะ should_execute=true) → apply/fail (txn ใหม่);
+      apply/fail request_id stable ต่อ lease (retry idempotent); lease หมด → reclaim + old-lease fenced (RFS01)
+      **provider สังเคราะห์** (`provider.py`, LOCAL mock, ไม่เรียก cloud/ข้อมูลจริง); **008** = list_claimable (EXECUTE rfq_ingest)
+      + get_extraction_status (EXECUTE rfq_app), definer/owner rfq_owner/pinned/no PUBLIC; 007 claim คืน `lease_expires_at`
+      → migration suite เขียว (040 28, 050 36, **harness T01-T18 19** — T10/T11 รวม fn ใหม่) + API 50 + **orchestration 21/21**
+      (Codex acceptance checklist ครบ) — รอ Codex review เส้นทาง endpoint→worker→provider→apply/fail (CODEX_INBOX)
+      → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
