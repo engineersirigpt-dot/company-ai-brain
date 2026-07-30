@@ -2,9 +2,9 @@
 # ephemeral PostgreSQL 16 + migrations + login roles → รัน enq_api/test_api.py (Codex H5)
 # ใช้: PY=/path/to/python bash enq_api/run_api_tests.sh   (รันจาก repo root)
 set -euo pipefail
-PORT="${APITEST_PORT:-5468}"
-NAME=rfq_apitest
-docker rm -f "$NAME" >/dev/null 2>&1 || true
+# M2: container/port ต่อ process — สอง run พร้อมกันไม่ฆ่ากัน (ไม่ rm ชื่อคงที่)
+PORT="${APITEST_PORT:-$((5400 + ($$ % 150)))}"
+NAME="rfq_apitest_$$"
 docker run -d --name "$NAME" -e POSTGRES_PASSWORD=test -e POSTGRES_DB=rfqtest -p "${PORT}:5432" postgres:16 >/dev/null
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
