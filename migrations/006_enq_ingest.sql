@@ -160,7 +160,7 @@ BEGIN
         IF v_existing_hash = v_hash AND v_existing_actor = p_actor THEN
             RETURN v_existing_id;                       -- replay เดิม (payload+actor ตรง) → id เดิม
         ELSE
-            RAISE EXCEPTION 'request_id "%" ถูกใช้ซ้ำด้วย payload/actor ต่าง (conflict)', p_request_id USING ERRCODE = '23505';
+            RAISE EXCEPTION 'request_id "%" ถูกใช้ซ้ำด้วย payload/actor ต่าง (conflict)', p_request_id USING ERRCODE = 'RFI01';
         END IF;
     END IF;
 

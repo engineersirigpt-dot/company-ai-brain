@@ -167,9 +167,11 @@ REVOKE ALL ON rfq_source_ingest, rfq_ai_provider, rfq_redaction_attestation,
 --   RFN01  run_not_found          (404) — claim/apply/fail: run_id ไม่พบ
 --   RFR01  invalid_extraction_result (422) — apply: evidence completeness/derivation/inference
 --                                            หรือ provider result อ้าง ref ที่ resolve ไม่ได้
+--   RFI01  idempotency_conflict   (409) — explicit ledger conflict (request_id ซ้ำด้วย payload/actor ต่าง)
 --   23503  begin input ไม่พบ (source/provider/attestation/approval) → transport map 422 invalid_request
---   22023  invalid input value    (422) · 23505 idempotency conflict (409) · 54000 payload limit (413)
--- apply ใช้ RF* เพราะ 23514/23503 เดิมกำกวม (state-vs-result / run-vs-ref อยู่ op เดียวกัน)
+--   22023  invalid input value    (422) · 54000 payload limit (413)
+--   23505  = duplicate business key จริง (unique constraint) → transport map 422 (draft/apply) ไม่ใช่ idempotency
+-- apply ใช้ RF* เพราะ 23514/23503/23505 เดิมกำกวม (state-vs-result / run-vs-ref / idem-vs-dupkey อยู่ op เดียวกัน)
 -- ============================================================================
 
 -- ---- helper: normalize+validate trusted args (เหมือน create_rfq_draft) ----
@@ -290,7 +292,7 @@ BEGIN
         FROM rfq_extraction_request WHERE service=p_service AND operation_code='BEGIN' AND request_id=p_request_id;
     IF FOUND THEN
         IF v_prev_hash=v_reqhash AND v_prev_actor=p_actor THEN RETURN v_prev;
-        ELSE RAISE EXCEPTION 'BEGIN request_id ซ้ำด้วย payload/actor ต่าง' USING ERRCODE='23505'; END IF;
+        ELSE RAISE EXCEPTION 'BEGIN request_id ซ้ำด้วย payload/actor ต่าง' USING ERRCODE='RFI01'; END IF;
     END IF;
 
     -- C1: trusted ref ไม่พบ = reject 23503 (ไม่สร้าง shell); provider ไม่พบ = 23503
@@ -365,7 +367,7 @@ BEGIN
         FROM rfq_extraction_request WHERE service=p_service AND operation_code='CLAIM' AND request_id=p_request_id;
     IF FOUND THEN
         IF v_prev_hash=v_reqhash AND v_prev_actor=p_worker THEN RETURN v_prev;   -- exact replay (คืนก่อนตรวจ lease/status)
-        ELSE RAISE EXCEPTION 'CLAIM request_id ซ้ำด้วย run/worker ต่าง' USING ERRCODE='23505'; END IF;
+        ELSE RAISE EXCEPTION 'CLAIM request_id ซ้ำด้วย run/worker ต่าง' USING ERRCODE='RFI01'; END IF;
     END IF;
 
     -- lock order: parent rfq → run
@@ -434,7 +436,7 @@ BEGIN
         FROM rfq_extraction_request WHERE service=p_service AND operation_code='FAIL' AND request_id=p_request_id;
     IF FOUND THEN   -- ledger-first (คืนก่อนตรวจ lease/status)
         IF v_prev_hash=v_reqhash AND v_prev_actor=p_actor THEN RETURN v_prev;
-        ELSE RAISE EXCEPTION 'FAIL request_id ซ้ำด้วย run/actor ต่าง' USING ERRCODE='23505'; END IF;
+        ELSE RAISE EXCEPTION 'FAIL request_id ซ้ำด้วย run/actor ต่าง' USING ERRCODE='RFI01'; END IF;
     END IF;
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
@@ -517,7 +519,7 @@ BEGIN
         FROM rfq_extraction_request WHERE service=p_service AND operation_code='APPLY' AND request_id=p_request_id;
     IF FOUND THEN
         IF v_prev_hash=v_reqhash AND v_prev_actor=p_actor THEN RETURN v_prev;
-        ELSE RAISE EXCEPTION 'APPLY request_id ซ้ำด้วย payload/actor ต่าง' USING ERRCODE='23505'; END IF;
+        ELSE RAISE EXCEPTION 'APPLY request_id ซ้ำด้วย payload/actor ต่าง' USING ERRCODE='RFI01'; END IF;
     END IF;
 
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;

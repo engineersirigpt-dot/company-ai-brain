@@ -70,11 +70,16 @@ BEGIN
     BEGIN
         PERFORM create_rfq_draft(p_ok || '{"header":{"enquiry_ref":"CHANGED"}}'::jsonb, 'enq-extractor', 'enq', 'r1');
         RAISE NOTICE 'FAIL is5b: request reuse with different payload allowed'; fail:=fail+1;
-    EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'PASS is5b: same request + different payload → conflict'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFI01' THEN RAISE NOTICE 'PASS is5b: same request + different payload → RFI01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is5b %',SQLERRM; fail:=fail+1; END IF; END;
     BEGIN
         PERFORM create_rfq_draft(p_ok, 'different-actor', 'enq', 'r1');   -- payload เดิม แต่ actor ต่าง
         RAISE NOTICE 'FAIL is5c: request reuse with different actor allowed'; fail:=fail+1;
-    EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'PASS is5c: same request + different actor → conflict (F4B)'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFI01' THEN RAISE NOTICE 'PASS is5c: same request + different actor → RFI01 (F4B)'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is5c %',SQLERRM; fail:=fail+1; END IF; END;
+    -- ST5d (F1.1): duplicate business key (line_no ซ้ำ) = unique violation จริง → 23505 (ไม่ใช่ RFI01)
+    BEGIN
+        PERFORM create_rfq_draft('{"schema_version":"draft-v1","items":[{"line_no":1,"job_name":"a"},{"line_no":1,"job_name":"b"}]}'::jsonb, 'enq-extractor', 'enq', 'r1-dup');
+        RAISE NOTICE 'FAIL is5d: duplicate line_no allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='23505' THEN RAISE NOTICE 'PASS is5d: duplicate line_no → 23505 (real unique, not RFI01)'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is5d %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ST6: item-count limit (>100) → reject ก่อน expand
     BEGIN

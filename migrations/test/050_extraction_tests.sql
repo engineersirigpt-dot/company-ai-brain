@@ -242,6 +242,28 @@ BEGIN
         RAISE NOTICE 'FAIL es31: apply wrong-lease allowed'; fail:=fail+1;
     EXCEPTION WHEN others THEN IF SQLSTATE='RFS01' THEN RAISE NOTICE 'PASS es31: apply wrong lease → RFS01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es31 %',SQLERRM; fail:=fail+1; END IF; END;
 
+    -- ES32 (F1.1): apply request_id เดิม + payload ต่าง → RFI01 (explicit ledger conflict ≠ dup key)
+    v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b32')->>'run_id')::uuid;
+    v_lease := (claim_rfq_extraction(v_run,'w1','enq','c32')->>'lease_token')::uuid;
+    PERFORM apply_rfq_extraction(v_run,v_lease,p_ok,'w1','enq','a32');
+    BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"DIFF"}}],"evidence":[]}')::jsonb,'w1','enq','a32');
+        RAISE NOTICE 'FAIL es32: replay diff payload allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFI01' THEN RAISE NOTICE 'PASS es32: apply request_id ซ้ำ payload ต่าง → RFI01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es32 %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ES33 (F1.1): apply มี line_no ซ้ำ → 23505 (duplicate business key = invalid result, mapper→422 ไม่ใช่ RFI01)
+    v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b33')->>'run_id')::uuid;
+    v_lease := (claim_rfq_extraction(v_run,'w1','enq','c33')->>'lease_token')::uuid;
+    BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"a"}},{"line_no":1,"fields":{"job_name":"b"}}],"evidence":[]}')::jsonb,'w1','enq','a33');
+        RAISE NOTICE 'FAIL es33: duplicate line_no allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='23505' THEN RAISE NOTICE 'PASS es33: apply dup line_no → 23505 (real unique)'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es33 %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ES34 (F1.1): apply มี option_no ซ้ำใน item → 23505 (natural child key ซ้ำ)
+    v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b34')->>'run_id')::uuid;
+    v_lease := (claim_rfq_extraction(v_run,'w1','enq','c34')->>'lease_token')::uuid;
+    BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"a"},"quantity_options":[{"option_no":1,"fields":{"quantity":100}},{"option_no":1,"fields":{"quantity":200}}]}],"evidence":[]}')::jsonb,'w1','enq','a34');
+        RAISE NOTICE 'FAIL es34: duplicate option_no allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='23505' THEN RAISE NOTICE 'PASS es34: apply dup option_no → 23505 (natural child key)'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es34 %',SQLERRM; fail:=fail+1; END IF; END;
+
     RAISE NOTICE '========= EXTRACTION RESULT: % passed, % failed =========', pass, fail;
     IF fail>0 THEN RAISE EXCEPTION 'EXTRACTION TESTS FAILED: %', fail; END IF;
 END $$;

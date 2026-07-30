@@ -49,7 +49,7 @@ curl -X POST localhost:8090/enq/draft -H 'Content-Type: application/json' \
 ## tests
 
 ```bash
-# ephemeral PG (loopback + Docker-assigned port ต่อ process) + migrations + login roles → test_api.py (46 checks)
+# ephemeral PG (loopback + Docker-assigned port ต่อ process) + migrations + login roles → test_api.py (50 checks)
 PY=/path/to/python bash enq_api/run_api_tests.sh
 ```
 ครอบ: auth ทุก route + wrong-key + non-ASCII-key + startup fail-closed + no dev-bypass, idempotency required/replay/conflict,
@@ -69,7 +69,8 @@ oversize + multi-frame + disconnect (middleware), schema_version required, login
 
 error mapping ครบ → ดู [`ENQ_EXTRACTION_ERROR_TAXONOMY.md`](../ENQ_EXTRACTION_ERROR_TAXONOMY.md):
 `RFS01`→`409 state_conflict`, `RFN01`→`404 run_not_found`, `RFR01`→`422 invalid_extraction_result`,
-`23505`→`409 idempotency_conflict`, class`22`/`235xx`→`422` (label ตาม op), `54000`→`413`, transient→`503`, อื่น→`500`
+`RFI01`→`409 idempotency_conflict` (ledger), `23505` dup-business-key→`422` (draft/apply) / `500` (begin·claim·fail),
+class`22`/`235xx`→`422` (label ตาม op), `54000`→`413`, transient→`503`, อื่น→`500`
 
 ## ยังไม่ทำ (increment ถัดไป)
 - **begin/claim/apply/fail** (AI extraction path) — ต้อง seed trusted tables + mock provider loop + `provider_input_ref`/`should_execute` handling (guardrails #6-8)

@@ -144,10 +144,12 @@ def _http_for_pg(op: str, code: str | None) -> tuple[int, str]:
         return 404, "run_not_found"
     if code == "RFR01":                                        # apply: invalid provider result (evidence/derivation/ref)
         return 422, "invalid_extraction_result"
-    if code == "23505":                                        # idempotency key reused / unique violation
+    if code == "RFI01":                                        # explicit ledger conflict (request_id ซ้ำ payload/actor ต่าง)
         return 409, "idempotency_conflict"
     if code == "54000":                                        # program-limit (size/collection cap)
         return 413, "payload_too_large"
+    if code == "23505":                                        # real unique violation = duplicate business key (ไม่ใช่ ledger)
+        return (422, _INVALID_LABEL.get(op, "invalid_request")) if op in ("draft", "apply") else (500, "internal_error")
     if cls == "22" or code in ("23502", "23503", "23514"):     # data-exception / not-null / FK / check → invalid input
         return 422, _INVALID_LABEL.get(op, "invalid_request")
     return 500, "internal_error"
