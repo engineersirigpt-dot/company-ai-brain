@@ -182,6 +182,69 @@ END;
 $$;
 ALTER FUNCTION _norm_ctx(text, text, text) OWNER TO rfq_owner;
 
+-- ---- helper: egress decision (logic เดียว ใช้ทั้ง begin และ claim — B3.2 กัน policy drift) ----
+-- resolve จาก trusted state ปัจจุบัน → total decision + authorized artifact/hash
+-- att/apr not-found = 23503 (bad reference; ที่ claim เป็น FK จึงไม่เกิด); policy fail = BLOCKED
+-- p_min_valid = att/apr.expires_at ต้อง >= ค่านี้ (begin=now(), claim=now()+lease window)
+CREATE OR REPLACE FUNCTION _egress_decide(
+    p_src rfq_source_ingest, p_prov rfq_ai_provider, p_target text, p_purpose text,
+    p_att_id uuid, p_apr_id uuid, p_min_valid timestamptz
+) RETURNS jsonb LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = pg_catalog, rfq, pg_temp AS $$
+DECLARE
+    att rfq_redaction_attestation%ROWTYPE; apr rfq_egress_approval%ROWTYPE;
+    v_dec text; v_blk text := NULL; v_ref text := NULL; v_hash char(64) := NULL;
+    v_red boolean := false; v_manifest jsonb := '{}'::jsonb; v_exc_by text := NULL; v_exc_reason text := NULL;
+    v_att_id uuid := NULL; v_apr_id uuid := NULL;
+BEGIN
+    IF NOT p_src.is_active OR p_src.revoked_at IS NOT NULL THEN v_blk:='source revoked/inactive';
+    ELSIF p_src.malware_scan_status <> 'CLEAN' THEN v_blk:='malware='||p_src.malware_scan_status;
+    ELSIF p_src.classification_status <> 'CONFIRMED' THEN v_blk:='classification_status='||p_src.classification_status;
+    ELSIF p_src.classification_code = 'UNCLASSIFIED' THEN v_blk:='classification=UNCLASSIFIED';
+    ELSIF p_src.contains_personal_data IS NULL OR p_src.contains_trade_secret IS NULL THEN v_blk:='privacy flags incomplete';
+    ELSIF NOT p_prov.is_active THEN v_blk:='provider inactive';
+    ELSIF p_prov.execution_target IS DISTINCT FROM p_target THEN v_blk:='provider target mismatch';
+    ELSIF p_prov.policy_version IS DISTINCT FROM p_src.policy_version THEN v_blk:='policy version mismatch';
+    END IF;
+
+    IF v_blk IS NOT NULL THEN v_dec:='BLOCKED';
+    ELSIF p_target='CLOUD' AND p_src.cloud_action_code IN ('BLOCK','LOCAL_ONLY') THEN
+        v_dec:='BLOCKED'; v_blk:='cloud_action='||p_src.cloud_action_code;
+    ELSIF p_target='CLOUD' AND p_src.cloud_action_code='REDACT' THEN
+        IF p_att_id IS NULL THEN v_dec:='BLOCKED'; v_blk:='REDACT ต้องมี attestation';
+        ELSE
+            SELECT * INTO att FROM rfq_redaction_attestation WHERE id=p_att_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'attestation % ไม่พบ', p_att_id USING ERRCODE='23503'; END IF;
+            IF NOT att.is_active OR att.revoked_at IS NOT NULL OR att.expires_at < p_min_valid
+               OR att.source_ingest_id IS DISTINCT FROM p_src.id OR att.source_sha256 IS DISTINCT FROM p_src.source_sha256
+               OR att.purpose_code IS DISTINCT FROM p_purpose THEN
+                v_dec:='BLOCKED'; v_blk:='attestation invalid';
+            ELSE v_dec:='REDACTED_ALLOW'; v_ref:=att.redacted_object_store_key; v_hash:=att.redacted_sha256;
+                 v_red:=true; v_manifest:=att.redaction_manifest; v_att_id:=att.id; END IF;
+        END IF;
+    ELSIF p_target='CLOUD' AND p_src.cloud_action_code='ALLOW' THEN
+        IF p_apr_id IS NULL THEN v_dec:='BLOCKED'; v_blk:='ALLOW ต้องมี approval';
+        ELSE
+            SELECT * INTO apr FROM rfq_egress_approval WHERE id=p_apr_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'approval % ไม่พบ', p_apr_id USING ERRCODE='23503'; END IF;
+            IF NOT apr.is_active OR apr.revoked_at IS NOT NULL OR apr.expires_at < p_min_valid
+               OR apr.source_ingest_id IS DISTINCT FROM p_src.id OR apr.provider_code IS DISTINCT FROM p_prov.provider_code
+               OR apr.model_code IS DISTINCT FROM p_prov.model_code OR apr.purpose_code IS DISTINCT FROM p_purpose THEN
+                v_dec:='BLOCKED'; v_blk:='approval invalid';
+            ELSE v_dec:='APPROVED_EXCEPTION'; v_ref:=p_src.object_store_key; v_hash:=p_src.source_sha256;
+                 v_exc_by:=apr.approved_by_ref; v_exc_reason:=apr.reason; v_apr_id:=apr.id; END IF;
+        END IF;
+    ELSIF p_target='LOCAL' THEN
+        v_dec:='LOCAL_ONLY'; v_ref:=p_src.object_store_key; v_hash:=p_src.source_sha256;
+    ELSE v_dec:='BLOCKED'; v_blk:='no matching egress branch';
+    END IF;
+
+    RETURN jsonb_build_object('decision',v_dec,'input_ref',v_ref,'input_sha256',v_hash,'redaction_applied',v_red,
+        'manifest',v_manifest,'exc_by',v_exc_by,'exc_reason',v_exc_reason,'att_id',v_att_id,'apr_id',v_apr_id,'blocked_reason',v_blk);
+END;
+$$;
+ALTER FUNCTION _egress_decide(rfq_source_ingest, rfq_ai_provider, text, text, uuid, uuid, timestamptz) OWNER TO rfq_owner;
+
 -- ---- begin_rfq_extraction: resolve trusted → egress decision → shell+attachment+run ----
 CREATE OR REPLACE FUNCTION begin_rfq_extraction(
     p_source_ingest_id uuid, p_target text, p_provider_code text, p_model_code text, p_purpose_code text,
@@ -198,10 +261,14 @@ DECLARE
     v_red_applied boolean := false; v_manifest jsonb := '{}'::jsonb;
     v_exc_by text := NULL; v_exc_reason text := NULL; v_att_id uuid := NULL; v_apr_id uuid := NULL;
     v_rfq uuid; v_run uuid; v_att uuid; v_reqhash char(64); v_prev jsonb; v_prev_hash char(64); v_prev_actor text;
-    hdr jsonb;
+    hdr jsonb; v_ej jsonb;
 BEGIN
     SELECT * INTO p_actor, p_service, p_request_id FROM _norm_ctx(p_actor, p_service, p_request_id);
     IF p_target NOT IN ('LOCAL','CLOUD') THEN RAISE EXCEPTION 'target ต้อง LOCAL|CLOUD' USING ERRCODE='22023'; END IF;
+    -- B3.1: purpose ต้อง non-blank / no control char / ≤100 (กัน NULL bypass purpose binding)
+    IF NULLIF(btrim(p_purpose_code, E' \t\n\r\f\v'), '') IS NULL
+       OR length(p_purpose_code)>100 OR p_purpose_code ~ '[[:cntrl:]]' THEN
+        RAISE EXCEPTION 'purpose_code ต้อง non-blank / no control char / ≤100' USING ERRCODE='22023'; END IF;
     hdr := COALESCE(p_correlation, '{}'::jsonb);
     PERFORM _reject_unknown_keys(hdr, c_corr, 'correlation');
 
@@ -223,48 +290,13 @@ BEGIN
     SELECT * INTO prov FROM rfq_ai_provider WHERE provider_code=p_provider_code AND model_code=p_model_code;
     IF NOT FOUND THEN RAISE EXCEPTION 'provider %/% ไม่พบ', p_provider_code, p_model_code USING ERRCODE='23503'; END IF;
 
-    -- egress decision (total §5) — precondition ก่อน (แถว 1)
-    IF NOT src.is_active OR src.revoked_at IS NOT NULL THEN v_blk:='source revoked/inactive';
-    ELSIF src.malware_scan_status <> 'CLEAN' THEN v_blk:='malware='||src.malware_scan_status;
-    ELSIF src.classification_status <> 'CONFIRMED' THEN v_blk:='classification_status='||src.classification_status;
-    ELSIF src.classification_code = 'UNCLASSIFIED' THEN v_blk:='classification=UNCLASSIFIED';
-    ELSIF src.contains_personal_data IS NULL OR src.contains_trade_secret IS NULL THEN v_blk:='privacy flags incomplete';
-    ELSIF NOT prov.is_active THEN v_blk:='provider inactive';
-    ELSIF prov.execution_target <> p_target THEN v_blk:='provider target mismatch';
-    ELSIF prov.policy_version <> src.policy_version THEN v_blk:='policy version mismatch';
-    END IF;
-
-    IF v_blk IS NOT NULL THEN v_dec:='BLOCKED';
-    ELSIF p_target='CLOUD' AND src.cloud_action_code IN ('BLOCK','LOCAL_ONLY') THEN
-        v_dec:='BLOCKED'; v_blk:='cloud_action='||src.cloud_action_code;
-    ELSIF p_target='CLOUD' AND src.cloud_action_code='REDACT' THEN
-        IF p_attestation_id IS NULL THEN v_dec:='BLOCKED'; v_blk:='REDACT ต้องมี attestation';
-        ELSE
-            SELECT * INTO att FROM rfq_redaction_attestation WHERE id=p_attestation_id;
-            IF NOT FOUND THEN RAISE EXCEPTION 'attestation % ไม่พบ', p_attestation_id USING ERRCODE='23503'; END IF;
-            IF NOT att.is_active OR att.revoked_at IS NOT NULL OR att.expires_at <= now()
-               OR att.source_ingest_id <> src.id OR att.source_sha256 <> src.source_sha256
-               OR att.purpose_code <> p_purpose_code THEN   -- B3: bind purpose
-                v_dec:='BLOCKED'; v_blk:='attestation invalid';
-            ELSE v_dec:='REDACTED_ALLOW'; v_ref:=att.redacted_object_store_key; v_hash:=att.redacted_sha256;
-                 v_red_applied:=true; v_manifest:=att.redaction_manifest; v_att_id:=att.id; END IF;
-        END IF;
-    ELSIF p_target='CLOUD' AND src.cloud_action_code='ALLOW' THEN
-        IF p_approval_id IS NULL THEN v_dec:='BLOCKED'; v_blk:='ALLOW ต้องมี approval';
-        ELSE
-            SELECT * INTO apr FROM rfq_egress_approval WHERE id=p_approval_id;
-            IF NOT FOUND THEN RAISE EXCEPTION 'approval % ไม่พบ', p_approval_id USING ERRCODE='23503'; END IF;
-            IF NOT apr.is_active OR apr.revoked_at IS NOT NULL OR apr.expires_at <= now()
-               OR apr.source_ingest_id <> src.id OR apr.provider_code <> p_provider_code
-               OR apr.model_code <> p_model_code OR apr.purpose_code <> p_purpose_code THEN
-                v_dec:='BLOCKED'; v_blk:='approval invalid';
-            ELSE v_dec:='APPROVED_EXCEPTION'; v_ref:=src.object_store_key; v_hash:=src.source_sha256;
-                 v_exc_by:=apr.approved_by_ref; v_exc_reason:=apr.reason; v_apr_id:=apr.id; END IF;
-        END IF;
-    ELSIF p_target='LOCAL' THEN
-        v_dec:='LOCAL_ONLY'; v_ref:=src.object_store_key; v_hash:=src.source_sha256;
-    ELSE v_dec:='BLOCKED'; v_blk:='no matching egress branch';
-    END IF;
+    -- egress decision ผ่าน helper เดียว (ใช้ชุดเดียวกับ claim — B3.2 กัน policy drift); min_valid=now() ที่ begin
+    v_ej := _egress_decide(src, prov, p_target, p_purpose_code, p_attestation_id, p_approval_id, now());
+    v_dec := v_ej->>'decision'; v_blk := v_ej->>'blocked_reason';
+    v_ref := v_ej->>'input_ref'; v_hash := v_ej->>'input_sha256';
+    v_red_applied := (v_ej->>'redaction_applied')::boolean; v_manifest := v_ej->'manifest';
+    v_exc_by := v_ej->>'exc_by'; v_exc_reason := v_ej->>'exc_reason';
+    v_att_id := (v_ej->>'att_id')::uuid; v_apr_id := (v_ej->>'apr_id')::uuid;
 
     -- สร้าง shell (DRAFT header-only) + attachment (copy trusted) + run
     INSERT INTO rfq (rfq_number_source, revision_no, is_current, status_code, row_version,
@@ -315,7 +347,7 @@ DECLARE
     r rfq_ai_extraction_run%ROWTYPE; src rfq_source_ingest%ROWTYPE; prov rfq_ai_provider%ROWTYPE;
     att rfq_redaction_attestation%ROWTYPE; apr rfq_egress_approval%ROWTYPE;
     v_blk text := NULL; v_lease uuid; v_out jsonb; v_prev jsonb; v_prev_hash char(64); v_prev_actor text; v_reqhash char(64);
-    v_lease_exp timestamptz;
+    v_lease_exp timestamptz; v_ej jsonb;
 BEGIN
     SELECT * INTO p_worker, p_service, p_request_id FROM _norm_ctx(p_worker, p_service, p_request_id);
     v_reqhash := encode(sha256((p_run_id::text)::bytea),'hex');
@@ -341,30 +373,22 @@ BEGIN
         RAISE EXCEPTION 'claim ทำได้เฉพาะ PENDING/expired-RUNNING (พบ %)', r.status_code USING ERRCODE='23514';
     END IF;
 
-    -- R1: revalidate trusted state ตอน claim (source/provider/attestation/approval + policy + expiry ครอบ lease)
+    -- R1/B3.2: re-evaluate egress ด้วย helper เดียว (min_valid ครอบ lease window) แล้วเทียบกับ run snapshot
+    -- → จับ policy/cloud_action/attestation/approval/purpose drift หลัง begin ครบในชุดเดียว (ไม่มี logic ซ้ำ)
     v_lease_exp := now() + make_interval(mins => c_lease_min);
     SELECT * INTO src FROM rfq_source_ingest WHERE id=r.source_ingest_id;
     SELECT * INTO prov FROM rfq_ai_provider WHERE provider_code=r.provider_name AND model_code=r.model_name;
-    IF src.id IS NULL OR NOT src.is_active OR src.revoked_at IS NOT NULL OR src.malware_scan_status<>'CLEAN'
-       OR src.classification_status<>'CONFIRMED' OR src.classification_code='UNCLASSIFIED'
-       OR src.contains_personal_data IS NULL OR src.contains_trade_secret IS NULL THEN v_blk:='source state invalid at claim';
-    ELSIF prov.provider_code IS NULL OR NOT prov.is_active OR prov.execution_target<>r.execution_target
-          OR prov.policy_version<>src.policy_version THEN v_blk:='provider invalid at claim';
-    ELSIF r.egress_decision_code='REDACTED_ALLOW' THEN
-        -- B3: re-bind attestation ครบทุก field กับ snapshot ใน run (กัน trusted record ถูกแก้หลัง begin)
-        SELECT * INTO att FROM rfq_redaction_attestation WHERE id=r.redaction_attestation_id;
-        IF att.id IS NULL OR NOT att.is_active OR att.revoked_at IS NOT NULL OR att.expires_at < v_lease_exp
-           OR att.source_ingest_id <> r.source_ingest_id OR att.source_sha256 <> src.source_sha256
-           OR att.redacted_sha256 <> r.input_sha256 OR att.redacted_object_store_key <> r.provider_input_ref
-           OR att.purpose_code <> r.purpose_code THEN
-            v_blk:='attestation invalid/mutated/expiring before lease'; END IF;
-    ELSIF r.egress_decision_code='APPROVED_EXCEPTION' THEN
-        SELECT * INTO apr FROM rfq_egress_approval WHERE id=r.egress_approval_id;
-        IF apr.id IS NULL OR NOT apr.is_active OR apr.revoked_at IS NOT NULL OR apr.expires_at < v_lease_exp
-           OR apr.source_ingest_id <> r.source_ingest_id OR apr.provider_code <> r.provider_name
-           OR apr.model_code <> r.model_name OR apr.purpose_code <> r.purpose_code THEN
-            v_blk:='approval invalid/mutated/expiring before lease'; END IF;
-    ELSIF r.egress_decision_code='BLOCKED' THEN v_blk:='run already blocked at begin';
+    IF src.id IS NULL THEN v_blk:='source missing at claim';
+    ELSIF prov.provider_code IS NULL THEN v_blk:='provider missing at claim';
+    ELSE
+        v_ej := _egress_decide(src, prov, r.execution_target, r.purpose_code,
+                               r.redaction_attestation_id, r.egress_approval_id, v_lease_exp);
+        IF (v_ej->>'decision') IS DISTINCT FROM r.egress_decision_code
+           OR (v_ej->>'input_sha256') IS DISTINCT FROM r.input_sha256
+           OR (v_ej->>'input_ref') IS DISTINCT FROM r.provider_input_ref
+           OR (v_ej->>'decision') = 'BLOCKED' THEN
+            v_blk := COALESCE(v_ej->>'blocked_reason', 'egress state changed since begin');
+        END IF;
     END IF;
 
     IF v_blk IS NOT NULL THEN
@@ -745,6 +769,7 @@ CREATE TRIGGER trg_rfq_block_ready_open_extraction
 -- ---- grants: EXECUTE เฉพาะ rfq_ingest; helper hidden ----
 REVOKE ALL ON FUNCTION _norm_ctx(text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION _ext_collect(jsonb,text,uuid,jsonb,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION _egress_decide(rfq_source_ingest, rfq_ai_provider, text, text, uuid, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION rfq_block_ready_open_extraction() FROM PUBLIC;   -- trigger fn: ไม่ให้โผล่ใน effective allowlist
 REVOKE ALL ON FUNCTION _resolve_subject(uuid,uuid,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION begin_rfq_extraction(uuid,text,text,text,text,uuid,uuid,jsonb,text,text,text) FROM PUBLIC;

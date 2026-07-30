@@ -198,6 +198,33 @@ BEGIN
         RAISE NOTICE 'FAIL es25: blocked shell → Ready allowed'; fail:=fail+1;
     EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es25: blocked shell → Ready blocked (H1)'; pass:=pass+1; END;
 
+    -- ES26 (B3.1): purpose NULL / '' / whitespace → reject (กัน bypass purpose binding)
+    BEGIN PERFORM begin_rfq_extraction(s_cloud_r,'CLOUD','claude','v1',NULL,att,NULL,'{}'::jsonb,'w','enq','b26a');
+        RAISE NOTICE 'FAIL es26a: NULL purpose allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS es26a: NULL purpose → reject'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es26a %',SQLERRM; fail:=fail+1; END IF; END;
+    BEGIN PERFORM begin_rfq_extraction(s_cloud_r,'CLOUD','claude','v1','   ',att,NULL,'{}'::jsonb,'w','enq','b26b');
+        RAISE NOTICE 'FAIL es26b: blank purpose allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS es26b: blank purpose → reject'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es26b %',SQLERRM; fail:=fail+1; END IF; END;
+    -- purpose ที่ตรงกับ attestation (att.purpose='enq') ต้องผ่านปกติ (ยืนยันไม่ over-block)
+    IF begin_rfq_extraction(s_cloud_r,'CLOUD','claude','v1','enq',att,NULL,'{}'::jsonb,'w','enq','b26c')->>'egress_decision_code'='REDACTED_ALLOW'
+    THEN RAISE NOTICE 'PASS es26c: valid purpose ยังผ่าน REDACTED_ALLOW'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es26c'; fail:=fail+1; END IF;
+
+    -- ES27 (B3.2): cloud_action drift REDACT→BLOCK หลัง begin → claim ต้อง BLOCKED (re-evaluate)
+    v_run := (begin_rfq_extraction(s_cloud_r,'CLOUD','claude','v1','enq',att,NULL,'{}'::jsonb,'w','enq','b27')->>'run_id')::uuid;
+    UPDATE rfq_source_ingest SET cloud_action_code='BLOCK' WHERE id=s_cloud_r;
+    v_res := claim_rfq_extraction(v_run,'w1','enq','c27');
+    IF v_res->>'should_execute'='false' AND v_res->>'status'='BLOCKED'
+    THEN RAISE NOTICE 'PASS es27: cloud_action REDACT→BLOCK หลัง begin → claim BLOCKED (B3.2)'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es27 %',v_res; fail:=fail+1; END IF;
+    UPDATE rfq_source_ingest SET cloud_action_code='REDACT' WHERE id=s_cloud_r;
+
+    -- ES28 (B3.2): provider inactive หลัง begin → claim BLOCKED
+    v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b28')->>'run_id')::uuid;
+    UPDATE rfq_ai_provider SET is_active=false WHERE provider_code='typhoon';
+    v_res := claim_rfq_extraction(v_run,'w1','enq','c28');
+    IF v_res->>'should_execute'='false' AND v_res->>'status'='BLOCKED'
+    THEN RAISE NOTICE 'PASS es28: provider disabled หลัง begin → claim BLOCKED'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es28 %',v_res; fail:=fail+1; END IF;
+    UPDATE rfq_ai_provider SET is_active=true WHERE provider_code='typhoon';
+
     RAISE NOTICE '========= EXTRACTION RESULT: % passed, % failed =========', pass, fail;
     IF fail>0 THEN RAISE EXCEPTION 'EXTRACTION TESTS FAILED: %', fail; END IF;
 END $$;

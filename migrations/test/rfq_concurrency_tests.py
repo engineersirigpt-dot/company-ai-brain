@@ -384,7 +384,7 @@ def t10_catalog_and_policy(sup):
            'add_signoff', 'revoke_signoff', '_lock_rfq_for_input',
            'create_rfq_draft', '_reject_unknown_keys', '_child_array',
            'begin_rfq_extraction', 'claim_rfq_extraction', 'apply_rfq_extraction', 'fail_rfq_extraction',
-           '_norm_ctx', '_ext_collect', '_resolve_subject']
+           '_egress_decide', '_norm_ctx', '_ext_collect', '_resolve_subject']
     invoker_ok = {'_reject_unknown_keys', '_child_array', '_norm_ctx', '_ext_collect', '_resolve_subject'}   # pure helper = INVOKER ตั้งใจ
     bad = []
     for fn in svc:
