@@ -373,10 +373,17 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       (route ใหม่ fail-closed อัตโนมัติ) + `secrets.compare_digest`; B2 **operation-aware SQLSTATE map** (class22/23502/23503/23514→422,
       23505→409, 54000→413, transient/class08→503) — invalid payload ไม่กลายเป็น 500 อีก + log เฉพาะ schema identifier
       (ไม่ log ค่าดิบ); M1 middleware `http.disconnect`→หยุด ไม่เรียก downstream; M2 runner ชื่อ/พอร์ตต่อ process + **32 เทสต์เขียว**
-      (เพิ่ม no-dev-bypass, SQLSTATE→422, disconnect/multi-frame, login least-privilege)
-      → **gate ก่อน extraction orchestration ปิดครบ** (B1/B2/M1 + regression) — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
-      → ถัดไป (หลัง confirm): extraction endpoints ผ่าน internal-worker pattern (public POST /enq/extractions → worker
-      begin/claim → provider นอก DB txn → apply/fail), auth จริง (JWT/Keycloak→principal→actor)
+- [x] **transport confirm (commit `ece4001`) — ปิด Codex confirm 397AB59 (F1 blocker + H1/H2)**
+      Codex confirm ปิด B1/B2-draft/M1/M2 แล้ว เหลือ F1: mapper รับ `op` แต่ไม่ใช้ → `apply` แยก state-conflict จาก
+      invalid-result ไม่ได้ (ทั้งคู่ `23514`; `23503` ก็กำกวม run-not-found vs ref-in-result)
+      **F1:** 007 ยิง **custom SQLSTATE self-describing** — `RFS01` state_conflict (409) · `RFN01` run_not_found (404) ·
+      `RFR01` invalid_extraction_result (422); begin input-not-found คงเป็น `23503`→422. mapper = **operation-aware**
+      `_http_for_pg(op,sqlstate)`. taxonomy อยู่ [`ENQ_EXTRACTION_ERROR_TAXONOMY.md`](ENQ_EXTRACTION_ERROR_TAXONOMY.md) + comment ใน 007
+      **H1:** non-ASCII key → 401 (ไม่ใช่ 500) + key ต้อง ASCII ตั้งแต่ startup. **H2:** test DB bind loopback + Docker-assigned port
+      → migration suite เขียว (050 30→33, harness T16/T17 = RFS01) + **API 32→46 เทสต์เขียว**
+      → **gate ก่อน extraction orchestration ปิดครบ** (F1+H1+M1 + regression) — รอ Codex confirm F1 (CODEX_INBOX)
+      → ถัดไป (หลัง confirm): extraction endpoints ผ่าน internal-worker pattern (public POST /enq/extractions → begin+202 →
+      durable worker claim → provider นอก DB txn → apply/fail), auth จริง (JWT/Keycloak→principal→actor)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
