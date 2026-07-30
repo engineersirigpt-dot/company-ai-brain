@@ -353,10 +353,10 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [x] **F5A** corrugated ผิดชนิด = reject (เดิมข้ามเงียบ) — is12; **F5B/F7** ตัด opaque JSON (`grade_spec_snapshot`/`specification_extra`) ออกจาก draft-v1 — is13a/b
 - [x] **F8** arg length/charset limit + normalize (tab/control char/ยาวเกิน = reject) — is14a/b/c; effective allowlist: REVOKE PUBLIC จาก legacy trigger fn (owner→rfq_owner กัน trigger chain พัง) — T11 enumerate
 - [x] **F8.1** `_reject_unknown_keys`/`_child_array` เป็น SECURITY INVOKER (ลด surface); **F9** doc: "006 ไม่มี dependency ต่อ pgcrypto" (ไม่ใช่ 'เลี่ยงทั้ง repo')
-- [ ] **F1/F6 (gated)** AI-derived values ยังไม่มี provenance ใน v1 → v1 = **manual/synthetic DRAFT เท่านั้น**; ก่อนต่อ AI extractor จริงต้องทำ **ENQ v1.1** (extraction run + evidence atomic)
-- [x] payload contract → [`RFQ_DRAFT_PAYLOAD_V1.md`](RFQ_DRAFT_PAYLOAD_V1.md)
-- [x] **test**: `020` 18 + `030` 15 + `040` **27** (is15 = รัน payload ตัวอย่างในเอกสารจริง กัน doc drift) + `rfq_concurrency_tests.py` **T01-T14** =
-      **74 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
+- [x] **F1/F6** AI-derived values ต้องมี provenance → **ปิดใน ENQ v1.1 (`007`)** — create_rfq_draft (`006`) = manual/synthetic DRAFT; AI path = begin/claim/apply (`007`)
+- [x] payload contract → [`RFQ_DRAFT_PAYLOAD_V1.md`](RFQ_DRAFT_PAYLOAD_V1.md) (v1) + [`RFQ_EXTRACTION_PAYLOAD_V1_1.md`](RFQ_EXTRACTION_PAYLOAD_V1_1.md) (v1.1 rev3+C1-C4)
+- [x] **test รวม**: `020` 18 + `030` 15 + `040` 27 + `050` 17 + `rfq_concurrency_tests.py` **T01-T16** =
+      **93 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
@@ -370,8 +370,21 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       → ทั้งคู่ได้ id เดียว (T14); เหลือ **operational**: FastAPI ต้อง commit/rollback ทันที + ตั้ง statement/txn timeout
       กัน connection ค้างถือ advisory lock (documented ใน payload contract)
 - [ ] **F8** durable audit ของ readiness attempt ที่ fail (RAISE=rollback ทำหาย — v1 ยอมรับ)
-- [ ] **ENQ v1.1** — extraction_runs + field_evidence ใน payload (พร้อม #6: validate run SUCCEEDED/ไม่ BLOCKED/policy allow
-      ก่อน insert AI evidence) + resolve subject-ref เป็น UUID; ตอนนี้ v1 fail-closed (reject keys เหล่านี้)
+- [x] **ENQ v1.1 (`007_enq_extraction.sql`) — ✅ two-phase provenance เสร็จ** (contract rev3 + C1-C4, Codex confirm GO)
+      - **two-phase**: `begin` (egress decision) → `claim` (revalidate trusted state + lease = **จุดอนุมัติจริง** R1) →
+        provider call นอก DB → `apply` (tree + evidence atomic) / `fail` (durable) — state machine + lease fencing
+      - **trusted tables** (`rfq_source_ingest/ai_provider/redaction_attestation/egress_approval`): scanner/redactor/approver เขียน;
+        `rfq_ingest` **ไม่มี direct privilege** — begin/claim resolve เอง → **egress ปลอมไม่ได้** (F1/R1)
+      - **egress gate ก่อน provider** (F2/R2): redaction/approval + artifact hash bind ก่อนเรียก; total decision table (F3);
+        LOCAL+BLOCK = LOCAL_ONLY (cloud_action = cloud-scope)
+      - **evidence completeness = set equality** (F4/R3/R4): AI-written field ที่ปรากฏใน payload ต้องมี evidence ครบเซ็ต;
+        relationship (`process.component_no`/`delivery.option_no`) = business field ต้องมี evidence; `value_snapshot=to_jsonb(actual)` natural key (C2)
+      - **derivation_type** แยกผู้เขียนจาก medium (F5/R5); **idempotency ledger** `(service,operation,request_id)` (F7/R7)
+      - fail-closed จาก v1: create_rfq_draft ไม่รับ evidence แล้ว; AI path มาทางนี้เท่านั้น
+- [x] **test 007**: `050` 17 (begin decision/claim revalidate/apply set-equality/lease/idempotency) +
+      harness **T15** (2-worker claim → exactly-one executor) + **T16** (reclaim fencing, old lease rejected)
+- [ ] **ENQ v1.1 gated ต่อ**: scanner/redactor/approver **ingest functions** (007 seed ด้วย owner); production writer roles + audit;
+      Cloud extraction ของ RFQ จริง (รอ Data Owner/DPO/Legal); source_type enum cleanup done ใน 007
 - [ ] **V5 (เหลือ)** production migration: fixed migration owner + `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>`,
       inspect effective privilege ของ login role จริง (ไม่ใช่แค่ SET ROLE), migration runner + version tracking
 - [ ] M3 orphan protection, external_ref append-only audit

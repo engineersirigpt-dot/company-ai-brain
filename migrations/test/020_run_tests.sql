@@ -95,12 +95,12 @@ BEGIN
         RAISE NOTICE 'FAIL neg8: estimate_link on DRAFT allowed'; fail:=fail+1;
     EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS neg8: estimate_link on non-READY rejected'; pass:=pass+1; END;
 
-    -- NEG 9 (B2/SEC-004): AI_INFERENCE evidence โดยไม่มี extraction_run_id → reject
+    -- NEG 9 (F5/R5): AI-derived evidence (derivation_type) โดยไม่มี extraction_run_id → reject
     BEGIN
-        INSERT INTO rfq_field_evidence (rfq_id,subject_type,subject_id,field_name,source_type)
-        VALUES (a_rfq,'COMPONENT',a_comp,'paper_ref','AI_INFERENCE');
+        INSERT INTO rfq_field_evidence (rfq_id,subject_type,subject_id,field_name,source_type,derivation_type)
+        VALUES (a_rfq,'COMPONENT',a_comp,'paper_ref','PDF','AI_EXTRACTED');
         RAISE NOTICE 'FAIL neg9: AI evidence without extraction_run allowed'; fail:=fail+1;
-    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS neg9: AI evidence requires extraction_run'; pass:=pass+1; END;
+    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS neg9: AI-derived evidence requires extraction_run'; pass:=pass+1; END;
 
     -- NEG 10 (M6): status_history อ้าง readiness_run ของ RFQ อื่น → reject
     BEGIN
@@ -130,9 +130,9 @@ BEGIN
     VALUES (gen_random_uuid(), c_rfq, NULL, 'CLOUD','anthropic','claude','rfq-egress-v1',
         'REDACTED_ALLOW', true, '{"dropped":["contact_phone"]}'::jsonb, 'SUCCEEDED')
     RETURNING id INTO other_run;
-    INSERT INTO rfq_field_evidence (rfq_id,subject_type,subject_id,field_name,source_type,extraction_run_id)
-    VALUES (c_rfq,'COMPONENT',other_comp,'paper_ref','AI_INFERENCE',other_run);
-    RAISE NOTICE 'PASS pos4: AI evidence with valid extraction_run inserted'; pass:=pass+1;
+    INSERT INTO rfq_field_evidence (rfq_id,subject_type,subject_id,field_name,source_type,derivation_type,extraction_run_id)
+    VALUES (c_rfq,'COMPONENT',other_comp,'paper_ref','PDF','AI_EXTRACTED',other_run);
+    RAISE NOTICE 'PASS pos4: AI evidence (derivation) with valid extraction_run inserted'; pass:=pass+1;
 
     -- NEG 11 (egress edge): REDACTED_ALLOW แต่ manifest ว่าง → reject
     BEGIN

@@ -450,11 +450,13 @@ def t11_ingest_allowlist(sup):
     ing.close()
     sel = sql1(sup, "SELECT has_table_privilege('rfq_ingest','rfq.rfq','SELECT')")
     checks.append(('ingest table SELECT=false', sel is False, sel))
-    # effective allowlist (F8): enumerate ทุก function ใน schema rfq ที่ rfq_ingest execute ได้ → ต้อง = [create_rfq_draft]
+    # effective allowlist (F8): enumerate ทุก function ใน schema rfq ที่ rfq_ingest execute ได้
+    # ตอนนี้ = create_rfq_draft (006) + begin/claim/apply/fail_rfq_extraction (007 ENQ write path)
     eff = sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p
         JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND has_function_privilege('rfq_ingest', p.oid, 'EXECUTE')""")
-    checks.append(('ingest effective EXECUTE = [create_rfq_draft]', eff == ['create_rfq_draft'], eff))
+    expect = ['apply_rfq_extraction','begin_rfq_extraction','claim_rfq_extraction','create_rfq_draft','fail_rfq_extraction']
+    checks.append(('ingest effective EXECUTE = ENQ write functions only', eff == expect, eff))
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "exact allowlist: create_rfq_draft only; no other fn, no table SELECT/DML"
     record('T11 ingest exact allowlist', allok, detail)
@@ -531,12 +533,78 @@ def t14_idempotency_concurrency(sup):
     record('T14 idempotency concurrency (same key→same id)', ok,
            f"B blocked-by-A={blocked}, id_a==id_b={id_b == id_a}, B_err={getattr(res.get('err'),'pgcode',None)}, req_rows={n_req}, rfq_rows={n_rfq}")
 
+def _seed_ext_run(sup, tag):
+    """seed source+provider (as superuser) + begin → คืน run_id (PENDING)"""
+    with sup.cursor() as cur:
+        cur.execute("SET search_path TO rfq")
+        cur.execute("INSERT INTO rfq_ai_provider VALUES ('typ','v1','LOCAL',true,'pol-v1') ON CONFLICT DO NOTHING")
+        cur.execute("""INSERT INTO rfq_source_ingest (object_store_key,source_sha256,malware_scan_status,classification_status,
+            classification_code,contains_personal_data,contains_trade_secret,cloud_action_code,policy_version,registered_by_ref)
+            VALUES (%s, repeat('a',64),'CLEAN','CONFIRMED','INTERNAL',true,false,'LOCAL_ONLY','pol-v1','sc') RETURNING id""", (f's3://{tag}',))
+        sid = cur.fetchone()[0]
+        cur.execute("SELECT (begin_rfq_extraction(%s,'LOCAL','typ','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq',%s)->>'run_id')::uuid",
+                    (sid, f'b-{tag}'))
+        return cur.fetchone()[0]
+
+def t15_claim_race(sup):
+    """Codex R6/#5: 2 worker claim run เดียวพร้อมกัน → มีเพียงหนึ่งได้สิทธิ์ (should_execute=true) + lease เดียว"""
+    run = _seed_ext_run(sup, 't15')
+    res = {}
+    def worker(name):
+        c = connect(role='rfq_ingest')
+        try:
+            with c.cursor() as cur:
+                cur.execute("SELECT claim_rfq_extraction(%s,%s,'enq',%s)", (run, name, f'cl-{name}'))
+                res[name] = cur.fetchone()[0].get('should_execute')
+        except Exception as e:
+            res[name] = f'ERR:{getattr(e,"pgcode",e)}'
+        finally:
+            c.close()
+    ta = threading.Thread(target=worker, args=('wA',)); tb = threading.Thread(target=worker, args=('wB',))
+    ta.start(); tb.start(); ta.join(10); tb.join(10)
+    n_exec = sum(1 for v in res.values() if v is True)
+    n_lease = sql1(sup, "SELECT count(*) FROM rfq_ai_extraction_run WHERE id=%s AND status_code='RUNNING' AND lease_token IS NOT NULL", (run,))
+    ok = n_exec == 1 and n_lease == 1
+    record('T15 claim race (exactly-one executor)', ok, f"exec_true={n_exec} of {res}, running_lease={n_lease}")
+
+def t16_reclaim_fencing(sup):
+    """Codex R6/C4/#8: lease หมด → worker ใหม่ reclaim ได้; worker เก่า (token เดิม) apply ถูก fence"""
+    run = _seed_ext_run(sup, 't16')
+    a = connect(role='rfq_ingest')
+    with a.cursor() as cur:
+        cur.execute("SELECT claim_rfq_extraction(%s,'wA','enq','clA')", (run,))
+        old_lease = cur.fetchone()[0]['lease_token']
+    # expire lease A (privileged)
+    with sup.cursor() as cur:
+        cur.execute("UPDATE rfq.rfq_ai_extraction_run SET lease_expires_at = now()-interval '1 min' WHERE id=%s", (run,))
+    # B reclaims with new request → should_execute true, attempt 2
+    b = connect(role='rfq_ingest')
+    with b.cursor() as cur:
+        cur.execute("SELECT claim_rfq_extraction(%s,'wB','enq','clB')", (run,))
+        rec = cur.fetchone()[0]
+    reclaimed = rec.get('should_execute') is True
+    attempt = sql1(sup, "SELECT attempt_no FROM rfq_ai_extraction_run WHERE id=%s", (run,))
+    # A (old token) tries apply → fenced (C4 token mismatch / expired)
+    payload = ('{"schema_version":"extract-v1.1","input_sha256":"'+('a'*64)+'","items":[{"line_no":1,'
+               '"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},'
+               '"field_name":"job_name","source_type":"PDF"}]}')
+    fenced = False
+    try:
+        with a.cursor() as cur:
+            cur.execute("SELECT apply_rfq_extraction(%s,%s,%s::jsonb,'wA','enq','apA')", (run, old_lease, payload))
+    except psycopg2.Error as e:
+        fenced = e.pgcode == errorcodes.CHECK_VIOLATION; a.rollback()
+    a.close(); b.close()
+    ok = reclaimed and attempt == 2 and fenced
+    record('T16 reclaim fencing (old lease rejected)', ok, f"reclaimed={reclaimed}, attempt={attempt}, old_lease_fenced={fenced}")
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
              t04_role_privilege, t05_version_edge, t06_rollback, t07_idempotency, t08_clone_atomicity,
              t09_authz_separation, t10_catalog_and_policy,
-             t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency]
+             t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
+             t15_claim_race, t16_reclaim_fencing]
     for t in tests:
         try:
             t(sup)
