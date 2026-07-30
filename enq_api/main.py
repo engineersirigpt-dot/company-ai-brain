@@ -1,55 +1,101 @@
 """
 ENQ API (v1.1 transport) — FastAPI หน้าร้านของ RFQ backend
 ==========================================================
-ทำให้ create_rfq_draft (migration 006) เรียกผ่าน HTTP ได้ — synthetic/manual draft path
-เป็นโมดูลแยก รันในเครื่อง dev เท่านั้น (ไม่ใช่ app/main.py ที่ deploy) — ยังไม่ deploy
+หุ้ม create_rfq_draft (migration 006) เป็น HTTP — synthetic/manual draft path
+โมดูลแยก รันในเครื่อง dev เท่านั้น (ไม่ใช่ app/main.py ที่ deploy) — ยังไม่ deploy
 
-ยึด Codex FastAPI guardrails:
-  #1 write ผ่าน DB role rfq_ingest (read ผ่าน rfq_app) — บังคับ boundary แม้ผ่าน API
-  #2 actor มาจาก authenticated server context (ไม่ใช่ request body)
-  #3 hard-code service = 'enq' ฝั่ง server
-  #5 validate raw-body size / structure ก่อนเรียก DB (DB = strict allowlist ชั้นสุดท้าย)
-  #9 request_id deterministic (จาก header X-Request-Id หรือ generate) → idempotent retry
-
-ยังไม่ทำ (increment ถัดไป): begin/claim/apply/fail (AI extraction path) — ต้อง seed trusted tables + mock provider
+แก้ตาม Codex transport review (B1/B2/B3 + H1-H4):
+  B1  auth ทุก /enq/* route (รวม GET) + fail-closed default (ต้องมี ENQ_API_KEY เว้นแต่ ENQ_DEV_MODE=1)
+  B2  จำกัด raw body ที่ ASGI middleware (นับ bytes จริงก่อน parse — กัน chunked bypass) + nesting-depth limit
+  B3  connect ด้วย dedicated LOGIN role (rfq_ingest_login write / rfq_app_login read) — ไม่ใช่ superuser, ไม่ SET ROLE
+  H1  idempotency key (X-Request-Id) required สำหรับ mutating; ไม่ generate เอง
+  H2  route เป็น sync def (FastAPI ส่งเข้า threadpool) + connect/statement/lock/idle timeout
+  H3  schema_version = required Literal['draft-v1'] (ไม่ default)
+  H4  ไม่ส่ง raw DB message กลับ client — map pgcode → stable public code + log ฝั่ง server
 """
 from __future__ import annotations
-import os, json, uuid
-from typing import Any
+import os, json, logging
+from typing import Any, Literal
 from contextlib import contextmanager
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-# ---- config (env; default = dev DB rfq_dev บน localhost:5433) ----
-RFQ_DSN = os.environ.get("RFQ_DSN", "host=localhost port=5433 dbname=rfqtest user=postgres password=test")
-ENQ_API_KEY = os.environ.get("ENQ_API_KEY")          # ตั้ง = เปิด auth จริง; ไม่ตั้ง = dev mode
-MAX_BODY_BYTES = 1_000_000                            # #5 raw-body cap (สอดคล้อง DB 1MB)
-SERVICE = "enq"                                       # #3 hard-coded service identity
+log = logging.getLogger("enq_api")
 
-app = FastAPI(title="ENQ API (RFQ draft)", version="0.1.0")
+# ---- config ----
+DEV_MODE       = os.environ.get("ENQ_DEV_MODE") == "1"
+ENQ_API_KEY    = os.environ.get("ENQ_API_KEY")
+MAX_BODY_BYTES = int(os.environ.get("ENQ_MAX_BODY_BYTES", "1000000"))
+MAX_JSON_DEPTH = int(os.environ.get("ENQ_MAX_JSON_DEPTH", "12"))
+SERVICE        = "enq"                                          # #3 hard-coded server-side
+_DEV_DSN_W = "host=localhost port=5433 dbname=rfqtest user=rfq_ingest_login password=ingest connect_timeout=5"
+_DEV_DSN_R = "host=localhost port=5433 dbname=rfqtest user=rfq_app_login password=app connect_timeout=5"
+WRITE_DSN = os.environ.get("RFQ_WRITE_DSN", _DEV_DSN_W)         # B3: non-superuser login roles
+READ_DSN  = os.environ.get("RFQ_READ_DSN",  _DEV_DSN_R)
+
+# B1: fail-closed — ต้องมี auth config เว้นแต่ประกาศ dev mode ชัดเจน
+if not DEV_MODE and not ENQ_API_KEY:
+    raise RuntimeError("fail-closed: ต้องตั้ง ENQ_API_KEY (หรือ ENQ_DEV_MODE=1 สำหรับ loopback dev)")
 
 
-# ---- auth: X-API-Key → server-controlled actor (#2) ----
-def resolve_actor(x_api_key: str | None) -> str:
-    if ENQ_API_KEY is None:
-        return "enq-api-dev"                          # dev mode: no key configured
-    if x_api_key != ENQ_API_KEY:
-        raise HTTPException(status_code=401, detail="invalid or missing X-API-Key")
-    return "enq-api"                                  # prod: derive จาก key/JWT (ยังไม่ map user)
+# ---- B2: ASGI middleware จำกัด raw body (นับ bytes จริง ก่อน JSON parse; รองรับ chunked) ----
+class LimitBodyMiddleware:
+    def __init__(self, app, max_bytes: int):
+        self.app = app; self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") not in ("POST", "PUT", "PATCH"):
+            return await self.app(scope, receive, send)
+        body = b""; more = True
+        while more:
+            msg = await receive()
+            if msg["type"] == "http.request":
+                body += msg.get("body", b"")
+                more = msg.get("more_body", False)
+                if len(body) > self.max_bytes:
+                    await send({"type": "http.response.start", "status": 413,
+                                "headers": [(b"content-type", b"application/json")]})
+                    await send({"type": "http.response.body", "body": b'{"detail":"payload too large"}'})
+                    return
+            elif msg["type"] == "http.disconnect":
+                await self.app(scope, receive, send); return
+        sent = False
+        async def replay():
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+        await self.app(scope, replay, send)
 
 
-# ---- DB helpers: SET ROLE per op (บังคับ role boundary) ----
+app = FastAPI(title="ENQ API (RFQ draft)", version="0.2.0")
+app.add_middleware(LimitBodyMiddleware, max_bytes=MAX_BODY_BYTES)
+
+
+# ---- B1: auth dependency ใช้กับทุก /enq/* route ----
+def require_actor(x_api_key: str | None = Header(default=None)) -> str:
+    if DEV_MODE:
+        return "enq-api-dev"
+    if not ENQ_API_KEY or x_api_key != ENQ_API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return "enq-api"                                           # prod: map JWT/registry → principal (ยังไม่ทำ)
+
+
+# ---- B3/H2: DB connection (dedicated login role, ไม่ superuser, มี timeout) ----
 @contextmanager
-def db_role(role: str):
-    conn = psycopg2.connect(RFQ_DSN)
+def db(dsn: str):
+    conn = psycopg2.connect(dsn)
     try:
         conn.autocommit = False
         with conn.cursor() as cur:
             cur.execute("SET search_path TO rfq")
-            cur.execute(f"SET ROLE {role}")           # role = literal คงที่ (rfq_ingest|rfq_app) ไม่ใช่ user input
+            cur.execute("SET statement_timeout='10s'")
+            cur.execute("SET lock_timeout='5s'")
+            cur.execute("SET idle_in_transaction_session_timeout='15s'")
         yield conn
         conn.commit()
     except Exception:
@@ -58,62 +104,77 @@ def db_role(role: str):
         conn.close()
 
 
-# ---- payload model (#5 structural guard; DB = strict allowlist ชั้นสุดท้าย) ----
+# ---- H3: strict-ish payload (schema_version required; DB = allowlist ชั้นสุดท้าย) ----
 class DraftPayload(BaseModel):
-    model_config = {"extra": "forbid"}                # reject unknown top-level key (ตรงกับ DB top allowlist)
-    schema_version: str = "draft-v1"
+    model_config = {"extra": "forbid"}
+    schema_version: Literal["draft-v1"]                        # required, no default
     header: dict[str, Any] = Field(default_factory=dict)
     items: list[dict[str, Any]] = Field(min_length=1, max_length=100)
+
+
+def _check_depth(o: Any, d: int = 1):
+    if d > MAX_JSON_DEPTH:
+        raise HTTPException(status_code=422, detail="payload nesting too deep")
+    if isinstance(o, dict):
+        for v in o.values(): _check_depth(v, d + 1)
+    elif isinstance(o, list):
+        for v in o: _check_depth(v, d + 1)
+
+
+# ---- H4: pgcode → stable public status/message (ไม่ส่ง raw DB message) ----
+_PG_STATUS = {"22023": 422, "23503": 422, "23505": 409, "54000": 413}
+_PG_MSG    = {"22023": "invalid payload", "23503": "referenced entity not found",
+              "23505": "conflict (idempotency key reused or duplicate)", "54000": "payload limit exceeded"}
+
+def _raise_db(e: psycopg2.Error, request_id: str):
+    code = getattr(e, "pgcode", None)
+    real = (e.diag.message_primary if e.diag else str(e)) or "db error"
+    log.warning("db error req_id=%s pgcode=%s: %s", request_id, code, real)   # detail → server log เท่านั้น
+    raise HTTPException(status_code=_PG_STATUS.get(code, 500), detail=_PG_MSG.get(code, "internal error"))
 
 
 @app.get("/health")
 def health():
     try:
-        with db_role("rfq_app") as conn, conn.cursor() as cur:
-            cur.execute("SELECT 1")
-            cur.fetchone()
-        return {"status": "ok", "db": "up", "service": SERVICE}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"db down: {e.__class__.__name__}")
+        with db(READ_DSN) as conn, conn.cursor() as cur:
+            cur.execute("SELECT rolsuper FROM pg_roles WHERE rolname=current_user")
+            is_super = cur.fetchone()[0]
+        return {"status": "ok", "db": "up", "service": SERVICE, "read_role_superuser": is_super}
+    except Exception:
+        raise HTTPException(status_code=503, detail="db down")
 
 
 @app.post("/enq/draft")
-async def create_draft(
+def create_draft(
     payload: DraftPayload,
-    request: Request,
-    x_api_key: str | None = Header(default=None),
+    actor: str = Depends(require_actor),
     x_request_id: str | None = Header(default=None),
 ):
-    actor = resolve_actor(x_api_key)
-    if int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="payload too large")
-    if payload.schema_version != "draft-v1":
-        raise HTTPException(status_code=422, detail="schema_version must be draft-v1")
-    request_id = (x_request_id or "").strip() or f"api-{uuid.uuid4().hex}"   # #9 idempotency key
-
+    request_id = (x_request_id or "").strip()
+    if not request_id:                                        # H1: idempotency key required
+        raise HTTPException(status_code=400, detail="X-Request-Id header required")
+    if len(request_id) > 200:
+        raise HTTPException(status_code=400, detail="X-Request-Id too long")
+    body = payload.model_dump()
+    _check_depth(body)
     try:
-        with db_role("rfq_ingest") as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT create_rfq_draft(%s::jsonb, %s, %s, %s)",
-                (json.dumps(payload.model_dump(), ensure_ascii=False), actor, SERVICE, request_id),
-            )
+        with db(WRITE_DSN) as conn, conn.cursor() as cur:
+            cur.execute("SELECT create_rfq_draft(%s::jsonb, %s, %s, %s)",
+                        (json.dumps(body, ensure_ascii=False), actor, SERVICE, request_id))
             rfq_id = cur.fetchone()[0]
     except psycopg2.Error as e:
-        # DB validation (unknown key / limit / bad ref ...) → 422; อื่น ๆ → 500
-        code = getattr(e, "pgcode", None)
-        detail = (e.diag.message_primary if e.diag else str(e)) or "db error"
-        raise HTTPException(status_code=422 if code in ("22023", "54000", "23503", "23505") else 500,
-                            detail=f"[{code}] {detail}")
+        _raise_db(e, request_id)
     return {"rfq_id": str(rfq_id), "request_id": request_id, "actor": actor}
 
 
 @app.get("/enq/rfq/{rfq_id}")
-def get_rfq(rfq_id: str):
+def get_rfq(rfq_id: str, actor: str = Depends(require_actor)):   # B1: GET ก็ต้อง auth
+    import uuid as _uuid
     try:
-        uuid.UUID(rfq_id)
+        _uuid.UUID(rfq_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="rfq_id must be a uuid")
-    with db_role("rfq_app") as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+    with db(READ_DSN) as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("SELECT id, rfq_no, status_code, revision_no, enquiry_ref, source_channel, "
                     "customer_name_raw, priority_code FROM rfq WHERE id=%s", (rfq_id,))
         rfq = cur.fetchone()
@@ -142,4 +203,4 @@ def get_rfq(rfq_id: str):
                         "WHERE rfq_item_id=%s ORDER BY delivery_no", (iid,))
             it["deliveries"] = cur.fetchall()
         rfq["items"] = items
-        return json.loads(json.dumps(rfq, default=str))   # serialize uuid/date/numeric
+        return json.loads(json.dumps(rfq, default=str))

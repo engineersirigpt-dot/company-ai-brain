@@ -11,13 +11,23 @@ pip install fastapi "uvicorn[standard]" pydantic psycopg2-binary
 
 # dev DB (ถ้ายังไม่รัน)
 docker run -d --name rfq_dev -e POSTGRES_PASSWORD=test -e POSTGRES_DB=rfqtest -p 5433:5432 postgres:16
-#  แล้วโหลด migrations 001,002,003,005,006,007 (ดู migrations/test/run_all.sh)
+#  โหลด migrations 001,002,003,005,006,007 (ดู migrations/test/run_all.sh)
+#  แล้วสร้าง login roles non-superuser (ครั้งเดียว):  psql ... < enq_api/dev_roles.sql
 
-# start
-uvicorn enq_api.main:app --host 127.0.0.1 --port 8090
+# start — fail-closed: ต้องตั้ง ENQ_API_KEY หรือ ENQ_DEV_MODE=1 ไม่งั้น startup จะ error
+ENQ_DEV_MODE=1 uvicorn enq_api.main:app --host 127.0.0.1 --port 8090
 ```
 
-env (ถ้าไม่ตั้ง = dev mode): `RFQ_DSN`, `ENQ_API_KEY` (ตั้ง = เปิด auth), `MAX_BODY_BYTES`
+### env (Codex transport fixes)
+
+| var | ค่า | หมายเหตุ |
+|---|---|---|
+| `ENQ_API_KEY` | เปิด auth (ต้องส่ง `X-API-Key` ทุก route) | **fail-closed**: ถ้าไม่ตั้ง และไม่มี `ENQ_DEV_MODE=1` → startup error |
+| `ENQ_DEV_MODE` | `1` = loopback dev (actor=`enq-api-dev`, ไม่ตรวจ key) | ใช้เฉพาะ local synthetic เท่านั้น |
+| `RFQ_WRITE_DSN` | DSN ของ **rfq_ingest_login** (non-superuser) | default = `rfq_ingest_login@localhost:5433` |
+| `RFQ_READ_DSN` | DSN ของ **rfq_app_login** (non-superuser) | default = `rfq_app_login@localhost:5433` |
+| `ENQ_MAX_BODY_BYTES` | จำกัด raw body (default `1000000`) | นับ bytes จริงที่ ASGI ก่อน parse (กัน chunked bypass) |
+| `ENQ_MAX_JSON_DEPTH` | จำกัด nesting (default `12`) | |
 
 ## endpoints
 
@@ -35,14 +45,25 @@ curl -X POST localhost:8090/enq/draft -H 'Content-Type: application/json' \
 # → {"rfq_id":"...","request_id":"job-123","actor":"enq-api-dev"}
 ```
 
-## Codex FastAPI guardrails ที่ยึด
-- **#1** write ผ่าน role `rfq_ingest`, read ผ่าน `rfq_app` — บังคับ role boundary แม้ผ่าน API (SET ROLE ต่อ op)
-- **#2** `actor` มาจาก server (API key) ไม่ใช่ request body
-- **#3** `service='enq'` hard-code ฝั่ง server
-- **#5** validate 2 ชั้น: Pydantic (top-level unknown key/size/structure) ที่ API + **DB allowlist strict** ชั้นสุดท้าย
-- **#9** `X-Request-Id` → idempotency (POST ซ้ำ = rfq_id เดิม)
+## tests (Codex H5)
 
-error mapping: DB validation (`22023/54000/23503/23505`) → `422`; อื่น ๆ → `500`
+```bash
+# ephemeral PG + migrations + login roles + set env → รัน test_api.py (14 checks)
+PY=/path/to/python bash enq_api/run_api_tests.sh
+```
+ครอบ: auth ทุก route + startup fail-closed, idempotency required/replay/conflict, oversize→413,
+schema_version required, unknown-key + error no-leak, read role ไม่ใช่ superuser
+
+## Codex transport fixes ที่ยึด (review BFFA702)
+- **B1** auth ทุก `/enq/*` route (รวม GET) + **fail-closed** default; dev เปิดได้เฉพาะ `ENQ_DEV_MODE=1`
+- **B2** จำกัด raw body ที่ ASGI middleware (นับ bytes ก่อน parse, กัน chunked) + JSON depth limit
+- **B3** connect ด้วย dedicated LOGIN role non-superuser (`rfq_ingest_login`/`rfq_app_login`) — ไม่ใช่ postgres
+- **H1** `X-Request-Id` **required** สำหรับ POST (ไม่ generate เอง); key เดิม+payload ต่าง → `409`
+- **H2** route เป็น sync `def` (FastAPI → threadpool) + statement/lock/idle timeout
+- **H3** `schema_version` = required `Literal['draft-v1']` + `extra="forbid"`; DB allowlist = ด่านสุดท้าย
+- **H4** ไม่ส่ง raw DB message กลับ client — map pgcode → stable public code + log ฝั่ง server
+
+error mapping: `22023/23503`→`422`, `23505`→`409`, `54000`→`413`, อื่น ๆ →`500` (ไม่มี DB message)
 
 ## ยังไม่ทำ (increment ถัดไป)
 - **begin/claim/apply/fail** (AI extraction path) — ต้อง seed trusted tables + mock provider loop + `provider_input_ref`/`should_execute` handling (guardrails #6-8)
