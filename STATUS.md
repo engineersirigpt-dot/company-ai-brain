@@ -355,8 +355,8 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [x] **F8.1** `_reject_unknown_keys`/`_child_array` เป็น SECURITY INVOKER (ลด surface); **F9** doc: "006 ไม่มี dependency ต่อ pgcrypto" (ไม่ใช่ 'เลี่ยงทั้ง repo')
 - [ ] **F1/F6 (gated)** AI-derived values ยังไม่มี provenance ใน v1 → v1 = **manual/synthetic DRAFT เท่านั้น**; ก่อนต่อ AI extractor จริงต้องทำ **ENQ v1.1** (extraction run + evidence atomic)
 - [x] payload contract → [`RFQ_DRAFT_PAYLOAD_V1.md`](RFQ_DRAFT_PAYLOAD_V1.md)
-- [x] **test**: `020` 18 + `030` 15 + `040` **26** + `rfq_concurrency_tests.py` **T01-T14** =
-      **73 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
+- [x] **test**: `020` 18 + `030` 15 + `040` **27** (is15 = รัน payload ตัวอย่างในเอกสารจริง กัน doc drift) + `rfq_concurrency_tests.py` **T01-T14** =
+      **74 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
@@ -366,8 +366,9 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [ ] **V4 (MED, ก่อน revision endpoint)** attachment/field-evidence carry-forward policy — attachment ใช้ link/lineage ไม่ duplicate binary;
       evidence สร้าง derivation provenance (map old subject→new) ไม่ copy UUID เก่า
 - [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — เติม master-gateway revalidate / egress gate / rules ครบก่อน Ready จริง
-- [ ] **F7 (partial done)** idempotency: sequential replay ปิดแล้ว (`rfq_ingest_request` PK+hash); **full concurrency**
-      (2 conn same request_id ชนกัน → loser abort) ยัง gate ก่อนเปิด auto-retry/queue จริง
+- [x] **F7 idempotency (ปิดแล้ว)** — sequential replay (PK+hash+actor) + **concurrent same-key** ผ่าน advisory-xact-lock
+      → ทั้งคู่ได้ id เดียว (T14); เหลือ **operational**: FastAPI ต้อง commit/rollback ทันที + ตั้ง statement/txn timeout
+      กัน connection ค้างถือ advisory lock (documented ใน payload contract)
 - [ ] **F8** durable audit ของ readiness attempt ที่ fail (RAISE=rollback ทำหาย — v1 ยอมรับ)
 - [ ] **ENQ v1.1** — extraction_runs + field_evidence ใน payload (พร้อม #6: validate run SUCCEEDED/ไม่ BLOCKED/policy allow
       ก่อน insert AI evidence) + resolve subject-ref เป็น UUID; ตอนนี้ v1 fail-closed (reject keys เหล่านี้)
