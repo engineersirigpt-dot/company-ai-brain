@@ -397,9 +397,19 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       apply/fail request_id stable ต่อ lease (retry idempotent); lease หมด → reclaim + old-lease fenced (RFS01)
       **provider สังเคราะห์** (`provider.py`, LOCAL mock, ไม่เรียก cloud/ข้อมูลจริง); **008** = list_claimable (EXECUTE rfq_ingest)
       + get_extraction_status (EXECUTE rfq_app), definer/owner rfq_owner/pinned/no PUBLIC; 007 claim คืน `lease_expires_at`
-      → migration suite เขียว (040 28, 050 36, **harness T01-T18 19** — T10/T11 รวม fn ใหม่) + API 50 + **orchestration 21/21**
-      (Codex acceptance checklist ครบ) — รอ Codex review เส้นทาง endpoint→worker→provider→apply/fail (CODEX_INBOX)
-      → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO)
+      → migration suite เขียว + API 50 + orchestration 21/21 (Codex acceptance checklist ครบ)
+- [x] **B1 lease-fence fix (commit `9485e32`) — ✅ Codex GO/CLOSED (re-review `9485e32`)**
+      Codex review orchestration เจอ blocker จริง: `now()` = txn-start แช่แข็ง → claim/apply/fail ที่เริ่มก่อน lease หมด
+      แต่รอ row lock *ข้าม* expiry ผ่าน fence ได้ (old worker เปลี่ยน terminal state ทั้งที่ lease หมด — ทำลาย C4)
+      **แก้:** จับ `v_now := clock_timestamp()` หลังได้ run FOR UPDATE lock แล้ว fence เทียบ `v_now` (claim/apply/fail);
+      `now()` คงไว้เฉพาะ begin (สร้าง run) + list_claimable (candidate selection). regression **T19/T20** (fail/apply
+      lock-wait-across-expiry → RFS01 + run ยัง RUNNING). **harness T01-T20 = 21** ; Codex 3-path probe ยืนยันตรง contract
+      → **B1 CLOSED — orchestration slice = GO local + synthetic** (Codex verdict `9485e32`)
+      → **pre-deploy gates (Codex M1/M2/M3, ยังไม่ block local+synthetic):**
+        **M1** read role `rfq_app` มี `SELECT ALL TABLES` → ข้าม safe projection ได้ (ต้อง allowlist read role ก่อน deploy)
+        **M2** inbound API + worker ใช้ role เดียว (`rfq_ingest_login`) → แยก inbound(draft/begin) vs worker(claim/apply/fail) ก่อน deploy
+        **M3** terminal retry ยังไม่ durable ข้าม crash (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
+      → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M1/M2/M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
