@@ -359,7 +359,12 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       **108 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
 - [x] **✅ Codex GO `17f17c7` (2026-07-30)** — v1.1 DB provenance layer **implementation-ready** หลัง review 5 รอบ
       (contract rev1-3 + implementation 2 รอบ); GO **ไม่รวม** deploy / real ENQ / Cloud extraction ข้อมูลจริง
-      → เดินต่อได้: FastAPI synthetic endpoint (10 guardrails) หรือ scanner/redactor/approver ingest functions
+- [x] **validate กับ enquiry จริง** — งาน reprint (masked) เข้า `create_rfq_draft` ครบทั้งใบ; edge เดียว (พิมพ์หลายรอบ)
+      หายาก → เก็บ notes ไม่เพิ่ม field (ดู memory `schema-validated-real-reprint-enquiry`)
+- [x] **FastAPI transport slice แรก (`enq_api/`, commit bffa702)** — `POST /enq/draft` + `GET /enq/rfq/{id}` หุ้ม create_rfq_draft
+      ผ่าน HTTP; role boundary (rfq_ingest write / rfq_app read), actor server-side, idempotency, validate 2 ชั้น;
+      **local + synthetic เท่านั้น ยังไม่ deploy**; รอ Codex review (CODEX_INBOX)
+      → ถัดไป: extraction endpoints (begin/claim/apply/fail) + auth จริง
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
