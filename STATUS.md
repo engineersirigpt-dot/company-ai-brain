@@ -380,10 +380,16 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       `RFR01` invalid_extraction_result (422); begin input-not-found คงเป็น `23503`→422. mapper = **operation-aware**
       `_http_for_pg(op,sqlstate)`. taxonomy อยู่ [`ENQ_EXTRACTION_ERROR_TAXONOMY.md`](ENQ_EXTRACTION_ERROR_TAXONOMY.md) + comment ใน 007
       **H1:** non-ASCII key → 401 (ไม่ใช่ 500) + key ต้อง ASCII ตั้งแต่ startup. **H2:** test DB bind loopback + Docker-assigned port
-      → migration suite เขียว (050 30→33, harness T16/T17 = RFS01) + **API 32→46 เทสต์เขียว**
-      → **gate ก่อน extraction orchestration ปิดครบ** (F1+H1+M1 + regression) — รอ Codex confirm F1 (CODEX_INBOX)
+- [x] **taxonomy confirm (commit `a3d20e0`) — ปิด Codex confirm ECE4001 F1.1** (RFS01/RFN01/RFR01 + state+lease + H1 + H2 = ACCEPT)
+      เหลือ F1.1: `23505` กำกวม — **ledger conflict** (request_id ซ้ำ payload ต่าง) vs **duplicate business key จริง** (line_no ซ้ำ)
+      mapper บังคับทั้งคู่เป็น 409; provider result ที่มี key ซ้ำควรเป็น 422 invalid_result
+      **F1.1:** ledger-conflict raise ทั้ง 5 fn (006 create_rfq_draft + 007 begin/claim/apply/fail) → **custom `RFI01`** → 409
+      idempotency_conflict; `23505` จริง (unique constraint) → 422 (draft=invalid_payload, apply=invalid_extraction_result) /
+      500 (begin·claim·fail ไม่ควรเกิด). regression 4 กลุ่มครบ (040 is5b/c/d, 050 es32/33/34, mapper units)
+      → migration suite เขียว (**040 27→28, 050 33→36**, harness 19) + **API 46→50 เทสต์เขียว**
+      → **gate ก่อน extraction orchestration ปิดครบ** (F1+F1.1+H1+M1 + regression) — รอ Codex confirm F1.1 (CODEX_INBOX)
       → ถัดไป (หลัง confirm): extraction endpoints ผ่าน internal-worker pattern (public POST /enq/extractions → begin+202 →
-      durable worker claim → provider นอก DB txn → apply/fail), auth จริง (JWT/Keycloak→principal→actor)
+      durable worker แยก process claim → provider นอก DB txn → apply/fail; คืน `lease_expires_at` จาก claim), auth จริง (JWT/Keycloak→principal→actor)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
