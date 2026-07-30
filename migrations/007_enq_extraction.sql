@@ -358,7 +358,7 @@ DECLARE
     r rfq_ai_extraction_run%ROWTYPE; src rfq_source_ingest%ROWTYPE; prov rfq_ai_provider%ROWTYPE;
     att rfq_redaction_attestation%ROWTYPE; apr rfq_egress_approval%ROWTYPE;
     v_blk text := NULL; v_lease uuid; v_out jsonb; v_prev jsonb; v_prev_hash char(64); v_prev_actor text; v_reqhash char(64);
-    v_lease_exp timestamptz; v_ej jsonb;
+    v_lease_exp timestamptz; v_now timestamptz; v_ej jsonb;
 BEGIN
     SELECT * INTO p_worker, p_service, p_request_id FROM _norm_ctx(p_worker, p_service, p_request_id);
     v_reqhash := encode(sha256((p_run_id::text)::bytea),'hex');
@@ -374,8 +374,9 @@ BEGIN
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='RFN01'; END IF;
+    v_now := clock_timestamp();   -- B1: เวลาจริงหลังได้ lock (now()=txn-start แช่แข็ง → รอ lock ข้าม expiry จะ fence พลาด)
 
-    IF r.status_code='RUNNING' AND r.lease_expires_at > now() THEN
+    IF r.status_code='RUNNING' AND r.lease_expires_at > v_now THEN
         v_out := jsonb_build_object('should_execute', false, 'reason', 'active lease held', 'run_id', p_run_id);
         INSERT INTO rfq_extraction_request(service,operation_code,request_id,rfq_id,run_id,actor_ref,payload_sha256,outcome)
         VALUES (p_service,'CLAIM',p_request_id,r.rfq_id,p_run_id,p_worker,v_reqhash,v_out); RETURN v_out;
@@ -386,7 +387,7 @@ BEGIN
 
     -- R1/B3.2: re-evaluate egress ด้วย helper เดียว (min_valid ครอบ lease window) แล้วเทียบกับ run snapshot
     -- → จับ policy/cloud_action/attestation/approval/purpose drift หลัง begin ครบในชุดเดียว (ไม่มี logic ซ้ำ)
-    v_lease_exp := now() + make_interval(mins => c_lease_min);
+    v_lease_exp := v_now + make_interval(mins => c_lease_min);   -- B1: lease ใหม่จากเวลาจริง
     SELECT * INTO src FROM rfq_source_ingest WHERE id=r.source_ingest_id;
     SELECT * INTO prov FROM rfq_ai_provider WHERE provider_code=r.provider_name AND model_code=r.model_name;
     IF src.id IS NULL THEN v_blk:='source missing at claim';
@@ -427,7 +428,7 @@ CREATE OR REPLACE FUNCTION fail_rfq_extraction(
     p_run_id uuid, p_lease_token uuid, p_error_code text, p_actor text, p_service text, p_request_id text
 ) RETURNS jsonb LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = pg_catalog, rfq, pg_temp AS $$
-DECLARE r rfq_ai_extraction_run%ROWTYPE; v_out jsonb; v_prev jsonb; v_prev_hash char(64); v_prev_actor text; v_reqhash char(64);
+DECLARE r rfq_ai_extraction_run%ROWTYPE; v_out jsonb; v_prev jsonb; v_prev_hash char(64); v_prev_actor text; v_reqhash char(64); v_now timestamptz;
 BEGIN
     SELECT * INTO p_actor, p_service, p_request_id FROM _norm_ctx(p_actor, p_service, p_request_id);
     v_reqhash := encode(sha256((p_run_id::text||'|'||coalesce(p_error_code,''))::bytea),'hex');
@@ -441,10 +442,11 @@ BEGIN
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='RFN01'; END IF;
+    v_now := clock_timestamp();   -- B1: เวลาจริงหลังได้ lock (กัน lock-wait ข้าม expiry)
     -- C4/B6: RUNNING + lease token + actor + service ตรง + ยังไม่หมดอายุ
     IF r.status_code<>'RUNNING' OR r.lease_token IS DISTINCT FROM p_lease_token
        OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.claimed_service IS DISTINCT FROM p_service
-       OR r.lease_expires_at <= now() THEN
+       OR r.lease_expires_at <= v_now THEN
         RAISE EXCEPTION 'fail ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='RFS01';
     END IF;
     UPDATE rfq_ai_extraction_run SET status_code='FAILED', error_code=p_error_code, completed_at=now() WHERE id=p_run_id;
@@ -509,7 +511,7 @@ DECLARE
     v_rfq uuid; v_items jsonb; hdr jsonb; f jsonb; it jsonb; ch jsonb; comp jsonb; corr jsonb; ev jsonb; cl jsonb;
     v_item uuid; v_comp uuid; v_q uuid; v_row jsonb; k text; v_sid uuid; v_ref jsonb; v_att uuid;
     v_written jsonb := '{}'::jsonb; v_evseen jsonb := '{}'::jsonb; v_infer jsonb := '{}'::jsonb;
-    v_clar jsonb := '{}'::jsonb; keystr text; v_deriv text; v_stype text; v_miss int;
+    v_clar jsonb := '{}'::jsonb; keystr text; v_deriv text; v_stype text; v_miss int; v_now timestamptz;
 BEGIN
     SELECT * INTO p_actor, p_service, p_request_id FROM _norm_ctx(p_actor, p_service, p_request_id);
     v_reqhash := encode(sha256((p_run_id::text||'|'||md5(p_payload::text))::bytea),'hex');
@@ -525,10 +527,11 @@ BEGIN
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='RFN01'; END IF;
+    v_now := clock_timestamp();   -- B1: เวลาจริงหลังได้ lock (กัน lock-wait ข้าม expiry)
     -- C4/B6: RUNNING + lease token + actor + service ตรง + ยังไม่หมดอายุ
     IF r.status_code<>'RUNNING' OR r.lease_token IS DISTINCT FROM p_lease_token
        OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.claimed_service IS DISTINCT FROM p_service
-       OR r.lease_expires_at <= now() THEN
+       OR r.lease_expires_at <= v_now THEN
         RAISE EXCEPTION 'apply ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='RFS01';
     END IF;
     v_rfq := r.rfq_id; v_att := r.source_attachment_id;

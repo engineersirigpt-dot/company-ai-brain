@@ -642,13 +642,62 @@ def t18_temptable_no_hijack(sup):
     c.close()
     record('T18 temp-table no-hijack (caller _w/_e ไม่กระทบ apply)', ok, f"apply_succeeded_despite_hostile_temp={ok}")
 
+def _fence_lockwait(sup, tag, op):
+    """B1: op (fail/apply) txn เริ่ม *ก่อน* lease หมด แต่รอ parent lock *ข้าม* expiry
+    → ต้อง RFS01 (fence ด้วย clock_timestamp ไม่ใช่ now()=txn-start) + run ยัง RUNNING (reclaim ได้)"""
+    run = _seed_ext_run(sup, tag)
+    rfq_id = sql1(sup, "SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=%s", (run,))
+    a = connect(role='rfq_ingest')                          # wA claim → RUNNING + lease (autocommit)
+    lease = sql1(a, "SELECT (claim_rfq_extraction(%s,'wA','enq',%s))->>'lease_token'", (run, f'cl-{tag}'))
+    holder = connect(); holder.autocommit = False           # superuser: ถือ parent lock ข้าม expiry
+    holder.cursor().execute("SELECT id FROM rfq WHERE id=%s FOR UPDATE", (rfq_id,))
+    sql1(sup, "SELECT 1")                                    # (no-op) ensure sup usable
+    with sup.cursor() as cur:                               # lease หมดใน 2s (หลัง holder ถือ lock แล้ว)
+        cur.execute("UPDATE rfq.rfq_ai_extraction_run SET lease_expires_at = clock_timestamp() + interval '2 seconds' WHERE id=%s", (run,))
+    payload = ('{"schema_version":"extract-v1.1","input_sha256":"'+('a'*64)+'","items":[{"line_no":1,'
+               '"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},'
+               '"field_name":"job_name","source_type":"PDF"}]}')
+    b = connect(role='rfq_ingest'); b.autocommit = False    # B: txn เริ่มตอนเรียก (now() < expiry) แล้ว block
+    res = {}
+    def run_b():
+        try:
+            cb = b.cursor()
+            if op == 'fail':
+                cb.execute("SELECT fail_rfq_extraction(%s,%s,'x','wA','enq',%s)", (run, lease, f'fB-{tag}'))
+            else:
+                cb.execute("SELECT apply_rfq_extraction(%s,%s,%s::jsonb,'wA','enq',%s)", (run, lease, payload, f'aB-{tag}'))
+            res['status'] = 'committed'; b.commit()
+        except psycopg2.Error as e:
+            res['pgcode'] = e.pgcode; b.rollback()
+    tb = threading.Thread(target=run_b); tb.start()
+    blocked = wait_blocked(sup, b.info.backend_pid, holder.info.backend_pid)
+    time.sleep(2.5)                                          # ปล่อยให้ lease (2s) หมดขณะ B รอ lock
+    holder.rollback(); holder.close()                       # ปลด parent lock → B เดินต่อ (clock จริง > expiry)
+    tb.join(15)
+    b.close(); a.close()
+    fenced = res.get('pgcode') == 'RFS01'
+    status = sql1(sup, "SELECT status_code FROM rfq_ai_extraction_run WHERE id=%s", (run,))
+    ok = blocked and fenced and status == 'RUNNING'
+    return ok, f"blocked={blocked}, B rc={res.get('pgcode') or res.get('status')}(want RFS01), status={status}(want RUNNING)"
+
+def t19_fence_fail(sup):
+    """B1: fail รอ parent lock ข้าม lease expiry → RFS01 (clock_timestamp fence)"""
+    ok, detail = _fence_lockwait(sup, 't19', 'fail')
+    record('T19 fence lock-wait-across-expiry (fail)', ok, detail)
+
+def t20_fence_apply(sup):
+    """B1: apply รอ parent lock ข้าม lease expiry → RFS01 (กัน two-path drift)"""
+    ok, detail = _fence_lockwait(sup, 't20', 'apply')
+    record('T20 fence lock-wait-across-expiry (apply)', ok, detail)
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
              t04_role_privilege, t05_version_edge, t06_rollback, t07_idempotency, t08_clone_atomicity,
              t09_authz_separation, t10_catalog_and_policy,
              t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
-             t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack]
+             t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack,
+             t19_fence_fail, t20_fence_apply]
     for t in tests:
         try:
             t(sup)
