@@ -4,7 +4,7 @@
 > ให้อ่านไฟล์นี้ก่อนเริ่มวิเคราะห์ วางแผน หรือแก้ไขโปรเจกต์ เพื่อใช้ข้อเท็จจริงและการตัดสินใจล่าสุดร่วมกัน  
 > เมื่อพบหลักฐานใหม่ ให้แยกให้ชัดระหว่าง **ยืนยันแล้ว**, **ยังต้องตรวจสอบ** และ **ข้อเสนอ**
 
-**อัปเดตล่าสุด:** 2026-07-27
+**อัปเดตล่าสุด:** 2026-07-30
 
 ---
 
@@ -363,8 +363,15 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       หายาก → เก็บ notes ไม่เพิ่ม field (ดู memory `schema-validated-real-reprint-enquiry`)
 - [x] **FastAPI transport slice แรก (`enq_api/`, commit bffa702)** — `POST /enq/draft` + `GET /enq/rfq/{id}` หุ้ม create_rfq_draft
       ผ่าน HTTP; role boundary (rfq_ingest write / rfq_app read), actor server-side, idempotency, validate 2 ชั้น;
-      **local + synthetic เท่านั้น ยังไม่ deploy**; รอ Codex review (CODEX_INBOX)
-      → ถัดไป: extraction endpoints (begin/claim/apply/fail) + auth จริง
+      **local + synthetic เท่านั้น ยังไม่ deploy**
+- [x] **transport hardening (commit `8eb6c41`) — ปิด Codex review BFFA702 (FIX-THEN-GO) ครบ B1/B2/B3 + H1-H5**
+      B1 auth ทุก route (รวม GET) + **fail-closed** startup (ต้องมี `ENQ_API_KEY` เว้นแต่ `ENQ_DEV_MODE=1`);
+      B2 ASGI body-limit นับ bytes ก่อน parse (กัน chunked bypass, 413) + JSON depth; B3 connect ด้วย login role
+      **non-superuser** (`rfq_ingest_login`/`rfq_app_login`, `enq_api/dev_roles.sql`) ไม่ใช่ postgres;
+      H1 `X-Request-Id` required (key เดิม+payload ต่าง→409); H2 sync def+timeouts; H3 `schema_version` required+`extra=forbid`;
+      H4 ไม่ส่ง raw DB message (pgcode→stable code); **H5 `test_api.py`+`run_api_tests.sh` = 14 เทสต์เขียวบน ephemeral PG**
+      → รอ Codex **targeted re-review transport** (CODEX_INBOX) ก่อนเริ่ม extraction orchestration
+      → ถัดไป: extraction endpoints (begin/claim/apply/fail) + auth จริง (JWT/Keycloak→principal→actor)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
