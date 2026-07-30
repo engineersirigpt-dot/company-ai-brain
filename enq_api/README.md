@@ -49,25 +49,27 @@ curl -X POST localhost:8090/enq/draft -H 'Content-Type: application/json' \
 ## tests
 
 ```bash
-# ephemeral PG (ชื่อ+พอร์ตต่อ process) + migrations + login roles + set env → test_api.py (32 checks)
+# ephemeral PG (loopback + Docker-assigned port ต่อ process) + migrations + login roles → test_api.py (46 checks)
 PY=/path/to/python bash enq_api/run_api_tests.sh
 ```
-ครอบ: auth ทุก route + wrong-key + startup fail-closed + no dev-bypass, idempotency required/replay/conflict,
-SQLSTATE→422/409/413 (ไม่รั่ว DB message), oversize + multi-frame + disconnect (middleware),
-schema_version required, login least-privilege (write/read direct DML denied, allowlist function เท่านั้น)
+ครอบ: auth ทุก route + wrong-key + non-ASCII-key + startup fail-closed + no dev-bypass, idempotency required/replay/conflict,
+operation-aware SQLSTATE mapper (RFS01/RFN01/RFR01 + 22/23xxx/54000/transient, ไม่รั่ว DB message),
+oversize + multi-frame + disconnect (middleware), schema_version required, login least-privilege
 
-## Codex transport fixes ที่ยึด (BFFA702 + re-review 8EB6C41)
+## Codex transport fixes ที่ยึด (BFFA702 + 8EB6C41 + confirm 397AB59)
 - **B1** auth ทุก `/enq/*` ผ่าน **router-wide dependency** (route ใหม่ fail-closed อัตโนมัติ) + `secrets.compare_digest`;
-  **ตัด unauthenticated dev mode ทิ้ง** — บังคับ key แม้ local dev
-- **B2** raw body limit ที่ ASGI middleware (นับ bytes ก่อน parse, กัน chunked) + JSON depth; middleware `http.disconnect` → หยุด ไม่เรียก downstream (M1)
+  **ตัด unauthenticated dev mode ทิ้ง**; **H1** non-ASCII key → `401` (ไม่ใช่ `500`), key format = ASCII ตั้งแต่ startup
+- **B2/F1** **operation-aware error mapper** `_http_for_pg(op, sqlstate)` + custom SQLSTATE จาก 007
+  (`RFS01`/`RFN01`/`RFR01`) → แยก state-conflict/not-found/invalid-result; log เฉพาะ schema identifier (ไม่ log ค่าดิบ)
+- **B2/M1** raw body limit ที่ ASGI middleware (นับ bytes ก่อน parse, กัน chunked) + JSON depth; `http.disconnect` → หยุด ไม่เรียก downstream
 - **B3** connect ด้วย LOGIN role non-superuser (`rfq_ingest_login`/`rfq_app_login`) — ไม่ใช่ postgres, ไม่ `SET ROLE`
-- **H1** `X-Request-Id` **required** สำหรับ POST; key เดิม+payload ต่าง → `409`
-- **H2** route เป็น sync `def` (threadpool) + statement/lock/idle timeout
+- **H1(idem)** `X-Request-Id` **required** สำหรับ POST; key เดิม+payload ต่าง → `409`
+- **H2** route เป็น sync `def` (threadpool) + statement/lock/idle timeout; **H2(test)** runner bind loopback + Docker-assigned port
 - **H3** `schema_version` = required `Literal['draft-v1']` + `extra="forbid"`; DB allowlist = ด่านสุดท้าย
-- **H4/B2** operation-aware error map ตาม SQLSTATE + log เฉพาะ schema identifier (ไม่ log ค่าดิบ)
 
-error mapping (SQLSTATE → HTTP + stable code): class `22`/`23502`/`23503`/`23514`→`422 invalid_payload`,
-`23505`→`409 state_conflict`, `54000`→`413 payload_too_large`, transient(`57014`/`55P03`/`40001`/`40P01`/class`08`)→`503 database_unavailable`, อื่น→`500 internal_error`
+error mapping ครบ → ดู [`ENQ_EXTRACTION_ERROR_TAXONOMY.md`](../ENQ_EXTRACTION_ERROR_TAXONOMY.md):
+`RFS01`→`409 state_conflict`, `RFN01`→`404 run_not_found`, `RFR01`→`422 invalid_extraction_result`,
+`23505`→`409 idempotency_conflict`, class`22`/`235xx`→`422` (label ตาม op), `54000`→`413`, transient→`503`, อื่น→`500`
 
 ## ยังไม่ทำ (increment ถัดไป)
 - **begin/claim/apply/fail** (AI extraction path) — ต้อง seed trusted tables + mock provider loop + `provider_input_ref`/`should_execute` handling (guardrails #6-8)

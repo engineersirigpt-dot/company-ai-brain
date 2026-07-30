@@ -595,10 +595,10 @@ def t16_reclaim_fencing(sup):
         with a.cursor() as cur:
             cur.execute("SELECT apply_rfq_extraction(%s,%s,%s::jsonb,'wA','enq','apA')", (run, old_lease, payload))
     except psycopg2.Error as e:
-        fenced = e.pgcode == errorcodes.CHECK_VIOLATION; a.rollback()
+        fenced = e.pgcode == 'RFS01'; a.rollback()          # F1: lease/state conflict = RFS01 (เดิม 23514)
     a.close(); b.close()
     ok = reclaimed and attempt == 2 and fenced
-    record('T16 reclaim fencing (old lease rejected)', ok, f"reclaimed={reclaimed}, attempt={attempt}, old_lease_fenced={fenced}")
+    record('T16 reclaim fencing (old lease rejected)', ok, f"reclaimed={reclaimed}, attempt={attempt}, old_lease_fenced={fenced}(want RFS01)")
 
 def t17_service_binding(sup):
     """Codex B6: claim ด้วย service A แล้ว apply ด้วย service B → reject (lease bind service)"""
@@ -614,9 +614,9 @@ def t17_service_binding(sup):
         with c.cursor() as cur:
             cur.execute("SELECT apply_rfq_extraction(%s,%s,%s::jsonb,'wA','svc-b','ap17')", (run, lease, payload))
     except psycopg2.Error as e:
-        denied = e.pgcode == errorcodes.CHECK_VIOLATION; c.rollback()
+        denied = e.pgcode == 'RFS01'; c.rollback()           # F1: service/lease mismatch = RFS01 (เดิม 23514)
     c.close()
-    record('T17 apply service binding (svc-a claim → svc-b apply reject)', denied, f"denied={denied}")
+    record('T17 apply service binding (svc-a claim → svc-b apply reject)', denied, f"denied={denied}(want RFS01)")
 
 def t18_temptable_no_hijack(sup):
     """Codex B5: caller (rfq_ingest) สร้าง temp _w/_e ก่อน → ไม่กระทบ SECURITY DEFINER apply (เลิกใช้ temp table แล้ว)"""

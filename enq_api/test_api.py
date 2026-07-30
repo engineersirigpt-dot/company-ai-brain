@@ -72,6 +72,52 @@ check("bad date (22007/22023) → 422",
 big = {"schema_version": "draft-v1", "items": [{"line_no": 1, "job_name": "x" * 1_100_000}]}
 check("oversize body → 413", client.post("/enq/draft", json=big, headers={**KEY, "X-Request-Id": "t-big"}).status_code == 413)
 
+# F1 mapper taxonomy — operation-aware, safe SQLSTATE (extraction state-conflict ≠ invalid-result ≠ not-found)
+mp = m._http_for_pg
+check("map RFS01 → 409 state_conflict", mp("apply", "RFS01") == (409, "state_conflict"))
+check("map RFN01 → 404 run_not_found", mp("claim", "RFN01") == (404, "run_not_found"))
+check("map RFR01 → 422 invalid_extraction_result", mp("apply", "RFR01") == (422, "invalid_extraction_result"))
+check("map 23505 → 409 idempotency_conflict", mp("begin", "23505") == (409, "idempotency_conflict"))
+check("map begin 23503 → 422 invalid_request", mp("begin", "23503") == (422, "invalid_request"))
+check("map draft 22023 → 422 invalid_payload", mp("draft", "22023") == (422, "invalid_payload"))
+check("map apply 22023 → 422 invalid_extraction_result", mp("apply", "22023") == (422, "invalid_extraction_result"))
+check("map 54000 → 413 payload_too_large", mp("apply", "54000") == (413, "payload_too_large"))
+check("map 57014 → 503 (transient)", mp("apply", "57014") == (503, "database_unavailable"))
+check("map 55P03 → 503 (transient class-55)", mp("apply", "55P03") == (503, "database_unavailable"))
+check("map unknown → 500", mp("apply", "XX000") == (500, "internal_error"))
+check("F1 apply RFS01≠RFR01 (409 state vs 422 result)", mp("apply", "RFS01")[0] == 409 and mp("apply", "RFR01")[0] == 422)
+
+# H1 non-ASCII API key → 401 (ไม่ใช่ 500/traceback)
+try:
+    m.require_actor("caf\xe9"); _h1 = False
+except m.HTTPException as _e:
+    _h1 = (_e.status_code == 401)
+except Exception:
+    _h1 = False
+check("H1 non-ASCII key (dependency) → 401 not 500", _h1)
+
+# raw ASGI probe — ส่ง header byte 0xE9 ตรงเข้า app (httpx client-side encode ASCII เท่านั้น จึงส่งไม่ได้)
+def asgi_status(method, path, headers):
+    st = {"code": None}
+    async def run():
+        started = {"done": False}
+        async def receive():
+            if not started["done"]:
+                started["done"] = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            return {"type": "http.disconnect"}
+        async def send(msg):
+            if msg["type"] == "http.response.start":
+                st["code"] = msg["status"]
+        scope = {"type": "http", "http_version": "1.1", "method": method, "scheme": "http",
+                 "path": path, "raw_path": path.encode(), "query_string": b"", "headers": headers,
+                 "server": ("127.0.0.1", 80), "client": ("127.0.0.1", 5555)}
+        await m.app(scope, receive, send)
+    asyncio.run(run())
+    return st["code"]
+na = asgi_status("GET", "/enq/rfq/00000000-0000-0000-0000-000000000000", [(b"x-api-key", b"caf\xe9")])
+check("H1 non-ASCII key (raw ASGI) → 401 not 500", na == 401, na)
+
 # ---- M1: middleware disconnect/multi-frame (direct ASGI probe) ----
 def asgi_probe(messages, max_bytes=1_000_000):
     state = {"called": False, "body": b"", "status": None}

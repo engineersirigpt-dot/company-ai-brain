@@ -161,6 +161,15 @@ REVOKE ALL ON rfq_source_ingest, rfq_ai_provider, rfq_redaction_attestation,
 -- ============================================================================
 -- PART 2 — service functions: begin / claim / fail  (apply อยู่ท้ายไฟล์)
 -- B2: ทั้ง 007 = transaction เดียว (ไม่มี COMMIT กลาง) → พังกลางทาง rollback หมด ไม่มี PUBLIC EXECUTE ค้าง
+-- ----------------------------------------------------------------------------
+-- Error taxonomy (Codex F1) — safe SQLSTATE ให้ transport/worker แยกประเภทได้โดยไม่ parse message:
+--   RFS01  state_conflict         (409) — claim/apply/fail: wrong status หรือ lease/actor/service ไม่ตรง/หมดอายุ
+--   RFN01  run_not_found          (404) — claim/apply/fail: run_id ไม่พบ
+--   RFR01  invalid_extraction_result (422) — apply: evidence completeness/derivation/inference
+--                                            หรือ provider result อ้าง ref ที่ resolve ไม่ได้
+--   23503  begin input ไม่พบ (source/provider/attestation/approval) → transport map 422 invalid_request
+--   22023  invalid input value    (422) · 23505 idempotency conflict (409) · 54000 payload limit (413)
+-- apply ใช้ RF* เพราะ 23514/23503 เดิมกำกวม (state-vs-result / run-vs-ref อยู่ op เดียวกัน)
 -- ============================================================================
 
 -- ---- helper: normalize+validate trusted args (เหมือน create_rfq_draft) ----
@@ -362,7 +371,7 @@ BEGIN
     -- lock order: parent rfq → run
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='23503'; END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='RFN01'; END IF;
 
     IF r.status_code='RUNNING' AND r.lease_expires_at > now() THEN
         v_out := jsonb_build_object('should_execute', false, 'reason', 'active lease held', 'run_id', p_run_id);
@@ -370,7 +379,7 @@ BEGIN
         VALUES (p_service,'CLAIM',p_request_id,r.rfq_id,p_run_id,p_worker,v_reqhash,v_out); RETURN v_out;
     END IF;
     IF r.status_code NOT IN ('PENDING','RUNNING') THEN
-        RAISE EXCEPTION 'claim ทำได้เฉพาะ PENDING/expired-RUNNING (พบ %)', r.status_code USING ERRCODE='23514';
+        RAISE EXCEPTION 'claim ทำได้เฉพาะ PENDING/expired-RUNNING (พบ %)', r.status_code USING ERRCODE='RFS01';
     END IF;
 
     -- R1/B3.2: re-evaluate egress ด้วย helper เดียว (min_valid ครอบ lease window) แล้วเทียบกับ run snapshot
@@ -429,12 +438,12 @@ BEGIN
     END IF;
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='23503'; END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='RFN01'; END IF;
     -- C4/B6: RUNNING + lease token + actor + service ตรง + ยังไม่หมดอายุ
     IF r.status_code<>'RUNNING' OR r.lease_token IS DISTINCT FROM p_lease_token
        OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.claimed_service IS DISTINCT FROM p_service
        OR r.lease_expires_at <= now() THEN
-        RAISE EXCEPTION 'fail ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='23514';
+        RAISE EXCEPTION 'fail ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='RFS01';
     END IF;
     UPDATE rfq_ai_extraction_run SET status_code='FAILED', error_code=p_error_code, completed_at=now() WHERE id=p_run_id;
     v_out := jsonb_build_object('status','FAILED','run_id',p_run_id);
@@ -513,12 +522,12 @@ BEGIN
 
     PERFORM 1 FROM rfq WHERE id=(SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=p_run_id) FOR UPDATE;
     SELECT * INTO r FROM rfq_ai_extraction_run WHERE id=p_run_id FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='23503'; END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'run % ไม่พบ', p_run_id USING ERRCODE='RFN01'; END IF;
     -- C4/B6: RUNNING + lease token + actor + service ตรง + ยังไม่หมดอายุ
     IF r.status_code<>'RUNNING' OR r.lease_token IS DISTINCT FROM p_lease_token
        OR r.claimed_by_ref IS DISTINCT FROM p_actor OR r.claimed_service IS DISTINCT FROM p_service
        OR r.lease_expires_at <= now() THEN
-        RAISE EXCEPTION 'apply ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='23514';
+        RAISE EXCEPTION 'apply ต้อง RUNNING + lease/actor/service ตรง + ยังไม่หมดอายุ' USING ERRCODE='RFS01';
     END IF;
     v_rfq := r.rfq_id; v_att := r.source_attachment_id;
 
@@ -627,7 +636,7 @@ BEGIN
             v_comp := NULL;
             IF ch ? 'component_no' AND jsonb_typeof(ch->'component_no')<>'null' AND ch->>'component_no' IS NOT NULL THEN
                 SELECT id INTO v_comp FROM rfq_component WHERE rfq_item_id=v_item AND component_no=(ch->>'component_no')::smallint;
-                IF v_comp IS NULL THEN RAISE EXCEPTION 'process.component_no % ไม่พบใน item', ch->>'component_no' USING ERRCODE='23503'; END IF;
+                IF v_comp IS NULL THEN RAISE EXCEPTION 'process.component_no % ไม่พบใน item', ch->>'component_no' USING ERRCODE='RFR01'; END IF;
             END IF;
             INSERT INTO rfq_process_requirement (rfq_item_id, rfq_component_id, sequence_no, process_ref, process_code_snapshot,
                 process_name_snapshot, process_name_raw, option_ref, option_code_snapshot, option_name_snapshot, option_name_raw,
@@ -662,7 +671,7 @@ BEGIN
             v_q := NULL;
             IF ch ? 'option_no' AND jsonb_typeof(ch->'option_no')<>'null' AND ch->>'option_no' IS NOT NULL THEN
                 SELECT id INTO v_q FROM rfq_quantity_option WHERE rfq_item_id=v_item AND option_no=(ch->>'option_no')::smallint;
-                IF v_q IS NULL THEN RAISE EXCEPTION 'delivery.option_no % ไม่พบใน item', ch->>'option_no' USING ERRCODE='23503'; END IF;
+                IF v_q IS NULL THEN RAISE EXCEPTION 'delivery.option_no % ไม่พบใน item', ch->>'option_no' USING ERRCODE='RFR01'; END IF;
             END IF;
             INSERT INTO rfq_delivery (rfq_item_id, quantity_option_id, delivery_no, destination_ref, destination_code_snapshot,
                 destination_name_snapshot, destination_raw, requested_date, quantity, unit_ref, unit_code_snapshot, is_split_delivery, notes)
@@ -683,10 +692,10 @@ BEGIN
         v_sid := _resolve_subject(v_rfq, v_item, ev->>'subject_type', ev->'ref');
         keystr := (ev->>'subject_type') || '|' || v_sid || '|' || (ev->>'field_name');
         IF NOT (v_written ? keystr) THEN
-            RAISE EXCEPTION 'evidence อ้าง field ที่ไม่ได้เขียน (%)', keystr USING ERRCODE='23514'; END IF;
+            RAISE EXCEPTION 'evidence อ้าง field ที่ไม่ได้เขียน (%)', keystr USING ERRCODE='RFR01'; END IF;
         v_deriv := COALESCE(ev->>'derivation_type','AI_EXTRACTED');
         IF v_deriv NOT IN ('AI_EXTRACTED','AI_INFERENCE') THEN
-            RAISE EXCEPTION 'apply evidence ต้องเป็น AI derivation (พบ %)', v_deriv USING ERRCODE='23514'; END IF;
+            RAISE EXCEPTION 'apply evidence ต้องเป็น AI derivation (พบ %)', v_deriv USING ERRCODE='RFR01'; END IF;
         v_stype := ev->>'source_type';
         IF v_stype IS NULL THEN RAISE EXCEPTION 'evidence.source_type ต้องระบุ (ห้าม default)' USING ERRCODE='22023'; END IF;
         INSERT INTO rfq_field_evidence (rfq_id, subject_type, subject_id, field_name, value_snapshot, source_type,
@@ -699,7 +708,7 @@ BEGIN
 
     -- ---- set equality: ทุก written field ต้องมี evidence (F4/R3/R4) ----
     SELECT count(*) INTO v_miss FROM jsonb_object_keys(v_written) w WHERE NOT (v_evseen ? w);
-    IF v_miss > 0 THEN RAISE EXCEPTION 'AI-written field ไม่มี evidence (% field)', v_miss USING ERRCODE='23514'; END IF;
+    IF v_miss > 0 THEN RAISE EXCEPTION 'AI-written field ไม่มี evidence (% field)', v_miss USING ERRCODE='RFR01'; END IF;
 
     -- ---- clarifications (question/reason only — R5) + AI_INFERENCE ต้องมี clarification subject+field เดียวกัน (B4) ----
     FOR cl IN SELECT * FROM jsonb_array_elements(COALESCE(p_payload->'clarifications','[]'::jsonb)) LOOP
@@ -710,7 +719,7 @@ BEGIN
         VALUES (v_rfq, cl->>'subject_type', v_sid, cl->>'field_name', cl->>'question', cl->>'reason', true, 'AI', p_actor);
     END LOOP;
     SELECT count(*) INTO v_miss FROM jsonb_object_keys(v_infer) i WHERE NOT (v_clar ? i);
-    IF v_miss > 0 THEN RAISE EXCEPTION 'AI_INFERENCE ต้องมี blocking clarification subject+field เดียวกัน (% field)', v_miss USING ERRCODE='23514'; END IF;
+    IF v_miss > 0 THEN RAISE EXCEPTION 'AI_INFERENCE ต้องมี blocking clarification subject+field เดียวกัน (% field)', v_miss USING ERRCODE='RFR01'; END IF;
 
     UPDATE rfq_ai_extraction_run SET status_code='SUCCEEDED', completed_at=now() WHERE id=p_run_id;
     v_prev := jsonb_build_object('rfq_id', v_rfq, 'run_id', p_run_id, 'status', 'SUCCEEDED');
@@ -729,7 +738,7 @@ BEGIN
     IF p_subject='RFQ' THEN RETURN p_rfq; END IF;
     v_ln := (p_ref->>'line_no')::smallint;
     SELECT id INTO v_item FROM rfq_item WHERE rfq_id=p_rfq AND line_no=v_ln;
-    IF v_item IS NULL THEN RAISE EXCEPTION 'ref line_no % ไม่พบ', v_ln USING ERRCODE='23503'; END IF;
+    IF v_item IS NULL THEN RAISE EXCEPTION 'ref line_no % ไม่พบ', v_ln USING ERRCODE='RFR01'; END IF;
     CASE p_subject
         WHEN 'ITEM' THEN RETURN v_item;
         WHEN 'QUANTITY' THEN SELECT id INTO v_id FROM rfq_quantity_option WHERE rfq_item_id=v_item AND option_no=(p_ref->>'option_no')::smallint;
@@ -742,7 +751,7 @@ BEGIN
         WHEN 'DELIVERY' THEN SELECT id INTO v_id FROM rfq_delivery WHERE rfq_item_id=v_item AND delivery_no=(p_ref->>'delivery_no')::smallint;
         ELSE RAISE EXCEPTION 'subject_type % ไม่รองรับ', p_subject USING ERRCODE='22023';
     END CASE;
-    IF v_id IS NULL THEN RAISE EXCEPTION 'ref %/% ไม่พบ subject', p_subject, p_ref USING ERRCODE='23503'; END IF;
+    IF v_id IS NULL THEN RAISE EXCEPTION 'ref %/% ไม่พบ subject', p_subject, p_ref USING ERRCODE='RFR01'; END IF;
     RETURN v_id;
 END;
 $$;

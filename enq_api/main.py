@@ -39,6 +39,8 @@ READ_DSN  = os.environ.get("RFQ_READ_DSN",  _DEV_DSN_R)
 #     local dev ให้ตั้ง ENQ_API_KEY เป็น key ทดสอบคงที่ แล้วส่ง X-API-Key ทุก request
 if not ENQ_API_KEY:
     raise RuntimeError("fail-closed: ต้องตั้ง ENQ_API_KEY (บังคับ auth แม้ local dev — ไม่มี unauthenticated dev mode)")
+if not ENQ_API_KEY.isascii():                                  # H1: key format = ASCII (compare_digest รับเฉพาะ ASCII)
+    raise RuntimeError("fail-closed: ENQ_API_KEY ต้องเป็น ASCII")
 
 
 # ---- B2/ASGI middleware จำกัด raw body (นับ bytes จริง ก่อน JSON parse; รองรับ chunked) ----
@@ -78,7 +80,8 @@ app.add_middleware(LimitBodyMiddleware, max_bytes=MAX_BODY_BYTES)
 
 # ---- B1: auth dependency — บังคับทุก /enq/* route ผ่าน router-wide dependency ----
 def require_actor(x_api_key: str | None = Header(default=None)) -> str:
-    if not x_api_key or not secrets.compare_digest(x_api_key, ENQ_API_KEY):
+    # H1: non-ASCII key → 401 (secrets.compare_digest รับเฉพาะ ASCII — กัน 500/traceback)
+    if not x_api_key or not x_api_key.isascii() or not secrets.compare_digest(x_api_key, ENQ_API_KEY):
         raise HTTPException(status_code=401, detail="unauthorized")
     return "enq-api"                                           # prod: map API-key/JWT → principal (ยังไม่ทำ)
 
@@ -122,28 +125,38 @@ def _check_depth(o: Any, d: int = 1):
         for v in o: _check_depth(v, d + 1)
 
 
-# ---- B2/H4: SQLSTATE → (http status, stable public code) — operation-aware-ready ----
+# ---- B2/H4/F1: (operation, SQLSTATE) → (http status, stable public code) ----
+# custom RF* codes จาก migration 007 (self-describing) + standard codes; op เลือก label ของ invalid-input
 _TRANSIENT = {"57014", "55P03", "40001", "40P01"}              # canceled/timeout, lock, deadlock, serialize
+_INVALID_LABEL = {"draft": "invalid_payload", "begin": "invalid_request",
+                  "claim": "invalid_request", "fail": "invalid_request",
+                  "apply": "invalid_extraction_result"}
 
-def _http_for_pg(code: str | None) -> tuple[int, str]:
+def _http_for_pg(op: str, code: str | None) -> tuple[int, str]:
     if not code:
         return 500, "internal_error"
     cls = code[:2]
-    if code == "54000":
-        return 413, "payload_too_large"                        # program-limit (size/collection cap)
-    if code == "23505":
-        return 409, "state_conflict"                           # idempotency key reused / unique violation
-    if code in ("23502", "23503", "23514") or cls == "22":     # not-null, FK, check, data-exception (22P02/22003/22007/22023)
-        return 422, "invalid_payload"
-    if code in _TRANSIENT or cls == "08":                      # transient — worker retry ได้
+    if code in _TRANSIENT or cls == "08":                      # transient ก่อน (55P03 = class 55 แต่ retryable)
         return 503, "database_unavailable"
+    if code == "RFS01":                                        # extraction: wrong status / lease mismatch|expired
+        return 409, "state_conflict"
+    if code == "RFN01":                                        # extraction: run_id ไม่พบ
+        return 404, "run_not_found"
+    if code == "RFR01":                                        # apply: invalid provider result (evidence/derivation/ref)
+        return 422, "invalid_extraction_result"
+    if code == "23505":                                        # idempotency key reused / unique violation
+        return 409, "idempotency_conflict"
+    if code == "54000":                                        # program-limit (size/collection cap)
+        return 413, "payload_too_large"
+    if cls == "22" or code in ("23502", "23503", "23514"):     # data-exception / not-null / FK / check → invalid input
+        return 422, _INVALID_LABEL.get(op, "invalid_request")
     return 500, "internal_error"
 
 
 def _raise_db(e: psycopg2.Error, request_id: str, op: str):
     code = getattr(e, "pgcode", None)
     diag = getattr(e, "diag", None)
-    status, detail = _http_for_pg(code)
+    status, detail = _http_for_pg(op, code)
     # log เฉพาะ schema identifier — ไม่ log message_primary ดิบ (อาจมีค่าจาก ENQ จริง)
     log.warning("db error req_id=%s op=%s sqlstate=%s constraint=%s column=%s table=%s → %s",
                 request_id, op, code,

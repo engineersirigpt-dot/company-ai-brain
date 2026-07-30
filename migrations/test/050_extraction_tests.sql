@@ -118,12 +118,12 @@ BEGIN
     v_lease := (claim_rfq_extraction(v_run,'w1','enq','c12')->>'lease_token')::uuid;
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x","product_type_ref":"PT"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF"}]}')::jsonb,'w1','enq','a12');
         RAISE NOTICE 'FAIL es12: missing evidence allowed'; fail:=fail+1;
-    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es12: AI field missing evidence → reject'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFR01' THEN RAISE NOTICE 'PASS es12: AI field missing evidence → RFR01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es12 %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ES13: evidence เกิน (field ไม่ได้เขียน) → reject
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF"},{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"notes","source_type":"PDF"}]}')::jsonb,'w1','enq','a13');
         RAISE NOTICE 'FAIL es13: extra evidence allowed'; fail:=fail+1;
-    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es13: evidence for unwritten field → reject'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFR01' THEN RAISE NOTICE 'PASS es13: evidence for unwritten field → RFR01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es13 %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ES14: input_sha256 mismatch → reject
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||rh64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF"}]}')::jsonb,'w1','enq','a14');
@@ -136,13 +136,13 @@ BEGIN
     UPDATE rfq_ai_extraction_run SET lease_expires_at = now()-interval '1 min' WHERE id=v_run;
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF"}]}')::jsonb,'w1','enq','a15');
         RAISE NOTICE 'FAIL es15: expired-lease apply allowed'; fail:=fail+1;
-    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es15: apply with expired lease → reject (C4)'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFS01' THEN RAISE NOTICE 'PASS es15: apply with expired lease → RFS01 (C4)'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es15 %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ES16 (R6): fail บน PENDING (ยังไม่ claim) → reject
     v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b16')->>'run_id')::uuid;
     BEGIN PERFORM fail_rfq_extraction(v_run, gen_random_uuid(), 'x','w1','enq','f16');
         RAISE NOTICE 'FAIL es16: fail on PENDING allowed'; fail:=fail+1;
-    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es16: fail on PENDING (no lease) → reject'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFS01' THEN RAISE NOTICE 'PASS es16: fail on PENDING (no lease) → RFS01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es16 %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ES17: unknown business key ใน fields → reject
     v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b17')->>'run_id')::uuid;
@@ -179,7 +179,7 @@ BEGIN
     -- ES22 (B4): evidence derivation HUMAN_EXTRACTED ใน apply → reject (ต้องเป็น AI)
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF","derivation_type":"HUMAN_EXTRACTED"}]}')::jsonb,'w1','enq','a22');
         RAISE NOTICE 'FAIL es22: HUMAN derivation allowed'; fail:=fail+1;
-    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es22: HUMAN/SYSTEM derivation ใน apply → reject'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFR01' THEN RAISE NOTICE 'PASS es22: HUMAN/SYSTEM derivation ใน apply → RFR01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es22 %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ES23 (B4): business field JSON null → reject
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":null}}],"evidence":[]}')::jsonb,'w1','enq','a23');
@@ -189,7 +189,7 @@ BEGIN
     -- ES24 (B4): AI_INFERENCE evidence โดยไม่มี matching blocking clarification → reject
     BEGIN PERFORM apply_rfq_extraction(v_run,v_lease,('{"schema_version":"extract-v1.1","input_sha256":"'||h64||'","items":[{"line_no":1,"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},"field_name":"job_name","source_type":"PDF","derivation_type":"AI_INFERENCE"}]}')::jsonb,'w1','enq','a24');
         RAISE NOTICE 'FAIL es24: AI_INFERENCE without clarification allowed'; fail:=fail+1;
-    EXCEPTION WHEN check_violation THEN RAISE NOTICE 'PASS es24: AI_INFERENCE ต้องมี blocking clarification'; pass:=pass+1; END;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFR01' THEN RAISE NOTICE 'PASS es24: AI_INFERENCE ต้องมี blocking clarification → RFR01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es24 %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ES25 (H1): blocked shell (มี extraction run ไม่ SUCCEEDED) → เข้า READY_FOR_ESTIMATE ไม่ได้
     v_run := (begin_rfq_extraction(s_bad_mal,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b25')->>'run_id')::uuid;
@@ -224,6 +224,23 @@ BEGIN
     IF v_res->>'should_execute'='false' AND v_res->>'status'='BLOCKED'
     THEN RAISE NOTICE 'PASS es28: provider disabled หลัง begin → claim BLOCKED'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es28 %',v_res; fail:=fail+1; END IF;
     UPDATE rfq_ai_provider SET is_active=true WHERE provider_code='typhoon';
+
+    -- ES29 (F1): claim run ที่ไม่มี → RFN01 (run_not_found ≠ state conflict ≠ invalid result)
+    BEGIN PERFORM claim_rfq_extraction(gen_random_uuid(),'w1','enq','c29');
+        RAISE NOTICE 'FAIL es29: claim unknown run allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFN01' THEN RAISE NOTICE 'PASS es29: claim unknown run → RFN01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es29 %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ES30 (F1): apply run ที่ไม่มี → RFN01
+    BEGIN PERFORM apply_rfq_extraction(gen_random_uuid(), gen_random_uuid(), p_ok,'w1','enq','a30');
+        RAISE NOTICE 'FAIL es30: apply unknown run allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFN01' THEN RAISE NOTICE 'PASS es30: apply unknown run → RFN01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es30 %',SQLERRM; fail:=fail+1; END IF; END;
+
+    -- ES31 (F1): apply ด้วย lease token ผิด (ยังไม่หมดอายุ) → RFS01 (state/lease conflict, แยกจาก invalid result RFR01)
+    v_run := (begin_rfq_extraction(s_ok,'LOCAL','typhoon','v1','enq',NULL,NULL,'{}'::jsonb,'w','enq','b31')->>'run_id')::uuid;
+    PERFORM claim_rfq_extraction(v_run,'w1','enq','c31');
+    BEGIN PERFORM apply_rfq_extraction(v_run, gen_random_uuid(), p_ok,'w1','enq','a31');
+        RAISE NOTICE 'FAIL es31: apply wrong-lease allowed'; fail:=fail+1;
+    EXCEPTION WHEN others THEN IF SQLSTATE='RFS01' THEN RAISE NOTICE 'PASS es31: apply wrong lease → RFS01'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL es31 %',SQLERRM; fail:=fail+1; END IF; END;
 
     RAISE NOTICE '========= EXTRACTION RESULT: % passed, % failed =========', pass, fail;
     IF fail>0 THEN RAISE EXCEPTION 'EXTRACTION TESTS FAILED: %', fail; END IF;
