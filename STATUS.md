@@ -357,6 +357,9 @@ field_path stability, revision chain integrity) ดูรายละเอี�
 - [x] payload contract → [`RFQ_DRAFT_PAYLOAD_V1.md`](RFQ_DRAFT_PAYLOAD_V1.md) (v1) + [`RFQ_EXTRACTION_PAYLOAD_V1_1.md`](RFQ_EXTRACTION_PAYLOAD_V1_1.md) (v1.1 rev3+C1-C4)
 - [x] **test รวม**: `020` 18 + `030` 15 + `040` 27 + `050` 30 + `rfq_concurrency_tests.py` **T01-T18** =
       **108 implemented checks + 1 gated skip (T07/F7)**; รันซ้ำได้ด้วย `migrations/test/run_all.sh` — ALL SUITES PASSED
+- [x] **✅ Codex GO `17f17c7` (2026-07-30)** — v1.1 DB provenance layer **implementation-ready** หลัง review 5 รอบ
+      (contract rev1-3 + implementation 2 รอบ); GO **ไม่รวม** deploy / real ENQ / Cloud extraction ข้อมูลจริง
+      → เดินต่อได้: FastAPI synthetic endpoint (10 guardrails) หรือ scanner/redactor/approver ingest functions
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
