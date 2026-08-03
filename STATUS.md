@@ -434,8 +434,15 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       **F5:** function เทียบด้วย **OID set** (`::regprocedure::oid`) ไม่ใช่ proname → overload ชื่อเดียวกัน (dummy signature) ถูกจับ
       **canonical spec** [`enq_api/caps.py`](enq_api/caps.py) — expected surface (function sigs + 47 read columns) ที่เดียว, main.py/worker.py import (กัน mirror drift)
       → deliberate-drift ครบ: F3 table-SELECT/column-UPDATE (inbound/worker/read) ; F4 inherited-role + PUBLIC grant (T11) ; F5 dummy overload → startup/assert fail
-      → **verified:** migration ALL PASSED (harness **21**), API **68**, orchestration **28** ; live (server effective-surface assert ผ่านกับ rfq_dev)
-      → **M1/M2 + B1-B3 + F1/F2 + F3/F4/F5 CLOSED (verified)** — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
+      → verified (migration 21, API 68, orch 28) — Codex confirm เจอ edge อีก 2 จุด (F6/F7)
+- [x] **F6/F7 all-relkind + schema/sequence/grant-option (commit `446d986`) — ปิด Codex confirm 3D0AC5D**
+      **F6:** relation scan `relkind IN ('r','p')` มองไม่เห็น **view/matview/foreign** → sensitive view หลุด ; ขยายเป็น `('r','p','v','m','f')`
+      **F7:** เพิ่มตรวจ **CREATE ON SCHEMA, sequence USAGE/SELECT/UPDATE, WITH GRANT OPTION** (function/column/schema) — เดิมไม่ตรวจ → credential ขยายอำนาจได้
+      **canonical 4-มิติ** ใน [`caps.py`](enq_api/caps.py) `assert_role(dsn,label,kind)` เดียว (main.py+worker.py เรียกร่วม) : (1) function OID (2) relation/column ทุก relkind (3) schema/sequence (4) grant-option
+        — inbound/worker: USAGE-on-schema เท่านั้น + ห้าม data/relation/sequence/grant-option ทุกชนิด ; read: exact base column + view/matview/foreign column = extra ; 009 mirror
+      → deliberate-drift ครบ: F6 sensitive view (read+worker) ; F7 schema CREATE / sequence UPDATE / EXECUTE-WGO / column-SELECT-WGO → startup/assert/migration fail
+      → **verified:** migration ALL PASSED (harness **21**), API **73**, orchestration **31** ; live (canonical assert ผ่านกับ rfq_dev)
+      → **M1/M2 + B1-B3 + F1/F2 + F3/F4/F5 + F6/F7 CLOSED (verified)** — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
       → เหลือ **M3** (real-provider gate, ไม่ block local+synthetic): terminal retry ยังไม่ durable ข้าม crash
         (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
