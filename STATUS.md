@@ -481,8 +481,13 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       - tests: **T21** (CONFIRM→REJECT block / REJECT→CONFIRM pass / revoked CONFIRMED block / soft-revoke / actor+reason non-blank / double-revoke / correction fallback F) + **T22** (transaction-order regression) ; อัปเดต 030 st7, T03b, T10
       - suites: **migration ALL PASSED (concurrency 21→23) · orchestration 58 · API 73** — local + synthetic
       - **multi-reviewer**: ปัจจุบัน = latest **overall** (single-reviewer stream V1) ; Codex ยืนยัน overall พอสำหรับ V1 **แต่ห้ามอ้างรองรับ multi-reviewer** — per-required-reviewer/quorum = รอ business decision ก่อน Ready จริง
-- [ ] **V3 (HIGH, ก่อน draft-edit)** เมื่อมี draft edit/upsert: ทุก readiness mutation ต้อง lock parent + reject terminal
-      + **bump parent `row_version`** (ตอนนี้ clarification/signoff lock parent แล้วแต่ยังไม่ bump version)
+- [x] **V3 (HIGH) — ✅ ปิดส่วน row_version bump (migration `011_rfq_readiness_versioning.sql`, `9dc9466`) รอ Codex review**
+      - readiness mutation ทั้ง 4 (`add_clarification`/`resolve_clarification`/`add_signoff`/`revoke_signoff`) เดิม lock parent + reject terminal (freeze) แล้ว **แต่ไม่ bump `row_version`** → client ถือ version เก่า mark_ready ผ่านได้ทั้งที่ readiness input เปลี่ยน (stale optimistic token)
+      - helper `_bump_rfq_version(rfq, actor)` (DEFINER, owner rfq_owner, REVOKE PUBLIC) เรียกหลัง parent lock → ทุก mutation bump row_version (+updated_at/by)
+      - `apply_rfq_extraction` insert clarification ตรง ๆ (ไม่ผ่าน add_clarification) → ENQ path ไม่กระทบ
+      - tests: **T23** (แต่ละ mutation bump ; stale token หลัง readiness mutation → mark_ready 40001 → re-read ผ่าน ; mutation บน terminal → reject+ไม่ bump) ; T03a อ่าน version สด ; T10 catalog +`_bump_rfq_version`
+      - suites: **migration ALL PASSED (concurrency 23→24) · orchestration 58 · API 73** — local + synthetic
+      - **draft-edit/upsert endpoint ยังไม่มี** = future consumer ของ pattern นี้ (V3 = prerequisite ทำ pattern ให้พร้อม)
 - [ ] **V4 (MED, ก่อน revision endpoint)** attachment/field-evidence carry-forward policy — attachment ใช้ link/lineage ไม่ duplicate binary;
       evidence สร้าง derivation provenance (map old subject→new) ไม่ copy UUID เก่า
 - [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — เติม master-gateway revalidate / egress gate / rules ครบก่อน Ready จริง
