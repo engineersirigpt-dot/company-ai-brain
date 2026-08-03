@@ -459,12 +459,12 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         · RFS01 fenced (drop, ห้าม fail lease เก่า) ; RFN01 alert ; RFI01/permission = operational alert (ไม่ตีเป็น transient)
       **M3c — cross-process crash / exactly-once ข้าม process:** ⏳ EXTERNAL gate — worker บังคับ dedupe เองไม่ได้ ; ปิดเมื่อ provider จริงพิสูจน์ idempotency (key เดิม→ผลเดิม, ไม่ side-effect ซ้ำ) หรือมี durable result checkpoint ก่อน apply
       → tests (orchestration 39→46→**52**): +invalid-result (`{}`→22023 / evidence ไม่ครบ→RFR01 / dup line_no→23505) +B1 (payload>1MB→54000) +B2 (Decimal/bytes→TypeError, NaN→ValueError) ทั้งหมด→FAILED, provider ครั้งเดียว, ไม่กลับเข้า claimable ; +fail-retry (drop ก่อน/หลัง commit → FAILED, provider ครั้งเดียว)
-      → suites: **orchestration 52 · API 73 · migration ALL PASSED** ; Codex รันยืนยันเอง 52/52 + probe lone-surrogate→22P02 / NUL→22P05 (class 22 → INVALID_RESULT → FAILED ถูกต้อง)
+      → suites: **orchestration 59 · API 73 · migration ALL PASSED** (backlog a+b เพิ่ม 7 tests) ; Codex รันยืนยันเอง 52/52 + probe lone-surrogate→22P02 / NUL→22P05 (class 22 → INVALID_RESULT → FAILED ถูกต้อง)
       → **Codex verdict `b140b23`: SHIP (local+synthetic)** — ห้ามขยาย GO ไป provider จริง/cloud/auth จริง/deploy จน M3c + external approvals ปิด
       → **non-blocking backlog (Codex, ก่อน provider จริง/production — ไม่ใช่ gate ของ local+synthetic):**
-        (a) lone-surrogate/NUL regression test (serializer+DB classifier พิสูจน์แล้ว แต่ควรมี test ก่อนต่อ provider จริง)
-        (b) config validation fail-fast: `ENQ_APPLY_RETRIES >= 1`, `ENQ_APPLY_BACKOFF_S >= 0`
-        (c) "alert" ปัจจุบัน = action code เท่านั้น → metric/error alert จริง = observability/deploy gate
+        ✅ (a) lone-surrogate/NUL regression test — CLOSED @ `5087acb` (surrogate→22P02, NUL→22P05, class 22 → INVALID_RESULT → FAILED)
+        ✅ (b) config fail-fast `_validate_config()` — CLOSED @ `5087acb` ; **แก้ latent bug**: `ENQ_APPLY_RETRIES=0` → `range(0)` ข้าม loop → `raise last` (last=None) → `raise None`/TypeError ; validate RETRIES≥1, BACKOFF≥0, POLL_LIMIT≥1, INTERVAL≥0, MARGIN≥0
+        ⏳ (c) "alert" ปัจจุบัน = action code เท่านั้น → metric/error alert จริง = observability/deploy gate
         (d) provider จริง: persistent idempotency (key เดิม+fingerprint เดิม→ผลเดิม ; key เดิม+fingerprint ต่าง→conflict ; ห้าม side-effect ซ้ำ)
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO/Legal)
 
