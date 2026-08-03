@@ -446,7 +446,7 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         **M1/M2 + B1-B3 + F1-F7 = CLOSED** — เข้า **deploy-readiness track** ได้ (ขอบเขต GO = DB-role surface + local/synthetic เท่านั้น)
       → **operational note (non-blocking, deploy work):** capability assert ทำงานตอน **startup** ไม่ใช่ continuous monitor →
         ตอน deploy ต้องมี restart/health automation หรือ privilege-drift monitoring (ถ้า DBA เปลี่ยน grant ระหว่าง process รัน)
-- [x] **M3 durable terminal retry (commit `451a91a` → M3-F1 fix `a3a5503`) — worker durability ปิดครบ (local+synthetic)**
+- [x] **M3 durable terminal retry (`451a91a` → `a3a5503` → `b140b23`) — ✅ Codex GO/SHIP `b140b23` : ENQ orchestration slice HARDENED/COMPLETE (local+synthetic)**
       **error contract:** `ProviderError` = terminal (fail/burn run) vs **`ProviderTransient`** = retryable (timeout/5xx/conn) → ไม่ burn run
       **durable apply/fail:** `_call_retry` retry ด้วย **request_id เดิม** บน transient DB error (OperationalError/serialize/deadlock/lock/canceled/class08,57)
         → 'provider สำเร็จ + apply connection ขาด' → retry → ledger คืน SUCCEEDED เดิม (idempotent, **ไม่เรียก provider ซ้ำ**) ไม่ว่า commit สำเร็จหรือไม่
@@ -459,7 +459,13 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         · RFS01 fenced (drop, ห้าม fail lease เก่า) ; RFN01 alert ; RFI01/permission = operational alert (ไม่ตีเป็น transient)
       **M3c — cross-process crash / exactly-once ข้าม process:** ⏳ EXTERNAL gate — worker บังคับ dedupe เองไม่ได้ ; ปิดเมื่อ provider จริงพิสูจน์ idempotency (key เดิม→ผลเดิม, ไม่ side-effect ซ้ำ) หรือมี durable result checkpoint ก่อน apply
       → tests (orchestration 39→46→**52**): +invalid-result (`{}`→22023 / evidence ไม่ครบ→RFR01 / dup line_no→23505) +B1 (payload>1MB→54000) +B2 (Decimal/bytes→TypeError, NaN→ValueError) ทั้งหมด→FAILED, provider ครั้งเดียว, ไม่กลับเข้า claimable ; +fail-retry (drop ก่อน/หลัง commit → FAILED, provider ครั้งเดียว)
-      → suites: **orchestration 52 · API 73 · migration ALL PASSED**
+      → suites: **orchestration 52 · API 73 · migration ALL PASSED** ; Codex รันยืนยันเอง 52/52 + probe lone-surrogate→22P02 / NUL→22P05 (class 22 → INVALID_RESULT → FAILED ถูกต้อง)
+      → **Codex verdict `b140b23`: SHIP (local+synthetic)** — ห้ามขยาย GO ไป provider จริง/cloud/auth จริง/deploy จน M3c + external approvals ปิด
+      → **non-blocking backlog (Codex, ก่อน provider จริง/production — ไม่ใช่ gate ของ local+synthetic):**
+        (a) lone-surrogate/NUL regression test (serializer+DB classifier พิสูจน์แล้ว แต่ควรมี test ก่อนต่อ provider จริง)
+        (b) config validation fail-fast: `ENQ_APPLY_RETRIES >= 1`, `ENQ_APPLY_BACKOFF_S >= 0`
+        (c) "alert" ปัจจุบัน = action code เท่านั้น → metric/error alert จริง = observability/deploy gate
+        (d) provider จริง: persistent idempotency (key เดิม+fingerprint เดิม→ผลเดิม ; key เดิม+fingerprint ต่าง→conflict ; ห้าม side-effect ซ้ำ)
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
