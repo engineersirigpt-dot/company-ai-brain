@@ -442,7 +442,10 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         — inbound/worker: USAGE-on-schema เท่านั้น + ห้าม data/relation/sequence/grant-option ทุกชนิด ; read: exact base column + view/matview/foreign column = extra ; 009 mirror
       → deliberate-drift ครบ: F6 sensitive view (read+worker) ; F7 schema CREATE / sequence UPDATE / EXECUTE-WGO / column-SELECT-WGO → startup/assert/migration fail
       → **verified:** migration ALL PASSED (harness **21**), API **73**, orchestration **31** ; live (canonical assert ผ่านกับ rfq_dev)
-      → **M1/M2 + B1-B3 + F1/F2 + F3/F4/F5 + F6/F7 CLOSED (verified)** — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
+      → **✅ Codex GO (`446d986`) — M1/M2 DB-role surface HARDENED สมบูรณ์ ; freeze surface นี้**
+        **M1/M2 + B1-B3 + F1-F7 = CLOSED** — เข้า **deploy-readiness track** ได้ (ขอบเขต GO = DB-role surface + local/synthetic เท่านั้น)
+      → **operational note (non-blocking, deploy work):** capability assert ทำงานตอน **startup** ไม่ใช่ continuous monitor →
+        ตอน deploy ต้องมี restart/health automation หรือ privilege-drift monitoring (ถ้า DBA เปลี่ยน grant ระหว่าง process รัน)
       → เหลือ **M3** (real-provider gate, ไม่ block local+synthetic): terminal retry ยังไม่ durable ข้าม crash
         (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
