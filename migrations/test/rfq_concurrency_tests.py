@@ -799,14 +799,11 @@ def t20_fence_apply(sup):
     record('T20 fence lock-wait-across-expiry (apply)', ok, detail)
 
 def t21_signoff_v2(sup):
-    """V2 (010): RFQ-007 latest active-decision rule + revoke_signoff append-only audit"""
+    """V2 (010): RFQ-007 latest active-decision rule (ยึด decision_seq) + revoke soft-revoke audit"""
     checks = []
 
-    def _add_signoff(rfq, decision, actor, when_sql):   # direct INSERT + controlled signed_at (deterministic order)
-        with sup.cursor() as cur:
-            cur.execute("SET search_path TO rfq")
-            cur.execute("INSERT INTO rfq_signoff (rfq_id,signoff_role,decision_code,actor_ref,signed_at) "
-                        "VALUES (%s,'REVIEWER',%s,%s," + when_sql + ")", (rfq, decision, actor))
+    def _decide(rfq, decision, actor):   # decision ใหม่ผ่าน service path (parent lock + decision_seq via DEFAULT)
+        return sql1(sup, "SELECT add_signoff(%s,'REVIEWER',%s,%s)", (rfq, decision, actor))
 
     def _mark_ready_blocked(rfq):
         try:
@@ -815,61 +812,93 @@ def t21_signoff_v2(sup):
         except psycopg2.Error as e:
             return (True, e.pgcode)
 
-    # case A: CONFIRM แล้ว REJECT ทีหลัง → BLOCK (เดิม EXISTS CONFIRMED = bug: ผ่าน)
-    fa = seed_review_rfq(sup, 'T21a')                       # base REVIEWER CONFIRMED (now())
-    _add_signoff(fa['rfq'], 'REJECTED', 'REV2', "now()+interval '1 min'")
-    bA, cA = _mark_ready_blocked(fa['rfq'])
-    checks.append(('A CONFIRM→REJECT blocks Ready (23514)', bA and cA == errorcodes.CHECK_VIOLATION, (bA, cA)))
-    checks.append(('A _reviewer_latest_confirmed=false (latest REJECTED)',
-                   sql1(sup, "SELECT _reviewer_latest_confirmed(%s)", (fa['rfq'],)) is False, None))
+    def _revoke_rejected(soid, actor, reason):
+        try:
+            sql1(sup, "SELECT revoke_signoff(%s,%s,%s)", (soid, actor, reason)); return False
+        except psycopg2.Error as e:
+            return e.pgcode == errorcodes.CHECK_VIOLATION
 
-    # case B: REJECT (เก่ากว่า) + CONFIRM (ล่าสุด) → Ready ผ่าน
-    fb = seed_review_rfq(sup, 'T21b')                       # base CONFIRMED (now()) = ล่าสุด
-    _add_signoff(fb['rfq'], 'REJECTED', 'REV0', "now()-interval '1 min'")
+    # A: CONFIRM (base) แล้ว REJECT ทีหลัง -> BLOCK (เดิม EXISTS CONFIRMED = bug: ผ่าน)
+    fa = seed_review_rfq(sup, 'T21a')                 # base REVIEWER CONFIRMED (decision_seq ต่ำสุด)
+    _decide(fa['rfq'], 'REJECTED', 'REV2')            # seq ใหม่กว่า -> latest = REJECTED
+    bA, cA = _mark_ready_blocked(fa['rfq'])
+    checks.append(('A CONFIRM->REJECT blocks Ready (23514)', bA and cA == errorcodes.CHECK_VIOLATION, (bA, cA)))
+    checks.append(('A _reviewer_latest_confirmed=false', sql1(sup, "SELECT _reviewer_latest_confirmed(%s)", (fa['rfq'],)) is False, None))
+
+    # B: REJECT แล้ว CONFIRM ทีหลัง -> Ready ผ่าน
+    fb = seed_review_rfq(sup, 'T21b')                 # base CONFIRMED (seq1)
+    _decide(fb['rfq'], 'REJECTED', 'REV0')            # REJECTED (seq2)
+    _decide(fb['rfq'], 'CONFIRMED', 'REV3')           # CONFIRMED (seq3) = latest
     ok_b = False
     try:
         sql1(sup, "SELECT mark_ready(%s,%s,'x')", (fb['rfq'], rowver(sup, fb['rfq'])))
         ok_b = sql1(sup, "SELECT status_code FROM rfq WHERE id=%s", (fb['rfq'],)) == 'READY_FOR_ESTIMATE'
     except psycopg2.Error:
         ok_b = False
-    checks.append(('B REJECT(earlier)+CONFIRM(latest) → Ready ผ่าน', ok_b, None))
+    checks.append(('B REJECT->CONFIRM(latest) -> Ready ผ่าน', ok_b, None))
 
-    # case C: revoke CONFIRMED เดียว → ไม่มี active reviewer → BLOCK ; + revoke = append-only
+    # C: revoke CONFIRMED เดียว -> ไม่มี active reviewer -> BLOCK ; revoke = soft (row อยู่ + metadata)
     fc = seed_review_rfq(sup, 'T21c')
-    sql1(sup, "SELECT revoke_signoff(%s,'admin','withdrawn')", (fc['signoff'],))
+    sql1(sup, "SELECT revoke_signoff(%s,'admin','withdrawn record')", (fc['signoff'],))
     with sup.cursor() as cur:
         cur.execute("SET search_path TO rfq")
         cur.execute("SELECT revoked_at IS NOT NULL, revoked_by_ref, revoke_reason FROM rfq_signoff WHERE id=%s", (fc['signoff'],))
         rev = cur.fetchone()
-    checks.append(('C revoke = append-only (row อยู่ + revoked_at/by/reason)',
-                   rev is not None and rev[0] is True and rev[1] == 'admin' and rev[2] == 'withdrawn', rev))
+    checks.append(('C revoke = soft (row อยู่ + revoked_at/by/reason)',
+                   rev is not None and rev[0] is True and rev[1] == 'admin' and rev[2] == 'withdrawn record', rev))
     bC, cC = _mark_ready_blocked(fc['rfq'])
-    checks.append(('C revoked CONFIRMED → Ready BLOCK (no active reviewer)', bC and cC == errorcodes.CHECK_VIOLATION, (bC, cC)))
+    checks.append(('C revoked CONFIRMED -> Ready BLOCK (no active reviewer)', bC and cC == errorcodes.CHECK_VIOLATION, (bC, cC)))
 
-    # case D: revoke reason ว่าง → reject
+    # D: M2 — revoke actor ว่าง -> reject ; reason ว่าง -> reject
     fd = seed_review_rfq(sup, 'T21d')
-    d_ok = False
-    try:
-        sql1(sup, "SELECT revoke_signoff(%s,'admin','   ')", (fd['signoff'],))
-    except psycopg2.Error as e:
-        d_ok = e.pgcode == errorcodes.CHECK_VIOLATION
-    checks.append(('D revoke reason ว่าง → reject (23514)', d_ok, None))
+    checks.append(('D revoke actor ว่าง -> reject (M2)', _revoke_rejected(fd['signoff'], '   ', 'r'), None))
+    checks.append(('D revoke reason ว่าง -> reject', _revoke_rejected(fd['signoff'], 'admin', '   '), None))
 
-    # case E: double-revoke → reject ; reason แรกไม่ถูกทับ (append-only)
+    # E: double-revoke -> reject ; reason แรกไม่ถูกทับ
     sql1(sup, "SELECT revoke_signoff(%s,'admin','first')", (fd['signoff'],))
-    e_ok = False
-    try:
-        sql1(sup, "SELECT revoke_signoff(%s,'admin2','second')", (fd['signoff'],))
-    except psycopg2.Error as e:
-        e_ok = e.pgcode == errorcodes.CHECK_VIOLATION
-    checks.append(('E double-revoke → reject (23514)', e_ok, None))
+    checks.append(('E double-revoke -> reject', _revoke_rejected(fd['signoff'], 'admin2', 'second'), None))
     checks.append(('E double-revoke ไม่ทับ revoke แรก',
                    sql1(sup, "SELECT revoke_reason FROM rfq_signoff WHERE id=%s", (fd['signoff'],)) == 'first', None))
 
+    # F (Codex Q4 correction semantics): revoke decision ล่าสุด -> fallback ไป active decision เก่ากว่า
+    #    CONFIRMED(base) -> REJECTED(latest) -> revoke REJECTED -> latest active = CONFIRMED -> Ready ผ่าน
+    ff = seed_review_rfq(sup, 'T21f')                 # base CONFIRMED (active)
+    rj = _decide(ff['rfq'], 'REJECTED', 'REVX')       # REJECTED = latest
+    b_before, _ = _mark_ready_blocked(ff['rfq'])
+    sql1(sup, "SELECT revoke_signoff(%s,'admin','entered in error')", (rj,))   # revoke REJECTED
+    ok_f = False
+    try:
+        sql1(sup, "SELECT mark_ready(%s,%s,'x')", (ff['rfq'], rowver(sup, ff['rfq'])))
+        ok_f = sql1(sup, "SELECT status_code FROM rfq WHERE id=%s", (ff['rfq'],)) == 'READY_FOR_ESTIMATE'
+    except psycopg2.Error:
+        ok_f = False
+    checks.append(('F revoke latest REJECTED -> fallback CONFIRMED เดิม -> Ready ผ่าน (correction)',
+                   b_before and ok_f, (b_before, ok_f)))
+
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or \
-        "latest active-decision rule + append-only revoke + reason/double-revoke guards ครบ"
-    record('T21 signoff v2 (latest-decision + append-only)', allok, detail)
+        "latest active-decision (decision_seq) + soft-revoke + actor/reason/double-revoke + correction fallback ครบ"
+    record('T21 signoff v2 (latest-decision + soft-revoke)', allok, detail)
+
+def t22_signoff_decision_order(sup):
+    """B1 regression: 'latest' ต้องยึด decision_seq (mutation order หลัง lock) ไม่ใช่ signed_at (txn-start)
+       txn A เริ่มก่อน (signed_at เก่า) แต่ commit CONFIRMED ทีหลัง txn B ที่ commit REJECTED ก่อน"""
+    f = seed_review_rfq(sup, 'T22'); rfq = f['rfq']   # base CONFIRMED (seq ต่ำสุด)
+    A = connect(role='rfq_app', app_name='rfq-ord-A'); A.autocommit = False
+    B = connect(role='rfq_app', app_name='rfq-ord-B'); B.autocommit = False
+    try:
+        ca = A.cursor(); ca.execute("SELECT 1")       # เริ่ม txn A -> now()=t_A (เก่าสุด)
+        cb = B.cursor(); cb.execute("SELECT add_signoff(%s,'REVIEWER','REJECTED','REVB')", (rfq,)); B.commit()  # t_B>t_A, commit ก่อน
+        ca.execute("SELECT add_signoff(%s,'REVIEWER','CONFIRMED','REVA')", (rfq,)); A.commit()                 # signed_at=t_A (< t_B) แต่ commit ทีหลัง
+    finally:
+        A.close(); B.close()
+    helper = sql1(sup, "SELECT _reviewer_latest_confirmed(%s)", (rfq,))
+    by_seq  = sql1(sup, "SELECT decision_code FROM rfq_signoff WHERE rfq_id=%s AND revoked_at IS NULL ORDER BY decision_seq DESC LIMIT 1", (rfq,))
+    by_time = sql1(sup, "SELECT decision_code FROM rfq_signoff WHERE rfq_id=%s AND revoked_at IS NULL ORDER BY signed_at DESC, id DESC LIMIT 1", (rfq,))
+    # test มีความหมายก็ต่อเมื่อ signed_at เรียงสวน (by_time=REJECTED) แต่ decision_seq/helper ถูก (CONFIRMED)
+    ok = helper is True and by_seq == 'CONFIRMED' and by_time == 'REJECTED'
+    record('T22 latest by decision_seq not signed_at (B1)', ok,
+           f"helper={helper}, by_seq={by_seq}(want CONFIRMED), by_signed_at={by_time}(bug->REJECTED)")
 
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
@@ -878,7 +907,7 @@ def main():
              t09_authz_separation, t10_catalog_and_policy,
              t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
              t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack,
-             t19_fence_fail, t20_fence_apply, t21_signoff_v2]
+             t19_fence_fail, t20_fence_apply, t21_signoff_v2, t22_signoff_decision_order]
     for t in tests:
         try:
             t(sup)
