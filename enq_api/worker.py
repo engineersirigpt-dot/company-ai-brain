@@ -138,23 +138,9 @@ def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) ->
     return results
 
 
-def _row(dsn: str, sql: str):
-    c = psycopg2.connect(dsn)
-    try:
-        with c.cursor() as cur:
-            cur.execute(sql); return cur.fetchone()
-    finally:
-        c.close()
-
 def assert_worker_role(dsn: str = WORKER_DSN):
-    """B3/F1/F3/F5: fail-closed ถ้า WORKER_DSN ชี้ role ผิด surface — เทียบ **effective** function OID set (กัน overload)
-    + ห้าม effective data access ทุกชนิด (SELECT/DML/column) ; จับทั้ง over/under-grant + inherited/PUBLIC"""
-    data = _row(dsn, caps.no_data_access_sql())[0]             # F3: รวม SELECT + column-level
-    if data:
-        raise RuntimeError(f"fail-closed: RFQ_WORKER_DSN มี direct data access บน rfq (ต้องผ่าน SECURITY DEFINER): {data}")
-    extra, missing = _row(dsn, caps.fn_drift_sql("worker"))    # F5: OID/signature set
-    if extra or missing:
-        raise RuntimeError(f"fail-closed: RFQ_WORKER_DSN function surface ผิด (extra={extra} missing={missing}) — over/under-grant?")
+    """B3/F1/F3–F7: fail-closed ถ้า WORKER_DSN ชี้ role ผิด surface — canonical effective check เดียวกับ main.py"""
+    caps.assert_role(dsn, "RFQ_WORKER_DSN (worker เช่น rfq_worker)", "worker")
 
 
 def main():

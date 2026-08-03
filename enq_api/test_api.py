@@ -286,6 +286,37 @@ if os.environ.get("SUPER_DSN"):
     _sx("DROP FUNCTION rfq.create_rfq_draft()")
     _sx("GRANT EXECUTE ON FUNCTION rfq.create_rfq_draft(jsonb,text,text,text) TO rfq_ingest")
     check("F5 overload (dummy create_rfq_draft()) แทน real sig → startup fail", rccode != 0 and "fail-closed" in err and "WRITE_DSN" in err, err[-200:])
+    # F6: read มี sensitive-VIEW SELECT → startup fail (relkind='v' ถูก scan)
+    _sx("CREATE VIEW rfq.codex_apiview AS SELECT input_sha256 FROM rfq.rfq_ai_extraction_run")
+    _sx("GRANT SELECT ON rfq.codex_apiview TO rfq_read_api")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+    _sx("REVOKE SELECT ON rfq.codex_apiview FROM rfq_read_api"); _sx("DROP VIEW rfq.codex_apiview")
+    check("F6 read sensitive-view SELECT → startup fail", rccode != 0 and "fail-closed" in err and "READ_DSN" in err, err[-200:])
+    # F7: inbound มี CREATE ON SCHEMA rfq → startup fail
+    _sx("GRANT CREATE ON SCHEMA rfq TO rfq_ingest")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+    _sx("REVOKE CREATE ON SCHEMA rfq FROM rfq_ingest")
+    check("F7 inbound schema CREATE → startup fail", rccode != 0 and "fail-closed" in err and "WRITE_DSN" in err, err[-200:])
+    # F7: inbound มี sequence UPDATE → startup fail
+    with _sup.cursor() as _c:
+        _c.execute("SELECT cl.relname FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace WHERE n.nspname='rfq' AND cl.relkind='S' LIMIT 1")
+        _r = _c.fetchone(); _seq = _r[0] if _r else None
+    if _seq:
+        _sx("GRANT UPDATE ON SEQUENCE rfq.%s TO rfq_ingest" % _seq)
+        rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+        _sx("REVOKE UPDATE ON SEQUENCE rfq.%s FROM rfq_ingest" % _seq)
+        check("F7 inbound sequence UPDATE → startup fail", rccode != 0 and "fail-closed" in err and "WRITE_DSN" in err, err[-200:])
+    # F7: inbound function EXECUTE WITH GRANT OPTION → startup fail
+    BEGIN_SIG = "rfq.begin_rfq_extraction(uuid,text,text,text,text,uuid,uuid,jsonb,text,text,text)"
+    _sx(f"GRANT EXECUTE ON FUNCTION {BEGIN_SIG} TO rfq_ingest WITH GRANT OPTION")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+    _sx(f"REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION {BEGIN_SIG} FROM rfq_ingest")
+    check("F7 inbound EXECUTE WITH GRANT OPTION → startup fail", rccode != 0 and "fail-closed" in err and "WRITE_DSN" in err, err[-200:])
+    # F7: read column SELECT WITH GRANT OPTION → startup fail
+    _sx("GRANT SELECT (id) ON rfq.rfq TO rfq_read_api WITH GRANT OPTION")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+    _sx("REVOKE GRANT OPTION FOR SELECT (id) ON rfq.rfq FROM rfq_read_api")
+    check("F7 read column SELECT WITH GRANT OPTION → startup fail", rccode != 0 and "fail-closed" in err and "READ_DSN" in err, err[-200:])
     _sup.close()
 
 nfail = res.count(False)

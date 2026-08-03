@@ -507,16 +507,29 @@ def t11_ingest_allowlist(sup):
     checks.append(('read_api function allowlist = get_extraction_status เท่านั้น', effr == ['get_extraction_status'], effr))
     # F2/F4: **effective** column allowlist — has_column_privilege (เห็น direct + inherited + PUBLIC) EXCEPT expected
     _rows = ",".join("('%s','%s')" % (t, c) for t, c in EXPECTED_RD)
-    def _rd_extra():
+    def _rd_extra():   # F6: relkind ครอบ view/matview/foreign ('r','p','v','m','f') ด้วย
         return sql1(sup, "SELECT string_agg(cl.relname||'.'||a.attname, ',') "
             "FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace "
             "JOIN pg_attribute a ON a.attrelid=cl.oid AND a.attnum>0 AND NOT a.attisdropped "
-            "WHERE n.nspname='rfq' AND cl.relkind IN ('r','p') "
+            "WHERE n.nspname='rfq' AND cl.relkind IN ('r','p','v','m','f') "
             "AND has_column_privilege('rfq_read_api', cl.oid, a.attnum, 'SELECT') "
             "AND (cl.relname, a.attname) NOT IN (VALUES " + _rows + ")")
+    def _rd_x7():      # F7: schema CREATE / sequence / grant-option (มิเรอร์ caps.extra_privs_sql)
+        return sql1(sup, "SELECT string_agg(x, ',') FROM ("
+            "SELECT 'schema:CREATE' x WHERE has_schema_privilege('rfq_read_api','rfq','CREATE') "
+            "UNION ALL SELECT 'seq:'||cl.relname||':'||p.priv FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace "
+            "CROSS JOIN LATERAL (VALUES ('USAGE'),('SELECT'),('UPDATE')) p(priv) "
+            "WHERE n.nspname='rfq' AND cl.relkind='S' AND has_sequence_privilege('rfq_read_api', cl.oid, p.priv) "
+            "UNION ALL SELECT 'fn-wgo:'||p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname='rfq' AND has_function_privilege('rfq_read_api', p.oid, 'EXECUTE WITH GRANT OPTION') "
+            "UNION ALL SELECT 'col-wgo:'||cl.relname||'.'||a.attname FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid=cl.oid AND a.attnum>0 AND NOT a.attisdropped "
+            "WHERE n.nspname='rfq' AND cl.relkind IN ('r','p','v','m','f') "
+            "AND has_column_privilege('rfq_read_api', cl.oid, a.attnum, 'SELECT WITH GRANT OPTION')) z")
     def _sx(q):
         with sup.cursor() as _c: _c.execute(q)
     checks.append(('F2 baseline: read_api ไม่มี column นอก allowlist (effective)', _rd_extra() is None, _rd_extra()))
+    checks.append(('F7 baseline: read_api ไม่มี schema/seq/grant-option', _rd_x7() is None, _rd_x7()))
     # F2: direct column over-grant (business + sensitive)
     _sx("GRANT SELECT (sample_description) ON rfq.rfq_item TO rfq_read_api")
     _sx("GRANT SELECT (original_filename) ON rfq.rfq_attachment TO rfq_read_api")
@@ -524,16 +537,36 @@ def t11_ingest_allowlist(sup):
     checks.append(('F2 drift caught: direct column over-grant', 'rfq_item.sample_description' in _e and 'rfq_attachment.original_filename' in _e, _e))
     _sx("REVOKE SELECT (sample_description) ON rfq.rfq_item FROM rfq_read_api")
     _sx("REVOKE SELECT (original_filename) ON rfq.rfq_attachment FROM rfq_read_api")
-    # F4: inherited-role grant — sensitive column ผ่าน role อื่นที่ grant ให้ rfq_read_api
+    # F4: inherited-role grant
     _sx("CREATE ROLE rfq_drift_tmp NOLOGIN")
     _sx("GRANT SELECT (source_sha256) ON rfq.rfq_source_ingest TO rfq_drift_tmp")
     _sx("GRANT rfq_drift_tmp TO rfq_read_api")
     checks.append(('F4 drift caught: inherited-role grant', 'rfq_source_ingest.source_sha256' in (_rd_extra() or ''), _rd_extra()))
     _sx("REVOKE rfq_drift_tmp FROM rfq_read_api"); _sx("DROP OWNED BY rfq_drift_tmp"); _sx("DROP ROLE rfq_drift_tmp")
-    # F4: PUBLIC grant — sensitive column ผ่าน PUBLIC (effective เห็น, direct-grantee ไม่เห็น)
+    # F4: PUBLIC grant
     _sx("GRANT SELECT (input_sha256) ON rfq.rfq_ai_extraction_run TO PUBLIC")
     checks.append(('F4 drift caught: PUBLIC grant', 'rfq_ai_extraction_run.input_sha256' in (_rd_extra() or ''), _rd_extra()))
     _sx("REVOKE SELECT (input_sha256) ON rfq.rfq_ai_extraction_run FROM PUBLIC")
+    # F6: sensitive view grant → effective read drift จับได้ (relkind='v')
+    _sx("CREATE VIEW rfq.codex_view_probe AS SELECT input_sha256 FROM rfq.rfq_ai_extraction_run")
+    _sx("GRANT SELECT ON rfq.codex_view_probe TO rfq_read_api")
+    checks.append(('F6 drift caught: sensitive view SELECT', 'codex_view_probe' in (_rd_extra() or ''), _rd_extra()))
+    _sx("REVOKE SELECT ON rfq.codex_view_probe FROM rfq_read_api"); _sx("DROP VIEW rfq.codex_view_probe")
+    # F7: schema CREATE + sequence UPDATE + function/column grant-option → จับได้
+    _sx("GRANT CREATE ON SCHEMA rfq TO rfq_read_api")
+    checks.append(('F7 drift caught: schema CREATE', 'schema:CREATE' in (_rd_x7() or ''), _rd_x7()))
+    _sx("REVOKE CREATE ON SCHEMA rfq FROM rfq_read_api")
+    _seq = sql1(sup, "SELECT cl.relname FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace WHERE n.nspname='rfq' AND cl.relkind='S' LIMIT 1")
+    if _seq:
+        _sx("GRANT UPDATE ON SEQUENCE rfq.%s TO rfq_read_api" % _seq)
+        checks.append(('F7 drift caught: sequence UPDATE', ('seq:'+_seq) in (_rd_x7() or ''), _rd_x7()))
+        _sx("REVOKE UPDATE ON SEQUENCE rfq.%s FROM rfq_read_api" % _seq)
+    _sx("GRANT EXECUTE ON FUNCTION rfq.get_extraction_status(uuid) TO rfq_read_api WITH GRANT OPTION")
+    checks.append(('F7 drift caught: function EXECUTE WITH GRANT OPTION', 'fn-wgo' in (_rd_x7() or ''), _rd_x7()))
+    _sx("REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION rfq.get_extraction_status(uuid) FROM rfq_read_api")
+    _sx("GRANT SELECT (id) ON rfq.rfq TO rfq_read_api WITH GRANT OPTION")
+    checks.append(('F7 drift caught: column SELECT WITH GRANT OPTION', 'col-wgo' in (_rd_x7() or ''), _rd_x7()))
+    _sx("REVOKE GRANT OPTION FOR SELECT (id) ON rfq.rfq FROM rfq_read_api")
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "role boundaries: inbound=draft+begin, worker=claim/apply/fail/list, read_api=business-SELECT+status; no cross-surface, no broad SELECT"
     record('T11 role allowlist boundaries (M1/M2)', allok, detail)

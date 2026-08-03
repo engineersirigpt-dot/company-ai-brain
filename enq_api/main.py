@@ -45,36 +45,9 @@ if not ENQ_API_KEY.isascii():                                  # H1: key format 
     raise RuntimeError("fail-closed: ENQ_API_KEY ต้องเป็น ASCII")
 
 
-# ---- B3/F1/F3/F5: startup capability fail-closed — เทียบ **effective** surface (function OID + relation/column) ----
-def _caps(dsn: str, sql: str):
-    c = psycopg2.connect(dsn)
-    try:
-        with c.cursor() as cur:
-            cur.execute(sql); return cur.fetchone()
-    finally:
-        c.close()
-
-def _assert_fn(dsn: str, label: str, role: str):
-    extra, missing = _caps(dsn, caps.fn_drift_sql(role))       # F5: OID/signature set (กัน overload ชื่อเดียวกัน)
-    if extra or missing:
-        raise RuntimeError(f"fail-closed: {label} function surface ผิด (extra={extra} missing={missing}) — over/under-grant?")
-
-def _assert_dsn_roles():
-    # READ (rfq_read_api): effective column SELECT == expected เป๊ะ ; ห้าม mutation ทุกชนิด ; function = {get_extraction_status}
-    extra, missing = _caps(READ_DSN, caps.read_cols_drift_sql())          # F3/F4: effective columns (เห็น inherited/PUBLIC)
-    if extra or missing:
-        raise RuntimeError(f"fail-closed: RFQ_READ_DSN column surface ผิด (extra={extra} missing={missing})")
-    mut = _caps(READ_DSN, caps.no_data_access_sql(("INSERT","UPDATE","DELETE","TRUNCATE","REFERENCES","TRIGGER")))[0]
-    if mut:
-        raise RuntimeError(f"fail-closed: RFQ_READ_DSN มี mutation privilege บน rfq: {mut}")
-    _assert_fn(READ_DSN, "RFQ_READ_DSN (read allowlist เช่น rfq_read_api)", "read")
-    # WRITE (inbound rfq_ingest): ห้าม effective data access ทุกชนิด (SELECT รวมด้วย — F3) ; function = {begin, create_rfq_draft}
-    data = _caps(WRITE_DSN, caps.no_data_access_sql())[0]                 # F3: รวม SELECT + column-level
-    if data:
-        raise RuntimeError(f"fail-closed: RFQ_WRITE_DSN มี direct data access บน rfq (ต้องผ่าน SECURITY DEFINER): {data}")
-    _assert_fn(WRITE_DSN, "RFQ_WRITE_DSN (inbound เช่น rfq_ingest)", "inbound")
-
-_assert_dsn_roles()                                            # บังคับเสมอ — ต่อ DB ไม่ได้/role ผิด = startup fail (fail-closed)
+# ---- B3/F1/F3–F7: startup capability fail-closed — canonical effective surface (function OID + relation/column ทุก relkind + schema/sequence/grant-option) ----
+caps.assert_role(READ_DSN,  "RFQ_READ_DSN (read allowlist เช่น rfq_read_api)", "read")
+caps.assert_role(WRITE_DSN, "RFQ_WRITE_DSN (inbound เช่น rfq_ingest)",         "inbound")
 
 
 # ---- B2/ASGI middleware จำกัด raw body (นับ bytes จริง ก่อน JSON parse; รองรับ chunked) ----

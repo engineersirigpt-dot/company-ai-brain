@@ -194,6 +194,26 @@ except Exception:
 _osx("DROP FUNCTION rfq.apply_rfq_extraction()")
 _osx(f"GRANT EXECUTE ON FUNCTION {APPLY_SIG} TO rfq_worker")
 check("F5 worker overload (dummy apply()) แทน real sig → assert fail", _f5)
+# F6/F7: worker view/schema/sequence/grant-option drift → assert fail
+def _wchk(name, setups, teardowns):
+    for s in setups: _osx(s)
+    try:
+        w.assert_worker_role(WDSN); r = False
+    except RuntimeError:
+        r = True
+    except Exception:
+        r = False
+    for t in teardowns: _osx(t)
+    check(name, r)
+_wchk("F6 worker sensitive-view SELECT → assert fail",
+      ["CREATE VIEW rfq.codex_wview AS SELECT input_sha256 FROM rfq.rfq_ai_extraction_run",
+       "GRANT SELECT ON rfq.codex_wview TO rfq_worker"],
+      ["REVOKE SELECT ON rfq.codex_wview FROM rfq_worker", "DROP VIEW rfq.codex_wview"])
+_wchk("F7 worker schema CREATE → assert fail",
+      ["GRANT CREATE ON SCHEMA rfq TO rfq_worker"], ["REVOKE CREATE ON SCHEMA rfq FROM rfq_worker"])
+_wchk("F7 worker EXECUTE WITH GRANT OPTION → assert fail",
+      [f"GRANT EXECUTE ON FUNCTION {APPLY_SIG} TO rfq_worker WITH GRANT OPTION"],
+      [f"REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION {APPLY_SIG} FROM rfq_worker"])
 
 sup.close()
 nfail = res.count(False)

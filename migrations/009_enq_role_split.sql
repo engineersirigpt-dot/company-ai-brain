@@ -57,7 +57,7 @@ GRANT EXECUTE ON FUNCTION get_extraction_status(uuid) TO rfq_read_api;
 -- assert M1 (F2): **exact (table,column) allowlist** ของ rfq_read_api = ตรง GET /enq/rfq เป๊ะ
 --   (ไม่ใช่ sentinel blacklist — จับได้ทั้ง extra column, missing column, table-level, และ DML)
 DO $assert$
-DECLARE v_extra text; v_missing text; v_tab text; v_fn text;
+DECLARE v_extra text; v_missing text; v_tab text; v_fn text; v_x text;
 BEGIN
   CREATE TEMP TABLE _rd_exp(t text, c text) ON COMMIT DROP;
   INSERT INTO _rd_exp(t,c) VALUES
@@ -77,11 +77,12 @@ BEGIN
     ('rfq_packing_requirement','quantity_per_pack'),('rfq_packing_requirement','unit_ref'),
     ('rfq_delivery','rfq_item_id'),('rfq_delivery','delivery_no'),('rfq_delivery','destination_raw'),('rfq_delivery','requested_date');
   -- F4: ใช้ **effective privilege** (has_column_privilege) ไม่ใช่ direct grantee → เห็นสิทธิ์ที่สืบทอด/PUBLIC ด้วย
-  -- extra: column ที่ rfq_read_api SELECT ได้จริง (effective) แต่ไม่อยู่ใน allowlist
+  -- F6: relkind ครอบ table+partition+**view+matview+foreign** ('r','p','v','m','f')
+  -- extra: column ที่ rfq_read_api SELECT ได้จริง (effective) แต่ไม่อยู่ใน allowlist (view/matview column = extra)
   SELECT string_agg(cl.relname||'.'||a.attname, ', ' ORDER BY cl.relname, a.attname) INTO v_extra
   FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace
     JOIN pg_attribute a ON a.attrelid=cl.oid AND a.attnum>0 AND NOT a.attisdropped
-  WHERE n.nspname='rfq' AND cl.relkind IN ('r','p')
+  WHERE n.nspname='rfq' AND cl.relkind IN ('r','p','v','m','f')
     AND has_column_privilege('rfq_read_api', cl.oid, a.attnum, 'SELECT')
     AND (cl.relname, a.attname) NOT IN (SELECT t,c FROM _rd_exp);
   IF v_extra IS NOT NULL THEN RAISE EXCEPTION 'M1 exact-allowlist: rfq_read_api อ่าน column นอก allowlist (effective): %', v_extra; END IF;
@@ -89,10 +90,10 @@ BEGIN
   SELECT string_agg(t||'.'||c, ', ' ORDER BY t,c) INTO v_missing FROM _rd_exp e
    WHERE NOT has_column_privilege('rfq_read_api', ('rfq.'||e.t)::regclass, e.c, 'SELECT');
   IF v_missing IS NOT NULL THEN RAISE EXCEPTION 'M1 exact-allowlist: rfq_read_api ขาด column ที่ endpoint ใช้: %', v_missing; END IF;
-  -- ห้าม mutation ทุกชนิด (effective, รวม column-level) บน rfq base table
+  -- ห้าม mutation ทุกชนิด (effective, รวม column-level) บน relation ทุก relkind
   SELECT string_agg(cl.relname||':'||p.priv, ', ') INTO v_tab FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace
     CROSS JOIN LATERAL (VALUES ('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')) p(priv)
-   WHERE n.nspname='rfq' AND cl.relkind IN ('r','p')
+   WHERE n.nspname='rfq' AND cl.relkind IN ('r','p','v','m','f')
      AND (has_table_privilege('rfq_read_api', cl.oid, p.priv)
        OR (p.priv IN ('INSERT','UPDATE','REFERENCES') AND has_any_column_privilege('rfq_read_api', cl.oid, p.priv)));
   IF v_tab IS NOT NULL THEN RAISE EXCEPTION 'M1: rfq_read_api มี mutation privilege บน rfq: %', v_tab; END IF;
@@ -104,6 +105,21 @@ BEGIN
   IF NOT has_function_privilege('rfq_read_api', 'rfq.get_extraction_status(uuid)'::regprocedure, 'EXECUTE') THEN
     RAISE EXCEPTION 'M1: rfq_read_api เรียก get_extraction_status ไม่ได้';
   END IF;
+  -- F7: schema CREATE / sequence / grant-option ต้องไม่มี ; schema USAGE ต้องมี
+  IF NOT has_schema_privilege('rfq_read_api','rfq','USAGE') THEN RAISE EXCEPTION 'M1: rfq_read_api ไม่มี USAGE ON SCHEMA rfq'; END IF;
+  SELECT string_agg(x, ', ') INTO v_x FROM (
+    SELECT 'schema:CREATE' x WHERE has_schema_privilege('rfq_read_api','rfq','CREATE')
+    UNION ALL SELECT 'schema:USAGE-WGO' WHERE has_schema_privilege('rfq_read_api','rfq','USAGE WITH GRANT OPTION')
+    UNION ALL SELECT 'seq:'||cl.relname||':'||p.priv FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace
+      CROSS JOIN LATERAL (VALUES ('USAGE'),('SELECT'),('UPDATE')) p(priv)
+      WHERE n.nspname='rfq' AND cl.relkind='S' AND has_sequence_privilege('rfq_read_api', cl.oid, p.priv)
+    UNION ALL SELECT 'fn-wgo:'||p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='rfq' AND has_function_privilege('rfq_read_api', p.oid, 'EXECUTE WITH GRANT OPTION')
+    UNION ALL SELECT 'col-wgo:'||cl.relname||'.'||a.attname FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace
+      JOIN pg_attribute a ON a.attrelid=cl.oid AND a.attnum>0 AND NOT a.attisdropped
+      WHERE n.nspname='rfq' AND cl.relkind IN ('r','p','v','m','f')
+        AND has_column_privilege('rfq_read_api', cl.oid, a.attnum, 'SELECT WITH GRANT OPTION')) z;
+  IF v_x IS NOT NULL THEN RAISE EXCEPTION 'M1: rfq_read_api มี privilege เกิน (schema/sequence/grant-option): %', v_x; END IF;
 END $assert$;
 
 COMMIT;
