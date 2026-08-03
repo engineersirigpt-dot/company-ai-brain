@@ -427,6 +427,12 @@ def t10_catalog_and_policy(sup):
     six = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND p.proname='mark_ready' AND p.pronargs=6""")
     if six and six > 0: bad.append("mark_ready-6arg-exists(policy-spoofable)")
+    # B1: add_clarification 7-arg (provenance-as-actor) ต้องถูก DROP ; เหลือแค่ 8-arg + rfq_app EXECUTE เฉพาะ 8-arg
+    ac7 = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='rfq' AND p.proname='add_clarification' AND p.pronargs=7""")
+    if ac7 and ac7 > 0: bad.append("add_clarification-7arg-exists(B1 provenance-as-actor)")
+    ac8 = sql1(sup, "SELECT has_function_privilege('rfq_app','add_clarification(uuid,text,uuid,text,boolean,text,text,text)','EXECUTE')")
+    if ac8 is not True: bad.append(f"rfq_app !EXECUTE add_clarification-8arg={ac8}")
     # และ readiness_run ต้องบันทึก trusted version เสมอ
     f = seed_review_rfq(sup, 'T10')
     sql1(sup, "SELECT mark_ready(%s,%s,'x')", (f['rfq'], rowver(sup, f['rfq'])))

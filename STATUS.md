@@ -481,10 +481,10 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       - tests: **T21** (CONFIRM→REJECT block / REJECT→CONFIRM pass / revoked CONFIRMED block / soft-revoke / actor+reason non-blank / double-revoke / correction fallback F) + **T22** (transaction-order regression) ; อัปเดต 030 st7, T03b, T10
       - suites: **migration ALL PASSED (concurrency 21→23) · orchestration 58 · API 73** — local + synthetic
       - **multi-reviewer**: ปัจจุบัน = latest **overall** (single-reviewer stream V1) ; Codex ยืนยัน overall พอสำหรับ V1 **แต่ห้ามอ้างรองรับ multi-reviewer** — per-required-reviewer/quorum = รอ business decision ก่อน Ready จริง
-- [x] **V3 (HIGH) — ✅ ปิดส่วน row_version bump (migration `011_rfq_readiness_versioning.sql`, `9dc9466`→`65e0e96`) รอ Codex confirm**
+- [x] **V3 (HIGH) — ✅ GO / HARDENED (local+synthetic) — Codex confirm `65e0e96`** (migration `011_rfq_readiness_versioning.sql`, `9dc9466`→`65e0e96`)
       - readiness mutation ทั้ง 4 (`add_clarification`/`resolve_clarification`/`add_signoff`/`revoke_signoff`) เดิม lock parent + reject terminal (freeze) แล้ว **แต่ไม่ bump `row_version`** → client ถือ version เก่า mark_ready ผ่านได้ทั้งที่ readiness input เปลี่ยน (stale optimistic token)
       - helper `_bump_rfq_version(rfq, actor)` (DEFINER, owner rfq_owner, REVOKE PUBLIC) เรียกหลัง parent lock → ทุก mutation bump row_version (+updated_at/by)
-      - `apply_rfq_extraction` insert clarification ตรง ๆ (ไม่ผ่าน add_clarification) → ENQ path ไม่กระทบ
+      - `apply_rfq_extraction` insert clarification ตรง ๆ (ไม่ผ่าน add_clarification) จึง**ไม่ bump ซ้ำต่อ clarification** ; หลัง M1 apply สำเร็จ bump aggregate **หนึ่งครั้ง** (ดูบรรทัด M1 ด้านล่าง)
       - **review B1/M1/N1 (`65e0e96`)**: **B1** `add_clarification` เดิม bump ด้วย `raised_by_ref` (provenance, nullable) → `raised_by_ref=NULL` ทำ updated_by_ref NOT NULL พัง (23502) ; แยก authenticated `p_actor` (8-arg, validate) ออกจาก provenance, DROP overload 7-arg
       - **M1**: `apply_rfq_extraction` เปลี่ยน aggregate ทั้งก้อนแต่ไม่ bump → เพิ่ม bump **หนึ่งครั้ง** ที่ success path (หลัง validation ครบ, ก่อน SUCCEEDED) ; replay (ledger-first return) + fail (RAISE/rollback) ไม่ bump ; **N1** `_bump` ใช้ `clock_timestamp()` + validate actor + not-found guard
       - tests: **T23** (แต่ละ mutation bump ; stale token → 40001 ; terminal reject ไม่ bump ; **B1** raised_by_ref=NULL+actor→ok / blank actor→reject) ; **M1** orchestration (apply 1→2 ; replay ยัง 2 ; fail ยัง 1 ; multi-item bump ครั้งเดียว) ; T03a อ่าน version สด ; T10 +`_bump_rfq_version`
