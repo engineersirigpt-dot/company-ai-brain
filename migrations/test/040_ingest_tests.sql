@@ -157,10 +157,11 @@ BEGIN
     EXCEPTION WHEN others THEN IF SQLSTATE='22023' THEN RAISE NOTICE 'PASS is14c: control-char actor rejected'; pass:=pass+1; ELSE RAISE NOTICE 'FAIL is14c wrong: %',SQLERRM; fail:=fail+1; END IF; END;
 
     -- ST15: payload ตัวอย่างเต็มตาม RFQ_DRAFT_PAYLOAD_V1.md (ทุก 6 child array + corrugated) → success (กัน doc drift)
+    -- NB: วันที่ใช้ far-future (2099) เพราะ rfq_check บังคับ quote_due_at >= received_at(now()) — วันที่ near-future จะหมดอายุตามปฏิทิน
     v_rfq := create_rfq_draft('{
       "schema_version":"draft-v1",
       "header":{"enquiry_ref":"ENQ-DOC","source_channel":"EMAIL","customer_ref":"CUST-01","customer_name_raw":"บริษัท ก",
-        "contact_name":"ป","contact_phone":"02","sales_owner_ref":"AE","priority_code":"NORMAL","quote_due_at":"2026-08-01T00:00:00+07:00"},
+        "contact_name":"ป","contact_phone":"02","sales_owner_ref":"AE","priority_code":"NORMAL","quote_due_at":"2099-08-01T00:00:00+07:00"},
       "items":[{"line_no":1,"job_name":"box","product_type_ref":"PT","finished_width_mm":80,"finished_length_mm":120,"finished_depth_mm":50,
         "finishing_state":"SPECIFIED","packing_state":"SPECIFIED","artwork_state":"RECEIVED","sample_state":"AVAILABLE",
         "quantity_options":[{"option_no":1,"quantity":5000,"unit_ref":"PCS","is_primary":true}],
@@ -170,7 +171,7 @@ BEGIN
           "corrugated":{"flute_code_snapshot":"B","layer_count_snapshot":3}}],
         "processes":[{"sequence_no":1,"process_ref":"PRC-1","component_no":1,"side_code":"OUTSIDE"}],
         "packings":[{"sequence_no":1,"packing_ref":"PK-1","quantity_per_pack":50}],
-        "deliveries":[{"delivery_no":1,"destination_ref":"DEST-1","option_no":1,"requested_date":"2026-08-15"}]}]
+        "deliveries":[{"delivery_no":1,"destination_ref":"DEST-1","option_no":1,"requested_date":"2099-08-15"}]}]
     }'::jsonb, 'enq-extractor', 'enq', 'rdoc');
     IF (SELECT count(*) FROM rfq_item WHERE rfq_id=v_rfq)=1
        AND (SELECT count(*) FROM rfq_design_variant v JOIN rfq_item i ON i.id=v.rfq_item_id WHERE i.rfq_id=v_rfq)=1
