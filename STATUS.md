@@ -420,7 +420,15 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       B3 → main.py/worker.py ตรวจ capability ของ DSN ตอน startup → RuntimeError ถ้า role ผิด surface (READ=rfq_app → fail)
       → **verified ครบ 3 suites:** migration ALL PASSED (harness **T01-T20 = 21**), API **61**, orchestration **23**
       → พบ+แก้ time-bomb แยก (`029b2a1`): 040 is15 hardcode `quote_due_at=2026-08-01` หมดอายุตามปฏิทิน (rfq_check) — ไม่เกี่ยว M1/M2, บั๊มเป็น 2099
-      → **B1-B3 CLOSED (verified)** — รอ Codex targeted re-review (CODEX_INBOX)
+      → B1 + README = PASS ; Codex re-review เจอ **F1/F2** (checks เป็น partial fingerprint ไม่ใช่ exact surface)
+- [x] **F1/F2 exact surface (commit `235ba89`) — ปิด Codex re-review 2E186D1**
+      **F1:** startup (main.py/worker.py) เทียบ **exact effective function set** ต่อ schema rfq (เหมือน T11) + ห้าม direct table DML
+        → จับทั้ง over-grant/under-grant (inbound={begin,create_rfq_draft}, worker={apply,claim,fail,list}, read={get_extraction_status})
+      **F2:** 009 assert เปลี่ยนจาก sentinel blacklist → **exact (table,column) allowlist** (enumerate role_column_grants EXCEPT 47 endpoint columns 2 ทาง) + ห้าม table-level privilege
+      → deliberate-drift tests: inbound/read over-grant + inbound under-grant → startup fail ; worker over/under-grant → assert fail ;
+        T11 grant business+sensitive column → exact-allowlist จับได้
+      → **verified:** migration ALL PASSED (harness **21**), API **64**, orchestration **25** ; live smoke (server startup assert ผ่านกับ rfq_dev)
+      → **M1/M2 + B1-B3 + F1/F2 CLOSED (verified)** — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
       → เหลือ **M3** (real-provider gate, ไม่ block local+synthetic): terminal retry ยังไม่ durable ข้าม crash
         (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
