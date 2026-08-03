@@ -405,10 +405,17 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       `now()` คงไว้เฉพาะ begin (สร้าง run) + list_claimable (candidate selection). regression **T19/T20** (fail/apply
       lock-wait-across-expiry → RFS01 + run ยัง RUNNING). **harness T01-T20 = 21** ; Codex 3-path probe ยืนยันตรง contract
       → **B1 CLOSED — orchestration slice = GO local + synthetic** (Codex verdict `9485e32`)
-      → **pre-deploy gates (Codex M1/M2/M3, ยังไม่ block local+synthetic):**
-        **M1** read role `rfq_app` มี `SELECT ALL TABLES` → ข้าม safe projection ได้ (ต้อง allowlist read role ก่อน deploy)
-        **M2** inbound API + worker ใช้ role เดียว (`rfq_ingest_login`) → แยก inbound(draft/begin) vs worker(claim/apply/fail) ก่อน deploy
-        **M3** terminal retry ยังไม่ durable ข้าม crash (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
+- [x] **M1/M2 role split (commit `88d6631`) — ✅ pre-deploy hardening เสร็จ (migration 009)**
+      แยก extraction surface เป็น 4 non-superuser role → credential เดียวถูกเจาะ = ทำได้เฉพาะ surface ตัวเอง:
+        **rfq_ingest** (inbound API) = create_rfq_draft + begin ; **rfq_worker** (worker, ใหม่) = list_claimable/claim/apply/fail ;
+        **rfq_read_api** (public read, ใหม่) = SELECT business tree + get_extraction_status ; **rfq_app** (reviewer, เดิม) = SELECT ALL (internal)
+      **M2:** ย้าย claim/apply/fail/list ออกจาก rfq_ingest → rfq_worker (inbound เรียก worker mutation ไม่ได้)
+      **M1:** rfq_read_api มี SELECT เฉพาะ 7 business tree tables (ไม่ใช่ SELECT ALL) → อ่าน run/attachment/source/evidence ตรง ๆ ไม่ได้
+        (ปิด leak provider_input_ref/input_sha256/object-store key ที่ safe projection ซ่อน) — 009 assert ตอน migrate
+      → harness **T11** ยืนยัน 3 role boundaries + cross-surface denials ; **T01-T20 = 21** ; API **55** ; orchestration **21**
+      → **M1+M2 CLOSED** — รอ Codex review (CODEX_INBOX)
+      → เหลือ **M3** (real-provider gate, ไม่ block local+synthetic): terminal retry ยังไม่ durable ข้าม crash
+        (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M1/M2/M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
