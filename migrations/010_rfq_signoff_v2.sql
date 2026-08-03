@@ -48,8 +48,9 @@ ALTER TABLE rfq_signoff
 ALTER TABLE rfq_signoff DROP CONSTRAINT IF EXISTS ck_rfq_signoff_revoke;
 ALTER TABLE rfq_signoff ADD CONSTRAINT ck_rfq_signoff_revoke CHECK (
     (revoked_at IS NULL     AND revoked_by_ref IS NULL AND revoke_reason IS NULL)
- OR (revoked_at IS NOT NULL AND NULLIF(btrim(revoked_by_ref), '') IS NOT NULL     -- M2: actor ห้ามว่าง
-                            AND NULLIF(btrim(revoke_reason),  '') IS NOT NULL)     -- reason ห้ามว่าง
+ OR (revoked_at IS NOT NULL                                                        -- M2 + re-review: ห้าม whitespace ล้วน
+     AND revoked_by_ref IS NOT NULL AND revoked_by_ref ~ '[^[:space:]]'            -- actor ต้องมี non-whitespace (btrim ตัดแค่ space จับ tab/NL ไม่ได้)
+     AND revoke_reason  IS NOT NULL AND revoke_reason  ~ '[^[:space:]]')           -- reason ต้องมี non-whitespace
 );
 
 -- partial index: หา latest active decision ต่อ (rfq, role) เร็ว (ยึด decision_seq)
@@ -198,10 +199,11 @@ SECURITY DEFINER SET search_path = pg_catalog, rfq, pg_temp AS $$
 DECLARE v_rfq uuid; s rfq_signoff%ROWTYPE;
 BEGIN
     -- input validation ก่อน (cheap, ไม่แตะ state ; invalid มี precedence เหนือ not-found/frozen — fail cheap ก่อนถือ lock)
-    IF p_actor IS NULL OR btrim(p_actor) = '' OR length(p_actor) > 200 OR p_actor ~ '[[:cntrl:]]' THEN
-        RAISE EXCEPTION 'revoke actor invalid (blank/too long/control char)' USING ERRCODE = '23514';   -- M2
+    IF p_actor IS NULL OR p_actor !~ '[^[:space:]]' OR length(p_actor) > 200 OR p_actor ~ '[[:cntrl:]]' THEN
+        RAISE EXCEPTION 'revoke actor invalid (blank/whitespace/too long/control char)' USING ERRCODE = '23514';   -- M2
     END IF;
-    IF p_reason IS NULL OR btrim(p_reason) = '' OR length(p_reason) > 2000 THEN
+    -- re-review: reason ที่เป็น whitespace ล้วน (tab/newline) ต้องไม่ผ่าน — `!~ '[^space]'` = ไม่มี non-whitespace เลย
+    IF p_reason IS NULL OR p_reason !~ '[^[:space:]]' OR length(p_reason) > 2000 THEN
         RAISE EXCEPTION 'revoke reason required (non-blank, <=2000)' USING ERRCODE = '23514';
     END IF;
     -- M1: parent ก่อน → child (ตาม lock protocol เดิม parent RFQ → child ; กัน deadlock surface)
@@ -214,7 +216,9 @@ BEGIN
         RAISE EXCEPTION 'signoff % already revoked', p_signoff_id USING ERRCODE = '23514';   -- soft revoke: no double-revoke
     END IF;
     UPDATE rfq_signoff
-        SET revoked_at = clock_timestamp(), revoked_by_ref = btrim(p_actor), revoke_reason = p_reason
+        SET revoked_at = clock_timestamp(),
+            revoked_by_ref = btrim(p_actor, E' \t\n\r\f\v'),      -- normalize: ตัด whitespace รอบ (ทุกชนิด ไม่ใช่แค่ space)
+            revoke_reason  = btrim(p_reason, E' \t\n\r\f\v')
         WHERE id = p_signoff_id;   -- clock_timestamp() = เวลา revoke จริงหลัง lock (ไม่ใช่ txn-start)
 END;
 $$;

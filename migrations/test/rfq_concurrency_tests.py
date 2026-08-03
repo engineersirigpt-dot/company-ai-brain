@@ -849,10 +849,25 @@ def t21_signoff_v2(sup):
     bC, cC = _mark_ready_blocked(fc['rfq'])
     checks.append(('C revoked CONFIRMED -> Ready BLOCK (no active reviewer)', bC and cC == errorcodes.CHECK_VIOLATION, (bC, cC)))
 
-    # D: M2 — revoke actor ว่าง -> reject ; reason ว่าง -> reject
+    # D: M2 + re-review — revoke actor/reason ว่าง หรือ whitespace ล้วน (tab/newline) -> reject
     fd = seed_review_rfq(sup, 'T21d')
     checks.append(('D revoke actor ว่าง -> reject (M2)', _revoke_rejected(fd['signoff'], '   ', 'r'), None))
     checks.append(('D revoke reason ว่าง -> reject', _revoke_rejected(fd['signoff'], 'admin', '   '), None))
+    checks.append(('D revoke reason tab/newline ล้วน -> reject (re-review)', _revoke_rejected(fd['signoff'], 'admin', '\t\n'), None))
+    checks.append(('D revoke actor tab ล้วน -> reject', _revoke_rejected(fd['signoff'], '\t', 'r'), None))
+    # CHECK invariant (defense in depth): direct UPDATE เลี่ยง function -> whitespace ล้วน ต้องชน constraint
+    def _direct_revoke(soid, actor, reason):
+        try:
+            with sup.cursor() as cur:
+                cur.execute("SET search_path TO rfq")
+                cur.execute("UPDATE rfq_signoff SET revoked_at=clock_timestamp(), revoked_by_ref=%s, revoke_reason=%s WHERE id=%s",
+                            (actor, reason, soid))
+            return False
+        except psycopg2.Error as e:
+            return e.pgcode == errorcodes.CHECK_VIOLATION
+    fg = seed_review_rfq(sup, 'T21g')
+    checks.append(('D CHECK: direct UPDATE reason tab/newline -> violation', _direct_revoke(fg['signoff'], 'admin', '\t\n'), None))
+    checks.append(('D CHECK: direct UPDATE actor tab -> violation', _direct_revoke(fg['signoff'], '\t', 'valid reason'), None))
 
     # E: double-revoke -> reject ; reason แรกไม่ถูกทับ
     sql1(sup, "SELECT revoke_signoff(%s,'admin','first')", (fd['signoff'],))
