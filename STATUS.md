@@ -412,11 +412,18 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       **M2:** ย้าย claim/apply/fail/list ออกจาก rfq_ingest → rfq_worker (inbound เรียก worker mutation ไม่ได้)
       **M1:** rfq_read_api มี SELECT เฉพาะ 7 business tree tables (ไม่ใช่ SELECT ALL) → อ่าน run/attachment/source/evidence ตรง ๆ ไม่ได้
         (ปิด leak provider_input_ref/input_sha256/object-store key ที่ safe projection ซ่อน) — 009 assert ตอน migrate
-      → harness **T11** ยืนยัน 3 role boundaries + cross-surface denials ; **T01-T20 = 21** ; API **55** ; orchestration **21**
-      → **M1+M2 CLOSED** — รอ Codex review (CODEX_INBOX)
+- [x] **M1/M2 review fixes B1-B3 (commit `2e186d1`, verified `029b2a1`) — ปิด Codex review 88D6631**
+      Codex review M1/M2 เจอ: **B1** read role SELECT ทั้งตาราง → อ่าน PII/notes column ที่ API ไม่คืนได้ ;
+      **B2** assert ไม่ครอบ ledger `rfq_extraction_request` (outcome เก็บ lease/ref/hash) ; **B3** DSN ชี้ role ผิดแล้ว service ไม่ fail-closed
+      **แก้:** B1 → column-level `GRANT SELECT(col)` ตรง endpoint (ไม่ใช่ table-level) → อ่าน PII (contact/notes/spec) ไม่ได้ ;
+      B2 → 009 assert + T11 ครอบ ledger + trusted tables + exact function allowlist ของ read_api ;
+      B3 → main.py/worker.py ตรวจ capability ของ DSN ตอน startup → RuntimeError ถ้า role ผิด surface (READ=rfq_app → fail)
+      → **verified ครบ 3 suites:** migration ALL PASSED (harness **T01-T20 = 21**), API **61**, orchestration **23**
+      → พบ+แก้ time-bomb แยก (`029b2a1`): 040 is15 hardcode `quote_due_at=2026-08-01` หมดอายุตามปฏิทิน (rfq_check) — ไม่เกี่ยว M1/M2, บั๊มเป็น 2099
+      → **B1-B3 CLOSED (verified)** — รอ Codex targeted re-review (CODEX_INBOX)
       → เหลือ **M3** (real-provider gate, ไม่ block local+synthetic): terminal retry ยังไม่ durable ข้าม crash
         (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
-      → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M1/M2/M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
+      → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
