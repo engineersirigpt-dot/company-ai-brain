@@ -427,8 +427,15 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       **F2:** 009 assert เปลี่ยนจาก sentinel blacklist → **exact (table,column) allowlist** (enumerate role_column_grants EXCEPT 47 endpoint columns 2 ทาง) + ห้าม table-level privilege
       → deliberate-drift tests: inbound/read over-grant + inbound under-grant → startup fail ; worker over/under-grant → assert fail ;
         T11 grant business+sensitive column → exact-allowlist จับได้
-      → **verified:** migration ALL PASSED (harness **21**), API **64**, orchestration **25** ; live smoke (server startup assert ผ่านกับ rfq_dev)
-      → **M1/M2 + B1-B3 + F1/F2 CLOSED (verified)** — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
+      → verified (migration 21, API 64, orch 25) — แต่ Codex final review เจอ edge อีก 3 จุด (F3/F4/F5)
+- [x] **F3/F4/F5 effective privileges (commit `3d0ac5d`) — ปิด Codex final review 235BA89**
+      **F3:** startup ตรวจ effective relation/column ครบ — inbound/worker ห้ามมี **SELECT/column-level** access ใด ๆ (has_table_privilege + has_any_column_privilege) ; read ตรวจ exact column set + no mutation
+      **F4:** 009 assert เปลี่ยนจาก direct grantee (`role_column_grants`) → **effective** (`has_column_privilege('rfq_read_api',...)`) → เห็นสิทธิ์สืบทอดจาก role อื่น + **PUBLIC**
+      **F5:** function เทียบด้วย **OID set** (`::regprocedure::oid`) ไม่ใช่ proname → overload ชื่อเดียวกัน (dummy signature) ถูกจับ
+      **canonical spec** [`enq_api/caps.py`](enq_api/caps.py) — expected surface (function sigs + 47 read columns) ที่เดียว, main.py/worker.py import (กัน mirror drift)
+      → deliberate-drift ครบ: F3 table-SELECT/column-UPDATE (inbound/worker/read) ; F4 inherited-role + PUBLIC grant (T11) ; F5 dummy overload → startup/assert fail
+      → **verified:** migration ALL PASSED (harness **21**), API **68**, orchestration **28** ; live (server effective-surface assert ผ่านกับ rfq_dev)
+      → **M1/M2 + B1-B3 + F1/F2 + F3/F4/F5 CLOSED (verified)** — รอ Codex confirm รอบสุดท้าย (CODEX_INBOX)
       → เหลือ **M3** (real-provider gate, ไม่ block local+synthetic): terminal retry ยังไม่ durable ข้าม crash
         (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
