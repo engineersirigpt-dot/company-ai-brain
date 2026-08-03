@@ -200,17 +200,18 @@ def t03_readiness_toctou(sup):
     res2 = {}
     def run_b2():
         try:
-            cb = B2.cursor(); cb.execute("SELECT revoke_signoff(%s,'hacker')", (so2,)); B2.commit(); res2['ok'] = True
+            cb = B2.cursor(); cb.execute("SELECT revoke_signoff(%s,'hacker','conc revoke')", (so2,)); B2.commit(); res2['ok'] = True
         except Exception as e:
             res2['err'] = e; B2.rollback()
     tb2 = threading.Thread(target=run_b2); tb2.start()
     blocked2 = wait_blocked(sup, pidB2, pidA2)
     A2.commit(); tb2.join(15); A2.close(); B2.close()
     err2 = res2.get('err'); code2 = getattr(err2, 'pgcode', None)
-    so_exists = sql1(sup, "SELECT count(*) FROM rfq_signoff WHERE id=%s", (so2,))
-    ok_b = blocked2 and code2 == errorcodes.CHECK_VIOLATION and so_exists == 1
+    # V2 append-only: revoke ถูก reject (frozen หลัง A commit mark_ready) → signoff ยัง active (revoked_at IS NULL)
+    so_active = sql1(sup, "SELECT revoked_at IS NULL FROM rfq_signoff WHERE id=%s", (so2,))
+    ok_b = blocked2 and code2 == errorcodes.CHECK_VIOLATION and so_active is True
     record('T03b TOCTOU revoke-signoff', ok_b,
-           f"B blocked={blocked2}, B rc={code2}(want 23514/reject), signoff_still_present={so_exists==1}")
+           f"B blocked={blocked2}, B rc={code2}(want 23514/reject), signoff_still_active(revoked_at IS NULL)={so_active}")
 
 def t04_role_privilege(sup):
     """as rfq_app: raw DML ถูก block; flag ไม่ช่วย; has_table_privilege = false"""
@@ -363,7 +364,7 @@ def t09_authz_separation(sup):
             checks.append((label, e.pgcode == errorcodes.INSUFFICIENT_PRIVILEGE, e.pgcode)); ing.rollback()
     denied_exec('ingest mark_ready',          "SELECT mark_ready(%s,1,'forged')", (rfq,))
     denied_exec('ingest add_signoff',         "SELECT add_signoff(%s,'REVIEWER','CONFIRMED','forged')", (rfq,))
-    denied_exec('ingest revoke_signoff',      "SELECT revoke_signoff(%s,'forged')", (so,))
+    denied_exec('ingest revoke_signoff',      "SELECT revoke_signoff(%s,'forged','x')", (so,))
     denied_exec('ingest create_rfq_revision', "SELECT create_rfq_revision(%s,'r','forged')", (rfq,))
     denied_exec('ingest resolve_clarification', "SELECT resolve_clarification(%s,'OPEN','forged')", (so,))
     ing.close()
@@ -381,7 +382,7 @@ def t09_authz_separation(sup):
 def t10_catalog_and_policy(sup):
     """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
     svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
-           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input',
+           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input', '_reviewer_latest_confirmed',
            'create_rfq_draft', '_reject_unknown_keys', '_child_array',
            'begin_rfq_extraction', 'claim_rfq_extraction', 'apply_rfq_extraction', 'fail_rfq_extraction',
            'list_claimable_extractions', 'get_extraction_status',
@@ -417,6 +418,8 @@ def t10_catalog_and_policy(sup):
             bad.append(f"_reject_unknown_keys:{role}-can-execute")
         if sql1(sup, "SELECT has_function_privilege(%s,'_child_array(jsonb,text,int,text)','EXECUTE')", (role,)):
             bad.append(f"_child_array:{role}-can-execute")
+        if sql1(sup, "SELECT has_function_privilege(%s,'_reviewer_latest_confirmed(uuid)','EXECUTE')", (role,)):
+            bad.append(f"_reviewer_latest_confirmed:{role}-can-execute")
     # policy spoof เชิงโครงสร้าง: mark_ready 6-arg (รับ policy version) ต้องไม่มีอยู่
     six = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND p.proname='mark_ready' AND p.pronargs=6""")
@@ -795,6 +798,79 @@ def t20_fence_apply(sup):
     ok, detail = _fence_lockwait(sup, 't20', 'apply')
     record('T20 fence lock-wait-across-expiry (apply)', ok, detail)
 
+def t21_signoff_v2(sup):
+    """V2 (010): RFQ-007 latest active-decision rule + revoke_signoff append-only audit"""
+    checks = []
+
+    def _add_signoff(rfq, decision, actor, when_sql):   # direct INSERT + controlled signed_at (deterministic order)
+        with sup.cursor() as cur:
+            cur.execute("SET search_path TO rfq")
+            cur.execute("INSERT INTO rfq_signoff (rfq_id,signoff_role,decision_code,actor_ref,signed_at) "
+                        "VALUES (%s,'REVIEWER',%s,%s," + when_sql + ")", (rfq, decision, actor))
+
+    def _mark_ready_blocked(rfq):
+        try:
+            sql1(sup, "SELECT mark_ready(%s,%s,'x')", (rfq, rowver(sup, rfq)))
+            return (False, None)
+        except psycopg2.Error as e:
+            return (True, e.pgcode)
+
+    # case A: CONFIRM แล้ว REJECT ทีหลัง → BLOCK (เดิม EXISTS CONFIRMED = bug: ผ่าน)
+    fa = seed_review_rfq(sup, 'T21a')                       # base REVIEWER CONFIRMED (now())
+    _add_signoff(fa['rfq'], 'REJECTED', 'REV2', "now()+interval '1 min'")
+    bA, cA = _mark_ready_blocked(fa['rfq'])
+    checks.append(('A CONFIRM→REJECT blocks Ready (23514)', bA and cA == errorcodes.CHECK_VIOLATION, (bA, cA)))
+    checks.append(('A _reviewer_latest_confirmed=false (latest REJECTED)',
+                   sql1(sup, "SELECT _reviewer_latest_confirmed(%s)", (fa['rfq'],)) is False, None))
+
+    # case B: REJECT (เก่ากว่า) + CONFIRM (ล่าสุด) → Ready ผ่าน
+    fb = seed_review_rfq(sup, 'T21b')                       # base CONFIRMED (now()) = ล่าสุด
+    _add_signoff(fb['rfq'], 'REJECTED', 'REV0', "now()-interval '1 min'")
+    ok_b = False
+    try:
+        sql1(sup, "SELECT mark_ready(%s,%s,'x')", (fb['rfq'], rowver(sup, fb['rfq'])))
+        ok_b = sql1(sup, "SELECT status_code FROM rfq WHERE id=%s", (fb['rfq'],)) == 'READY_FOR_ESTIMATE'
+    except psycopg2.Error:
+        ok_b = False
+    checks.append(('B REJECT(earlier)+CONFIRM(latest) → Ready ผ่าน', ok_b, None))
+
+    # case C: revoke CONFIRMED เดียว → ไม่มี active reviewer → BLOCK ; + revoke = append-only
+    fc = seed_review_rfq(sup, 'T21c')
+    sql1(sup, "SELECT revoke_signoff(%s,'admin','withdrawn')", (fc['signoff'],))
+    with sup.cursor() as cur:
+        cur.execute("SET search_path TO rfq")
+        cur.execute("SELECT revoked_at IS NOT NULL, revoked_by_ref, revoke_reason FROM rfq_signoff WHERE id=%s", (fc['signoff'],))
+        rev = cur.fetchone()
+    checks.append(('C revoke = append-only (row อยู่ + revoked_at/by/reason)',
+                   rev is not None and rev[0] is True and rev[1] == 'admin' and rev[2] == 'withdrawn', rev))
+    bC, cC = _mark_ready_blocked(fc['rfq'])
+    checks.append(('C revoked CONFIRMED → Ready BLOCK (no active reviewer)', bC and cC == errorcodes.CHECK_VIOLATION, (bC, cC)))
+
+    # case D: revoke reason ว่าง → reject
+    fd = seed_review_rfq(sup, 'T21d')
+    d_ok = False
+    try:
+        sql1(sup, "SELECT revoke_signoff(%s,'admin','   ')", (fd['signoff'],))
+    except psycopg2.Error as e:
+        d_ok = e.pgcode == errorcodes.CHECK_VIOLATION
+    checks.append(('D revoke reason ว่าง → reject (23514)', d_ok, None))
+
+    # case E: double-revoke → reject ; reason แรกไม่ถูกทับ (append-only)
+    sql1(sup, "SELECT revoke_signoff(%s,'admin','first')", (fd['signoff'],))
+    e_ok = False
+    try:
+        sql1(sup, "SELECT revoke_signoff(%s,'admin2','second')", (fd['signoff'],))
+    except psycopg2.Error as e:
+        e_ok = e.pgcode == errorcodes.CHECK_VIOLATION
+    checks.append(('E double-revoke → reject (23514)', e_ok, None))
+    checks.append(('E double-revoke ไม่ทับ revoke แรก',
+                   sql1(sup, "SELECT revoke_reason FROM rfq_signoff WHERE id=%s", (fd['signoff'],)) == 'first', None))
+
+    allok = all(ok for _, ok, _ in checks)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or \
+        "latest active-decision rule + append-only revoke + reason/double-revoke guards ครบ"
+    record('T21 signoff v2 (latest-decision + append-only)', allok, detail)
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
@@ -802,7 +878,7 @@ def main():
              t09_authz_separation, t10_catalog_and_policy,
              t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
              t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack,
-             t19_fence_fail, t20_fence_apply]
+             t19_fence_fail, t20_fence_apply, t21_signoff_v2]
     for t in tests:
         try:
             t(sup)

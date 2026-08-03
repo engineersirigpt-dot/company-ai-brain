@@ -178,10 +178,11 @@ BEGIN
     -- b_rfq ยัง REVIEW → add/resolve clarification + add/revoke signoff ได้
     PERFORM resolve_clarification(clar, 'ANSWERED', 'AE-Y', 'ใช้กระดาษ KA 185');
     so := add_signoff(b_rfq, 'PREPARER', 'CONFIRMED', 'PREP-Y');
-    PERFORM revoke_signoff(so, 'PREP-Y');
+    PERFORM revoke_signoff(so, 'PREP-Y', 'st7 revoke reason');   -- V2: 3-arg + append-only (ไม่ DELETE)
     IF (SELECT status_code FROM rfq_clarification WHERE id=clar)='ANSWERED'
-       AND NOT EXISTS (SELECT 1 FROM rfq_signoff WHERE id=so)
-    THEN RAISE NOTICE 'PASS st7: resolve_clarification + add/revoke signoff work on REVIEW rfq'; pass:=pass+1;
+       AND (SELECT revoked_at FROM rfq_signoff WHERE id=so) IS NOT NULL         -- row ยังอยู่ (append-only)
+       AND (SELECT revoke_reason FROM rfq_signoff WHERE id=so)='st7 revoke reason'
+    THEN RAISE NOTICE 'PASS st7: resolve_clarification + add/revoke(append-only) signoff work on REVIEW rfq'; pass:=pass+1;
     ELSE RAISE NOTICE 'FAIL st7'; fail:=fail+1; END IF;
 
     -- ST8 (F3 freeze): แก้ readiness input ของ revision ที่ล็อกแล้ว (a_rfq=SUPERSEDED) → reject
