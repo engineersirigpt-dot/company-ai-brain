@@ -505,23 +505,35 @@ def t11_ingest_allowlist(sup):
     effr = sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND has_function_privilege('rfq_read_api', p.oid, 'EXECUTE')""")
     checks.append(('read_api function allowlist = get_extraction_status เท่านั้น', effr == ['get_extraction_status'], effr))
-    # F2: exact (table,column) allowlist — deliberate drift ต้องถูกจับ (ไม่ใช่ sentinel blacklist)
+    # F2/F4: **effective** column allowlist — has_column_privilege (เห็น direct + inherited + PUBLIC) EXCEPT expected
     _rows = ",".join("('%s','%s')" % (t, c) for t, c in EXPECTED_RD)
     def _rd_extra():
-        return sql1(sup, "SELECT string_agg(t||'.'||c, ',') FROM ("
-                   "SELECT table_name t, column_name c FROM information_schema.role_column_grants "
-                   "WHERE grantee='rfq_read_api' AND table_schema='rfq' AND privilege_type='SELECT' "
-                   "EXCEPT SELECT * FROM (VALUES " + _rows + ") e(t,c)) x")
-    checks.append(('F2 baseline: read_api ไม่มี column นอก allowlist', _rd_extra() is None, _rd_extra()))
-    with sup.cursor() as _c:
-        _c.execute("GRANT SELECT (sample_description) ON rfq.rfq_item TO rfq_read_api")       # extra บน business table
-        _c.execute("GRANT SELECT (original_filename) ON rfq.rfq_attachment TO rfq_read_api")  # extra บน sensitive table
+        return sql1(sup, "SELECT string_agg(cl.relname||'.'||a.attname, ',') "
+            "FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid=cl.oid AND a.attnum>0 AND NOT a.attisdropped "
+            "WHERE n.nspname='rfq' AND cl.relkind IN ('r','p') "
+            "AND has_column_privilege('rfq_read_api', cl.oid, a.attnum, 'SELECT') "
+            "AND (cl.relname, a.attname) NOT IN (VALUES " + _rows + ")")
+    def _sx(q):
+        with sup.cursor() as _c: _c.execute(q)
+    checks.append(('F2 baseline: read_api ไม่มี column นอก allowlist (effective)', _rd_extra() is None, _rd_extra()))
+    # F2: direct column over-grant (business + sensitive)
+    _sx("GRANT SELECT (sample_description) ON rfq.rfq_item TO rfq_read_api")
+    _sx("GRANT SELECT (original_filename) ON rfq.rfq_attachment TO rfq_read_api")
     _e = _rd_extra() or ""
-    checks.append(('F2 exact-allowlist จับ drift (business + sensitive column)',
-                   'rfq_item.sample_description' in _e and 'rfq_attachment.original_filename' in _e, _e))
-    with sup.cursor() as _c:
-        _c.execute("REVOKE SELECT (sample_description) ON rfq.rfq_item FROM rfq_read_api")
-        _c.execute("REVOKE SELECT (original_filename) ON rfq.rfq_attachment FROM rfq_read_api")
+    checks.append(('F2 drift caught: direct column over-grant', 'rfq_item.sample_description' in _e and 'rfq_attachment.original_filename' in _e, _e))
+    _sx("REVOKE SELECT (sample_description) ON rfq.rfq_item FROM rfq_read_api")
+    _sx("REVOKE SELECT (original_filename) ON rfq.rfq_attachment FROM rfq_read_api")
+    # F4: inherited-role grant — sensitive column ผ่าน role อื่นที่ grant ให้ rfq_read_api
+    _sx("CREATE ROLE rfq_drift_tmp NOLOGIN")
+    _sx("GRANT SELECT (source_sha256) ON rfq.rfq_source_ingest TO rfq_drift_tmp")
+    _sx("GRANT rfq_drift_tmp TO rfq_read_api")
+    checks.append(('F4 drift caught: inherited-role grant', 'rfq_source_ingest.source_sha256' in (_rd_extra() or ''), _rd_extra()))
+    _sx("REVOKE rfq_drift_tmp FROM rfq_read_api"); _sx("DROP OWNED BY rfq_drift_tmp"); _sx("DROP ROLE rfq_drift_tmp")
+    # F4: PUBLIC grant — sensitive column ผ่าน PUBLIC (effective เห็น, direct-grantee ไม่เห็น)
+    _sx("GRANT SELECT (input_sha256) ON rfq.rfq_ai_extraction_run TO PUBLIC")
+    checks.append(('F4 drift caught: PUBLIC grant', 'rfq_ai_extraction_run.input_sha256' in (_rd_extra() or ''), _rd_extra()))
+    _sx("REVOKE SELECT (input_sha256) ON rfq.rfq_ai_extraction_run FROM PUBLIC")
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "role boundaries: inbound=draft+begin, worker=claim/apply/fail/list, read_api=business-SELECT+status; no cross-surface, no broad SELECT"
     record('T11 role allowlist boundaries (M1/M2)', allok, detail)

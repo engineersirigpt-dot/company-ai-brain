@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 import psycopg2
 
-from enq_api import provider
+from enq_api import provider, caps
 
 log = logging.getLogger("enq_worker")
 
@@ -138,32 +138,23 @@ def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) ->
     return results
 
 
-WORKER_FN = ["apply_rfq_extraction", "claim_rfq_extraction", "fail_rfq_extraction", "list_claimable_extractions"]
-
-def assert_worker_role(dsn: str = WORKER_DSN):
-    """B3/F1: fail-closed ถ้า WORKER_DSN ชี้ role ผิด surface — เทียบ exact function set + ห้าม direct table DML
-    (จับทั้ง over-grant, under-grant เช่น apply/fail ถูก revoke, และ reviewer/draft/begin ที่ถูก grant เกิน)"""
-    fn = _call_json_row(dsn, """SELECT coalesce(array_agg(p.proname ORDER BY p.proname), ARRAY[]::text[])
-        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-        WHERE n.nspname='rfq' AND has_function_privilege(current_user, p.oid, 'EXECUTE')""")[0]
-    if fn != WORKER_FN:
-        raise RuntimeError(f"fail-closed: RFQ_WORKER_DSN function surface ผิด (ได้ {fn}, ต้อง {WORKER_FN}) — role over/under-granted?")
-    if _call_json_row(dsn, """SELECT count(*) FROM information_schema.tables t
-        WHERE t.table_schema='rfq' AND t.table_type='BASE TABLE'
-          AND (has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'INSERT')
-            OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'UPDATE')
-            OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'DELETE')
-            OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'TRUNCATE'))""")[0] > 0:
-        raise RuntimeError("fail-closed: RFQ_WORKER_DSN มี direct table DML บน schema rfq (ต้องผ่าน SECURITY DEFINER function เท่านั้น)")
-
-
-def _call_json_row(dsn: str, sql: str):
+def _row(dsn: str, sql: str):
     c = psycopg2.connect(dsn)
     try:
         with c.cursor() as cur:
             cur.execute(sql); return cur.fetchone()
     finally:
         c.close()
+
+def assert_worker_role(dsn: str = WORKER_DSN):
+    """B3/F1/F3/F5: fail-closed ถ้า WORKER_DSN ชี้ role ผิด surface — เทียบ **effective** function OID set (กัน overload)
+    + ห้าม effective data access ทุกชนิด (SELECT/DML/column) ; จับทั้ง over/under-grant + inherited/PUBLIC"""
+    data = _row(dsn, caps.no_data_access_sql())[0]             # F3: รวม SELECT + column-level
+    if data:
+        raise RuntimeError(f"fail-closed: RFQ_WORKER_DSN มี direct data access บน rfq (ต้องผ่าน SECURITY DEFINER): {data}")
+    extra, missing = _row(dsn, caps.fn_drift_sql("worker"))    # F5: OID/signature set
+    if extra or missing:
+        raise RuntimeError(f"fail-closed: RFQ_WORKER_DSN function surface ผิด (extra={extra} missing={missing}) — over/under-grant?")
 
 
 def main():

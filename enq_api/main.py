@@ -23,6 +23,8 @@ from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends
 from pydantic import BaseModel, Field
 
+from enq_api import caps                                       # canonical capability spec (Codex F3/F4/F5)
+
 log = logging.getLogger("enq_api")
 
 # ---- config ----
@@ -43,20 +45,7 @@ if not ENQ_API_KEY.isascii():                                  # H1: key format 
     raise RuntimeError("fail-closed: ENQ_API_KEY ต้องเป็น ASCII")
 
 
-# ---- B3/F1: startup capability fail-closed — เทียบ **exact function surface** + ห้าม direct table DML (กัน config drift ทุกชนิด) ----
-# exact effective function set ต่อ schema rfq (เหมือน T11) ; ไม่ใช่ sentinel บางตัว → จับทั้ง over-grant และ under-grant
-INBOUND_FN = ["begin_rfq_extraction", "create_rfq_draft"]
-READ_FN    = ["get_extraction_status"]
-_FN_SQL  = """SELECT coalesce(array_agg(p.proname ORDER BY p.proname), ARRAY[]::text[])
-    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-    WHERE n.nspname='rfq' AND has_function_privilege(current_user, p.oid, 'EXECUTE')"""
-_DML_SQL = """SELECT count(*) FROM information_schema.tables t
-    WHERE t.table_schema='rfq' AND t.table_type='BASE TABLE'
-      AND (has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'INSERT')
-        OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'UPDATE')
-        OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'DELETE')
-        OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'TRUNCATE'))"""
-
+# ---- B3/F1/F3/F5: startup capability fail-closed — เทียบ **effective** surface (function OID + relation/column) ----
 def _caps(dsn: str, sql: str):
     c = psycopg2.connect(dsn)
     try:
@@ -65,16 +54,25 @@ def _caps(dsn: str, sql: str):
     finally:
         c.close()
 
-def _assert_role(dsn: str, label: str, expect_fn: list[str]):
-    fn = _caps(dsn, _FN_SQL)[0]
-    if fn != expect_fn:
-        raise RuntimeError(f"fail-closed: {label} function surface ผิด (ได้ {fn}, ต้อง {expect_fn}) — role over/under-granted?")
-    if _caps(dsn, _DML_SQL)[0] > 0:
-        raise RuntimeError(f"fail-closed: {label} มี direct table DML บน schema rfq (ต้องผ่าน SECURITY DEFINER function เท่านั้น)")
+def _assert_fn(dsn: str, label: str, role: str):
+    extra, missing = _caps(dsn, caps.fn_drift_sql(role))       # F5: OID/signature set (กัน overload ชื่อเดียวกัน)
+    if extra or missing:
+        raise RuntimeError(f"fail-closed: {label} function surface ผิด (extra={extra} missing={missing}) — over/under-grant?")
 
 def _assert_dsn_roles():
-    _assert_role(READ_DSN,  "RFQ_READ_DSN (read allowlist เช่น rfq_read_api)", READ_FN)
-    _assert_role(WRITE_DSN, "RFQ_WRITE_DSN (inbound เช่น rfq_ingest)",         INBOUND_FN)
+    # READ (rfq_read_api): effective column SELECT == expected เป๊ะ ; ห้าม mutation ทุกชนิด ; function = {get_extraction_status}
+    extra, missing = _caps(READ_DSN, caps.read_cols_drift_sql())          # F3/F4: effective columns (เห็น inherited/PUBLIC)
+    if extra or missing:
+        raise RuntimeError(f"fail-closed: RFQ_READ_DSN column surface ผิด (extra={extra} missing={missing})")
+    mut = _caps(READ_DSN, caps.no_data_access_sql(("INSERT","UPDATE","DELETE","TRUNCATE","REFERENCES","TRIGGER")))[0]
+    if mut:
+        raise RuntimeError(f"fail-closed: RFQ_READ_DSN มี mutation privilege บน rfq: {mut}")
+    _assert_fn(READ_DSN, "RFQ_READ_DSN (read allowlist เช่น rfq_read_api)", "read")
+    # WRITE (inbound rfq_ingest): ห้าม effective data access ทุกชนิด (SELECT รวมด้วย — F3) ; function = {begin, create_rfq_draft}
+    data = _caps(WRITE_DSN, caps.no_data_access_sql())[0]                 # F3: รวม SELECT + column-level
+    if data:
+        raise RuntimeError(f"fail-closed: RFQ_WRITE_DSN มี direct data access บน rfq (ต้องผ่าน SECURITY DEFINER): {data}")
+    _assert_fn(WRITE_DSN, "RFQ_WRITE_DSN (inbound เช่น rfq_ingest)", "inbound")
 
 _assert_dsn_roles()                                            # บังคับเสมอ — ต่อ DB ไม่ได้/role ผิด = startup fail (fail-closed)
 

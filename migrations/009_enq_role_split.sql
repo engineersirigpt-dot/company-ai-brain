@@ -57,7 +57,7 @@ GRANT EXECUTE ON FUNCTION get_extraction_status(uuid) TO rfq_read_api;
 -- assert M1 (F2): **exact (table,column) allowlist** ของ rfq_read_api = ตรง GET /enq/rfq เป๊ะ
 --   (ไม่ใช่ sentinel blacklist — จับได้ทั้ง extra column, missing column, table-level, และ DML)
 DO $assert$
-DECLARE v_extra text; v_missing text; v_tab text;
+DECLARE v_extra text; v_missing text; v_tab text; v_fn text;
 BEGIN
   CREATE TEMP TABLE _rd_exp(t text, c text) ON COMMIT DROP;
   INSERT INTO _rd_exp(t,c) VALUES
@@ -76,24 +76,32 @@ BEGIN
     ('rfq_packing_requirement','rfq_item_id'),('rfq_packing_requirement','sequence_no'),('rfq_packing_requirement','packing_name_raw'),
     ('rfq_packing_requirement','quantity_per_pack'),('rfq_packing_requirement','unit_ref'),
     ('rfq_delivery','rfq_item_id'),('rfq_delivery','delivery_no'),('rfq_delivery','destination_raw'),('rfq_delivery','requested_date');
-  -- extra: column SELECT ที่ grant แต่ไม่อยู่ใน allowlist (จับ over-grant ทุกชนิด รวม PII/ledger/spec)
-  SELECT string_agg(t||'.'||c, ', ' ORDER BY t,c) INTO v_extra FROM (
-    SELECT table_name t, column_name c FROM information_schema.role_column_grants
-      WHERE grantee='rfq_read_api' AND table_schema='rfq' AND privilege_type='SELECT'
-    EXCEPT SELECT t,c FROM _rd_exp) x;
-  IF v_extra IS NOT NULL THEN RAISE EXCEPTION 'M1 exact-allowlist: rfq_read_api มี column นอก allowlist: %', v_extra; END IF;
-  -- missing: allowlist column ที่ endpoint ใช้แต่ไม่ถูก grant
-  SELECT string_agg(t||'.'||c, ', ' ORDER BY t,c) INTO v_missing FROM (
-    SELECT t,c FROM _rd_exp
-    EXCEPT SELECT table_name, column_name FROM information_schema.role_column_grants
-      WHERE grantee='rfq_read_api' AND table_schema='rfq' AND privilege_type='SELECT') x;
+  -- F4: ใช้ **effective privilege** (has_column_privilege) ไม่ใช่ direct grantee → เห็นสิทธิ์ที่สืบทอด/PUBLIC ด้วย
+  -- extra: column ที่ rfq_read_api SELECT ได้จริง (effective) แต่ไม่อยู่ใน allowlist
+  SELECT string_agg(cl.relname||'.'||a.attname, ', ' ORDER BY cl.relname, a.attname) INTO v_extra
+  FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace
+    JOIN pg_attribute a ON a.attrelid=cl.oid AND a.attnum>0 AND NOT a.attisdropped
+  WHERE n.nspname='rfq' AND cl.relkind IN ('r','p')
+    AND has_column_privilege('rfq_read_api', cl.oid, a.attnum, 'SELECT')
+    AND (cl.relname, a.attname) NOT IN (SELECT t,c FROM _rd_exp);
+  IF v_extra IS NOT NULL THEN RAISE EXCEPTION 'M1 exact-allowlist: rfq_read_api อ่าน column นอก allowlist (effective): %', v_extra; END IF;
+  -- missing: allowlist column ที่อ่านไม่ได้จริง
+  SELECT string_agg(t||'.'||c, ', ' ORDER BY t,c) INTO v_missing FROM _rd_exp e
+   WHERE NOT has_column_privilege('rfq_read_api', ('rfq.'||e.t)::regclass, e.c, 'SELECT');
   IF v_missing IS NOT NULL THEN RAISE EXCEPTION 'M1 exact-allowlist: rfq_read_api ขาด column ที่ endpoint ใช้: %', v_missing; END IF;
-  -- ต้องไม่มี table-level privilege ใด ๆ (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) บน rfq schema
-  SELECT string_agg(table_name||':'||privilege_type, ', ') INTO v_tab FROM information_schema.role_table_grants
-    WHERE grantee='rfq_read_api' AND table_schema='rfq';
-  IF v_tab IS NOT NULL THEN RAISE EXCEPTION 'M1: rfq_read_api มี table-level privilege (ต้อง column SELECT เท่านั้น): %', v_tab; END IF;
-  -- get_extraction_status ต้องเรียกได้ (positive)
-  IF NOT has_function_privilege('rfq_read_api','rfq.get_extraction_status(uuid)','EXECUTE') THEN
+  -- ห้าม mutation ทุกชนิด (effective, รวม column-level) บน rfq base table
+  SELECT string_agg(cl.relname||':'||p.priv, ', ') INTO v_tab FROM pg_class cl JOIN pg_namespace n ON n.oid=cl.relnamespace
+    CROSS JOIN LATERAL (VALUES ('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')) p(priv)
+   WHERE n.nspname='rfq' AND cl.relkind IN ('r','p')
+     AND (has_table_privilege('rfq_read_api', cl.oid, p.priv)
+       OR (p.priv IN ('INSERT','UPDATE','REFERENCES') AND has_any_column_privilege('rfq_read_api', cl.oid, p.priv)));
+  IF v_tab IS NOT NULL THEN RAISE EXCEPTION 'M1: rfq_read_api มี mutation privilege บน rfq: %', v_tab; END IF;
+  -- F5: exact function set (effective OID) = get_extraction_status เท่านั้น
+  SELECT string_agg(p.oid::regprocedure::text, ', ') INTO v_fn FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+   WHERE n.nspname='rfq' AND has_function_privilege('rfq_read_api', p.oid, 'EXECUTE')
+     AND p.oid <> 'rfq.get_extraction_status(uuid)'::regprocedure::oid;
+  IF v_fn IS NOT NULL THEN RAISE EXCEPTION 'M1: rfq_read_api execute function เกิน get_extraction_status: %', v_fn; END IF;
+  IF NOT has_function_privilege('rfq_read_api', 'rfq.get_extraction_status(uuid)'::regprocedure, 'EXECUTE') THEN
     RAISE EXCEPTION 'M1: rfq_read_api เรียก get_extraction_status ไม่ได้';
   END IF;
 END $assert$;

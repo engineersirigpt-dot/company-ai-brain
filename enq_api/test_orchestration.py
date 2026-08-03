@@ -165,6 +165,35 @@ except Exception:
     _o = False
 _osx("REVOKE EXECUTE ON FUNCTION rfq.create_rfq_draft(jsonb,text,text,text) FROM rfq_worker")
 check("F1 worker over-grant (create_rfq_draft) → assert fail", _o)
+# F3: worker มี direct data access (table SELECT / column UPDATE) → assert fail
+def _wfail(setup, teardown):
+    _osx(setup)
+    try:
+        w.assert_worker_role(WDSN); r = False
+    except RuntimeError:
+        r = True
+    except Exception:
+        r = False
+    _osx(teardown); return r
+check("F3 worker table SELECT → assert fail",
+      _wfail("GRANT SELECT ON rfq.rfq_attachment TO rfq_worker", "REVOKE SELECT ON rfq.rfq_attachment FROM rfq_worker"))
+check("F3 worker column UPDATE → assert fail",
+      _wfail("GRANT UPDATE (status_code) ON rfq.rfq_ai_extraction_run TO rfq_worker",
+             "REVOKE UPDATE (status_code) ON rfq.rfq_ai_extraction_run FROM rfq_worker"))
+# F5: overload ชื่อเดียวกัน — revoke real apply + grant dummy apply() → assert fail (OID ต่างกัน)
+_osx(f"REVOKE EXECUTE ON FUNCTION {APPLY_SIG} FROM rfq_worker")
+_osx("CREATE FUNCTION rfq.apply_rfq_extraction() RETURNS void LANGUAGE sql AS 'SELECT 1'")
+_osx("REVOKE EXECUTE ON FUNCTION rfq.apply_rfq_extraction() FROM PUBLIC")
+_osx("GRANT EXECUTE ON FUNCTION rfq.apply_rfq_extraction() TO rfq_worker")
+try:
+    w.assert_worker_role(WDSN); _f5 = False
+except RuntimeError:
+    _f5 = True
+except Exception:
+    _f5 = False
+_osx("DROP FUNCTION rfq.apply_rfq_extraction()")
+_osx(f"GRANT EXECUTE ON FUNCTION {APPLY_SIG} TO rfq_worker")
+check("F5 worker overload (dummy apply()) แทน real sig → assert fail", _f5)
 
 sup.close()
 nfail = res.count(False)
