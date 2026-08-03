@@ -18,7 +18,7 @@ boundary:
 local + synthetic เท่านั้น — ยังไม่ deploy, ไม่เรียก cloud, ไม่ใช้ข้อมูลจริง
 """
 from __future__ import annotations
-import os, json, time, uuid, logging
+import os, json, time, uuid, logging, math
 from datetime import datetime, timezone
 
 import psycopg2
@@ -39,9 +39,14 @@ APPLY_BACKOFF_S   = float(os.environ.get("ENQ_APPLY_BACKOFF_S", "0.2"))
 
 
 def _validate_config():
-    """fail-fast config (Codex backlog (b)) — ค่าที่ผิดทำ retry loop/sleep พังแบบเงียบ
-    โดยเฉพาะ ENQ_APPLY_RETRIES < 1 → `for attempt in range(0)` ข้าม loop → `raise last` ที่ last=None → raise None"""
+    """fail-fast config (Codex backlog (b) + F1) — ค่าที่ผิดทำ retry loop/sleep/lease budget พังแบบเงียบ
+    - ENQ_APPLY_RETRIES < 1 → `for attempt in range(0)` ข้าม loop → `raise last` ที่ last=None → raise None
+    - F1: NaN/±Inf ผ่าน comparison `< 0` (nan<0 และ inf<0 = False) → time.sleep(NaN)→ValueError / sleep(Inf)→OverflowError /
+      margin NaN → lease budget=NaN bypass `budget<=0` / margin +Inf → ทุกงาน lease_too_short วน reclaim → ต้อง finite ก่อน"""
     problems = []
+    for name, val in (("ENQ_APPLY_BACKOFF_S", APPLY_BACKOFF_S), ("ENQ_WORKER_INTERVAL", POLL_INTERVAL_S),
+                      ("ENQ_PROVIDER_MARGIN_S", PROVIDER_MARGIN_S)):
+        if not math.isfinite(val):    problems.append("%s ต้องเป็น finite (ตอนนี้ %r → sleep/lease budget พัง)" % (name, val))
     if APPLY_RETRIES < 1:     problems.append("ENQ_APPLY_RETRIES ต้อง >= 1 (ตอนนี้ %r → retry loop ไม่รัน → raise None)" % APPLY_RETRIES)
     if APPLY_BACKOFF_S < 0:   problems.append("ENQ_APPLY_BACKOFF_S ต้อง >= 0 (ตอนนี้ %r → time.sleep ค่าติดลบ)" % APPLY_BACKOFF_S)
     if POLL_LIMIT < 1:        problems.append("ENQ_WORKER_POLL_LIMIT ต้อง >= 1 (ตอนนี้ %r → ไม่ claim งานเลย)" % POLL_LIMIT)
