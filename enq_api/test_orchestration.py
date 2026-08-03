@@ -175,6 +175,51 @@ try: outd = w.process_run(run_d, WORKER, WDSN)
 finally: prov.extract = orig
 check("M3 provider terminal → run FAILED", outd.get("action") == "fail" and outd.get("status") == "FAILED", outd)
 
+# ---- M3-F1: provider คืน payload สำเร็จ แต่ DB validator reject (invalid result) → escalate เป็น FAILED (ไม่ค้าง RUNNING) ----
+def _m3f1(tag, payload_fn):
+    r = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": tag}); rid = r.json()["run_id"]
+    cc = []; prov.extract = lambda **kw: (cc.append(1), payload_fn(kw["input_sha256"]))[1]
+    try: o = w.process_run(rid, WORKER, WDSN)
+    finally: prov.extract = orig
+    return rid, o, len(cc)
+# case 1: provider คืน {} → apply 22023 → FAILED
+r1, o1, n1 = _m3f1("xm3f1a", lambda sha: {})
+check("M3-F1 provider {} → apply invalid → run FAILED", o1.get("action") == "fail" and o1.get("status") == "FAILED", o1)
+check("M3-F1 (empty) provider เรียกครั้งเดียว + run ไม่ claimable", n1 == 1 and r1 not in claim_ids(), (n1, o1))
+# case 2: evidence ไม่ครบ → RFR01 → FAILED
+r2, o2, _ = _m3f1("xm3f1b", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha,
+    "items": [{"line_no": 1, "fields": {"job_name": "x", "product_type_ref": "PT"}}],
+    "evidence": [{"subject_type": "ITEM", "ref": {"line_no": 1}, "field_name": "job_name", "source_type": "PDF"}]})
+check("M3-F1 incomplete evidence → RFR01 → run FAILED", o2.get("action") == "fail" and o2.get("status") == "FAILED", o2)
+# case 3: dup line_no → 23505 → FAILED
+r3, o3, _ = _m3f1("xm3f1c", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha,
+    "items": [{"line_no": 1, "fields": {"job_name": "a"}}, {"line_no": 1, "fields": {"job_name": "b"}}], "evidence": []})
+check("M3-F1 dup line_no → 23505 → run FAILED", o3.get("action") == "fail" and o3.get("status") == "FAILED", o3)
+check("M3-F1 FAILED runs ไม่กลับเข้า claimable", all(x not in claim_ids() for x in (r1, r2, r3)), claim_ids())
+
+# ---- M3 fail-retry: durable fail (connection drop ก่อน/หลัง commit) ----
+def _m3fail(tag, flaky_fn):
+    r = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": tag}); rid = r.json()["run_id"]
+    cc = []
+    def _perr(**kw): cc.append(1); raise prov.ProviderError("bad result")
+    prov.extract = _perr; st = {"hit": False}; w._call_json = lambda d, s, p: flaky_fn(st, d, s, p)
+    try: o = w.process_run(rid, WORKER, WDSN)
+    finally: w._call_json = _ocj; prov.extract = orig
+    return o, len(cc)
+def _fail_pre(st, d, s, p):
+    if "fail_rfq_extraction" in s and not st.get("hit"):
+        st["hit"] = True; raise psycopg2.OperationalError("drop pre")
+    return _ocj(d, s, p)
+of5, nf5 = _m3fail("xm3f5", _fail_pre)
+check("M3 fail transient(ก่อน commit) → retry → FAILED ; provider ครั้งเดียว", of5.get("action") == "fail" and of5.get("status") == "FAILED" and nf5 == 1, (of5, nf5))
+def _fail_post(st, d, s, p):
+    r = _ocj(d, s, p)
+    if "fail_rfq_extraction" in s and not st.get("hit"):
+        st["hit"] = True; raise psycopg2.OperationalError("drop post")
+    return r
+of6, nf6 = _m3fail("xm3f6", _fail_post)
+check("M3 fail committed+drop → retry ledger คืน FAILED เดิม ; provider ครั้งเดียว", of6.get("action") == "fail" and of6.get("status") == "FAILED" and nf6 == 1, (of6, nf6))
+
 # ---- B3: worker role capability fail-closed (rfq_worker ผ่าน ; inbound DSN ต้อง raise) ----
 try:
     w.assert_worker_role(WDSN); _wok = True

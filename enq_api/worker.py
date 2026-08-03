@@ -108,43 +108,68 @@ def process_run(run_id, worker_id: str, dsn: str = WORKER_DSN) -> dict:
     # ---- provider call: นอก DB transaction เท่านั้น ----
     try:
         result = provider.extract(input_ref=ref, input_sha256=sha, execution_target=target,
-                                  timeout_s=budget, idempotency_key=f"{run_id}:{sha}")   # M3: stable ต่อ attempt
+                                  timeout_s=budget, idempotency_key=f"{run_id}:{sha}")   # M3: stable ข้าม claim/reclaim ของ run
     except provider.ProviderTransient as e:
         # M3: ชั่วคราว — ไม่ fail run (ไม่ burn) ; ปล่อย RUNNING → lease หมด → worker ใหม่ reclaim
         return {"run_id": str(run_id), "action": "provider_transient", "reason": str(e)}
     except provider.ProviderError as e:
-        return _terminal(dsn, run_id, "fail",
-                         "SELECT fail_rfq_extraction(%s,%s,%s,%s,%s,%s)",
-                         (run_id, lease, "PROVIDER_ERROR", worker_id, SERVICE, fail_req), reason=str(e))
-
-    return _terminal(dsn, run_id, "apply",
-                     "SELECT apply_rfq_extraction(%s,%s,%s::jsonb,%s,%s,%s)",
-                     (run_id, lease, json.dumps(result, ensure_ascii=False), worker_id, SERVICE, apply_req))
+        return _do_fail(dsn, run_id, lease, "PROVIDER_ERROR", worker_id, fail_req, reason=str(e))
+    return _do_apply(dsn, run_id, lease, result, worker_id, apply_req, fail_req)
 
 
-# M3: pgcode ที่ retry ได้ (transient) — serialize/deadlock/lock/canceled/insufficient-resource/connection class 08/57
+# M3: transient (retry ได้ ด้วย request_id เดิม) — serialize/deadlock/lock/canceled/insufficient-resource/connection 08/57
 _TRANSIENT_PG = {"40001", "40P01", "55P03", "57014", "53300", "53400",
                  "08000", "08003", "08006", "08001", "08004", "57P01", "57P02", "57P03"}
+# M3-F1: provider คืน payload แต่ DB validator reject = invalid provider result → escalate เป็น FAILED (ไม่ค้าง RUNNING)
+_INVALID_RESULT_PG = {"RFR01", "23502", "23503", "23505", "23514", "54000"}   # + class '22'
 
-def _terminal(dsn, run_id, kind, sql, params, reason=None) -> dict:
-    """เรียก apply/fail แบบ durable (M3): retry บน transient error ด้วย **request_id เดิม**
-    → 'provider สำเร็จ + apply connection ขาด' จะ retry แล้ว ledger คืน SUCCEEDED เดิม (idempotent, ไม่เรียก provider ซ้ำ)
-    business reject (RFS01 fenced ฯลฯ) = terminal → รายงานทันที ไม่ retry"""
+def _is_transient(e) -> bool:
+    return isinstance(e, psycopg2.OperationalError) or getattr(e, "pgcode", None) in _TRANSIENT_PG
+
+def _is_invalid_result(code) -> bool:
+    return code in _INVALID_RESULT_PG or (code is not None and code[:2] == "22")
+
+def _call_retry(dsn, sql, params):
+    """transient-retry core (request_id เดิม = idempotent replay) ; raise psycopg2.Error ถ้า terminal หรือ retry หมด"""
     last = None
     for attempt in range(APPLY_RETRIES):
         try:
-            r = _call_json(dsn, sql, params) or {}
-            return {"run_id": str(run_id), "action": kind, "status": r.get("status"),
-                    "rfq_id": r.get("rfq_id"), "reason": reason, "attempts": attempt + 1}
+            return (_call_json(dsn, sql, params) or {}), attempt + 1
         except psycopg2.Error as e:
-            code = getattr(e, "pgcode", None)
-            if not (isinstance(e, psycopg2.OperationalError) or code in _TRANSIENT_PG):
-                return {"run_id": str(run_id), "action": kind + "_rejected", "pgcode": code}   # terminal reject
+            if not _is_transient(e):
+                raise
             last = e
-            log.warning("%s transient (%s) attempt %d/%d — retry (idempotent)", kind, code, attempt + 1, APPLY_RETRIES)
+            log.warning("transient (%s) attempt %d/%d — retry (idempotent)", getattr(e, "pgcode", None), attempt + 1, APPLY_RETRIES)
             time.sleep(APPLY_BACKOFF_S * (attempt + 1))
-    # หมด retry — run อาจยัง RUNNING ; ปล่อย lease หมด → reclaim (ไม่ burn)
-    return {"run_id": str(run_id), "action": kind + "_retry_exhausted", "pgcode": getattr(last, "pgcode", None)}
+    raise last                                                 # retry หมด (ยัง transient) → propagate
+
+def _do_fail(dsn, run_id, lease, error_code, worker_id, fail_req, reason=None) -> dict:
+    """fail_rfq_extraction แบบ durable retry (stable fail_req) → run FAILED (terminal)"""
+    try:
+        r, att = _call_retry(dsn, "SELECT fail_rfq_extraction(%s,%s,%s,%s,%s,%s)",
+                             (run_id, lease, error_code, worker_id, SERVICE, fail_req))
+        return {"run_id": str(run_id), "action": "fail", "status": r.get("status"), "reason": reason, "attempts": att}
+    except psycopg2.Error as e:
+        kind = "fail_retry_exhausted" if _is_transient(e) else "fail_rejected"   # transient หมด → RUNNING/reclaim
+        return {"run_id": str(run_id), "action": kind, "pgcode": getattr(e, "pgcode", None)}
+
+def _do_apply(dsn, run_id, lease, result, worker_id, apply_req, fail_req) -> dict:
+    """apply_rfq_extraction แบบ durable retry ; ถ้า DB reject ว่า invalid provider result → escalate เป็น FAILED (M3-F1)"""
+    try:
+        r, att = _call_retry(dsn, "SELECT apply_rfq_extraction(%s,%s,%s::jsonb,%s,%s,%s)",
+                             (run_id, lease, json.dumps(result, ensure_ascii=False), worker_id, SERVICE, apply_req))
+        return {"run_id": str(run_id), "action": "apply", "status": r.get("status"), "rfq_id": r.get("rfq_id"), "attempts": att}
+    except psycopg2.Error as e:
+        code = getattr(e, "pgcode", None)
+        if _is_transient(e):                                   # transient หมด — run ยัง RUNNING → reclaim (ไม่ burn)
+            return {"run_id": str(run_id), "action": "apply_retry_exhausted", "pgcode": code}
+        if _is_invalid_result(code):                           # M3-F1: provider result ผิด contract → fail run (terminal)
+            return _do_fail(dsn, run_id, lease, "INVALID_EXTRACTION_RESULT", worker_id, fail_req, reason="invalid provider result " + str(code))
+        if code == "RFS01":                                    # lease หมด/ถูก fence — ทิ้งผล ปล่อย owner ใหม่
+            return {"run_id": str(run_id), "action": "apply_fenced", "pgcode": code}
+        if code == "RFN01":                                    # run หาย — alert (state lost)
+            return {"run_id": str(run_id), "action": "apply_run_not_found", "pgcode": code}
+        return {"run_id": str(run_id), "action": "apply_rejected", "pgcode": code}   # RFI01/permission — operational alert
 
 
 def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) -> list:

@@ -16,7 +16,7 @@ class ProviderError(Exception):
 
 class ProviderTransient(Exception):
     """provider ล้มเหลว **ชั่วคราว** (timeout/5xx/connection) → worker ไม่ fail run ; ปล่อย lease หมด → reclaim
-    (provider จริงต้องรับ idempotency_key ที่ stable ต่อ attempt เพื่อ dedupe การเรียกซ้ำตอน reclaim)"""
+    (provider จริงต้องรับ idempotency_key ที่ stable ข้าม claim/reclaim ของ run เดิม เพื่อ dedupe การเรียกซ้ำ)"""
 
 
 def extract(*, input_ref: str | None, input_sha256: str, execution_target: str,
@@ -29,7 +29,7 @@ def extract(*, input_ref: str | None, input_sha256: str, execution_target: str,
     - **ต้อง echo input_sha256** กลับใน payload (apply ตรวจว่าตรง run snapshot)
     - deterministic: ไม่มี randomness, ไม่มี network — เหมาะกับ test/CI
     - timeout_s = lease budget (provider จริงต้องใช้เป็น request timeout < lease) — synthetic ไม่ใช้
-    - idempotency_key = stable ต่อ extraction attempt (M3) — provider จริงใช้ dedupe re-call ตอน reclaim ; synthetic ไม่ใช้
+    - idempotency_key = **stable ข้าม claim/reclaim ของ run เดิม** (= run:input_sha256) (M3) — provider จริงใช้ dedupe re-call ; synthetic ไม่ใช้
     - error contract: ProviderError = terminal (fail run) ; ProviderTransient = retryable (leave RUNNING → reclaim)
     """
     if execution_target != "LOCAL":
