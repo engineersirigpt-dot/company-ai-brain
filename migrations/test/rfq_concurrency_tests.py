@@ -169,7 +169,8 @@ def t03_readiness_toctou(sup):
     A = connect(role='rfq_app', app_name='rfq-conc-A'); B = connect(role='rfq_app', app_name='rfq-conc-B')
     A.autocommit = False; B.autocommit = False
     pidA, pidB = A.info.backend_pid, B.info.backend_pid
-    curA = A.cursor(); curA.execute("SELECT mark_ready(%s,1,'A')", (rfq,)); curA.fetchone()
+    rvA = rowver(sup, rfq)   # V3: add/resolve_clarification bump row_version → อ่าน version ปัจจุบัน
+    curA = A.cursor(); curA.execute("SELECT mark_ready(%s,%s,'A')", (rfq, rvA)); curA.fetchone()
     res = {}
     def run_b():
         try:
@@ -382,7 +383,7 @@ def t09_authz_separation(sup):
 def t10_catalog_and_policy(sup):
     """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
     svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
-           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input', '_reviewer_latest_confirmed',
+           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input', '_reviewer_latest_confirmed', '_bump_rfq_version',
            'create_rfq_draft', '_reject_unknown_keys', '_child_array',
            'begin_rfq_extraction', 'claim_rfq_extraction', 'apply_rfq_extraction', 'fail_rfq_extraction',
            'list_claimable_extractions', 'get_extraction_status',
@@ -420,6 +421,8 @@ def t10_catalog_and_policy(sup):
             bad.append(f"_child_array:{role}-can-execute")
         if sql1(sup, "SELECT has_function_privilege(%s,'_reviewer_latest_confirmed(uuid)','EXECUTE')", (role,)):
             bad.append(f"_reviewer_latest_confirmed:{role}-can-execute")
+        if sql1(sup, "SELECT has_function_privilege(%s,'_bump_rfq_version(uuid,text)','EXECUTE')", (role,)):
+            bad.append(f"_bump_rfq_version:{role}-can-execute")
     # policy spoof เชิงโครงสร้าง: mark_ready 6-arg (รับ policy version) ต้องไม่มีอยู่
     six = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND p.proname='mark_ready' AND p.pronargs=6""")
@@ -915,6 +918,54 @@ def t22_signoff_decision_order(sup):
     record('T22 latest by decision_seq not signed_at (B1)', ok,
            f"helper={helper}, by_seq={by_seq}(want CONFIRMED), by_signed_at={by_time}(bug->REJECTED)")
 
+def t23_readiness_versioning(sup):
+    """V3 (011): readiness mutation ทุกตัว bump parent row_version -> stale optimistic token -> mark_ready 40001"""
+    checks = []
+    def rv(rfq): return rowver(sup, rfq)
+
+    # 1) each readiness mutation bumps row_version
+    f = seed_review_rfq(sup, 'T23'); rfq = f['rfq']; v0 = rv(rfq)   # base signoff = direct insert (ไม่ bump)
+    c = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',false,'AI','bot')", (rfq, rfq)); v1 = rv(rfq)
+    sql1(sup, "SELECT resolve_clarification(%s,'ANSWERED','ae','ans')", (c,)); v2 = rv(rfq)
+    so = sql1(sup, "SELECT add_signoff(%s,'REVIEWER','CONFIRMED','rev2')", (rfq,)); v3 = rv(rfq)
+    sql1(sup, "SELECT revoke_signoff(%s,'admin','correction')", (so,)); v4 = rv(rfq)
+    checks.append(('add_clarification bump', v1 == v0 + 1, (v0, v1)))
+    checks.append(('resolve_clarification bump', v2 == v1 + 1, (v1, v2)))
+    checks.append(('add_signoff bump', v3 == v2 + 1, (v2, v3)))
+    checks.append(('revoke_signoff bump', v4 == v3 + 1, (v3, v4)))
+
+    # 2) stale optimistic token: readiness เปลี่ยนหลัง client อ่าน version -> mark_ready(เก่า) = 40001
+    g = seed_review_rfq(sup, 'T23s')          # ready-able, base CONFIRMED, v1
+    stale = rv(g['rfq'])                       # client cache = v1
+    sql1(sup, "SELECT add_signoff(%s,'REVIEWER','CONFIRMED','rev3')", (g['rfq'],))   # readiness เปลี่ยน -> v2
+    stale_ok = False
+    try:
+        sql1(sup, "SELECT mark_ready(%s,%s,'x')", (g['rfq'], stale))
+    except psycopg2.Error as e:
+        stale_ok = e.pgcode == errorcodes.SERIALIZATION_FAILURE   # 40001
+    checks.append(('stale version หลัง readiness mutation -> mark_ready 40001', stale_ok, None))
+    fresh_ok = False
+    try:
+        sql1(sup, "SELECT mark_ready(%s,%s,'x')", (g['rfq'], rv(g['rfq'])))   # re-read -> ผ่าน
+        fresh_ok = sql1(sup, "SELECT status_code FROM rfq WHERE id=%s", (g['rfq'],)) == 'READY_FOR_ESTIMATE'
+    except psycopg2.Error:
+        fresh_ok = False
+    checks.append(('re-read fresh version -> mark_ready ผ่าน', fresh_ok, None))
+
+    # 3) reject-on-terminal ยังทำงาน: mutation บน RFQ ที่ READY_FOR_ESTIMATE (frozen) -> reject + ไม่ bump
+    vt = rv(g['rfq'])
+    frozen_ok = False
+    try:
+        sql1(sup, "SELECT add_signoff(%s,'REVIEWER','CONFIRMED','late')", (g['rfq'],))
+    except psycopg2.Error as e:
+        frozen_ok = e.pgcode == errorcodes.CHECK_VIOLATION
+    checks.append(('mutation บน terminal RFQ -> reject (freeze) + ไม่ bump', frozen_ok and rv(g['rfq']) == vt, (frozen_ok, vt)))
+
+    allok = all(ok for _, ok, _ in checks)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or \
+        "readiness mutations bump row_version ; stale token -> 40001 ; terminal reject ไม่ bump"
+    record('T23 readiness versioning (V3)', allok, detail)
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
@@ -922,7 +973,7 @@ def main():
              t09_authz_separation, t10_catalog_and_policy,
              t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
              t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack,
-             t19_fence_fail, t20_fence_apply, t21_signoff_v2, t22_signoff_decision_order]
+             t19_fence_fail, t20_fence_apply, t21_signoff_v2, t22_signoff_decision_order, t23_readiness_versioning]
     for t in tests:
         try:
             t(sup)
