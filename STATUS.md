@@ -446,9 +446,14 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         **M1/M2 + B1-B3 + F1-F7 = CLOSED** — เข้า **deploy-readiness track** ได้ (ขอบเขต GO = DB-role surface + local/synthetic เท่านั้น)
       → **operational note (non-blocking, deploy work):** capability assert ทำงานตอน **startup** ไม่ใช่ continuous monitor →
         ตอน deploy ต้องมี restart/health automation หรือ privilege-drift monitoring (ถ้า DBA เปลี่ยน grant ระหว่าง process รัน)
-      → เหลือ **M3** (real-provider gate, ไม่ block local+synthetic): terminal retry ยังไม่ durable ข้าม crash
-        (provider สำเร็จ + apply ขาด) → durable checkpoint / stable provider idempotency key ก่อน provider จริง
-      → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง + M3 = increment ถัดไป (gated Data Owner/DPO/Legal)
+- [x] **M3 durable terminal retry (commit `451a91a`) — worker durability ปิดแล้ว**
+      **error contract:** `ProviderError` = terminal (fail/burn run) vs **`ProviderTransient`** = retryable (timeout/5xx/conn) → ไม่ burn run
+      **durable apply/fail:** `_terminal()` retry ด้วย **request_id เดิม** บน transient DB error (OperationalError/serialize/deadlock/lock/canceled/class08,57)
+        → 'provider สำเร็จ + apply connection ขาด' → retry → ledger คืน SUCCEEDED เดิม (idempotent, **ไม่เรียก provider ซ้ำ**) ไม่ว่า commit สำเร็จหรือไม่
+      **provider transient** → run คง RUNNING (ไม่ FAILED) → reclaim ; ส่ง `idempotency_key` (stable ต่อ attempt) ให้ provider จริง dedupe re-call ตอน reclaim
+      → tests (orchestration 31→**39**): apply transient ก่อน/หลัง commit → SUCCEEDED+provider เรียกครั้งเดียว ; provider transient→RUNNING ; provider terminal→FAILED
+      → **M3 (worker-level) CLOSED** — ส่วนที่รอ provider จริงคือ provider ฝั่งนั้น**บริโภค** idempotency_key + คืน transient/terminal จริง (ทำตอนต่อ provider จริง)
+      → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
 - [ ] **V2 (HIGH, ก่อน Ready จริง)** sign-off latest/active-decision rule (ตอนนี้ `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED
