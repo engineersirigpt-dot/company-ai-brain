@@ -470,14 +470,15 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
-- [x] **V2 (HIGH) — ✅ ปิดแล้ว (migration `010_rfq_signoff_v2.sql`, commit `61a26f8`) รอ Codex review**
+- [x] **V2 (HIGH) — ✅ ปิดแล้ว (migration `010_rfq_signoff_v2.sql`, `61a26f8`→`ee4486a`) รอ Codex re-review**
       - **latest active-decision rule**: `mark_ready` RFQ-007 เดิม `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED/revoke ทีหลังยังผ่าน (stale) ;
-        ตอนนี้ helper `_reviewer_latest_confirmed(rfq)` = decision ล่าสุดที่ยัง active (non-revoked, `ORDER BY signed_at DESC, id DESC LIMIT 1`) ต้อง CONFIRMED ; NULL/REJECTED/RETURNED → block
-      - **revoke_signoff append-only**: เดิม DELETE (audit หาย) → ตอนนี้ set `revoked_at/revoked_by_ref/revoke_reason` (all-or-nothing CHECK, reason non-blank),
-        lock row FOR UPDATE + parent freeze, reject double-revoke ; gate มองข้าม revoked ; signature 2→3-arg (+reason), DROP old + re-GRANT rfq_app
-      - tests: **T21** (CONFIRM→REJECT block / REJECT→CONFIRM pass / revoked CONFIRMED block / append-only / reason required / double-revoke reject) ; อัปเดต 030 st7, concurrency T03b, T09/T10 (3-arg + helper hidden)
-      - suites: **migration ALL PASSED (concurrency 21→22) · orchestration 58 · API 73** — local + synthetic
-      - เปิดคำถามให้ Codex: "latest" ใช้ `signed_at DESC, id DESC` — signed_at=`now()` (txn-start) distinct ข้าม API call ; exact-tie fallback = id DESC (deterministic แต่ไม่ time-meaningful) — ควรมี monotonic seq ไหม ; multi-reviewer (A CONFIRMED ล่าสุด, B REJECTED เก่ากว่า) ปัจจุบัน = pass (ดู latest overall ไม่ใช่ per-reviewer)
+        ตอนนี้ helper `_reviewer_latest_confirmed(rfq)` = decision ล่าสุดที่ยัง active (non-revoked) ต้อง CONFIRMED ; NULL/REJECTED/RETURNED → block
+      - **B1 (Codex)**: "latest" ยึด **`decision_seq`** (sequence, DEFAULT nextval eval หลัง parent lock ใน add_signoff = serialize order จริง) ไม่ใช่ `signed_at=now()` (=txn-start → เรียงสวน mutation order ได้) ; T22 พิสูจน์ (by_signed_at=REJECTED bug vs by_seq/helper=CONFIRMED)
+      - **revoke_signoff audit-preserving soft revoke**: เดิม DELETE (audit หาย) → set `revoked_at`(clock_timestamp)`/revoked_by_ref/revoke_reason` ; **M1** lock parent→child (protocol เดิม) ; **M2** actor non-blank (function + CHECK `NULLIF(btrim())`), reject double-revoke ; gate มองข้าม revoked ; signature 2→3-arg (+reason)
+      - **B2 (Codex)**: migration wrap `BEGIN/COMMIT` (atomic) ; **Q4**: correction semantics — revoke decision ล่าสุด → fallback active decision เก่ากว่า (documented + test F)
+      - tests: **T21** (CONFIRM→REJECT block / REJECT→CONFIRM pass / revoked CONFIRMED block / soft-revoke / actor+reason non-blank / double-revoke / correction fallback F) + **T22** (transaction-order regression) ; อัปเดต 030 st7, T03b, T10
+      - suites: **migration ALL PASSED (concurrency 21→23) · orchestration 58 · API 73** — local + synthetic
+      - **multi-reviewer**: ปัจจุบัน = latest **overall** (single-reviewer stream V1) ; Codex ยืนยัน overall พอสำหรับ V1 **แต่ห้ามอ้างรองรับ multi-reviewer** — per-required-reviewer/quorum = รอ business decision ก่อน Ready จริง
 - [ ] **V3 (HIGH, ก่อน draft-edit)** เมื่อมี draft edit/upsert: ทุก readiness mutation ต้อง lock parent + reject terminal
       + **bump parent `row_version`** (ตอนนี้ clarification/signoff lock parent แล้วแต่ยังไม่ bump version)
 - [ ] **V4 (MED, ก่อน revision endpoint)** attachment/field-evidence carry-forward policy — attachment ใช้ link/lineage ไม่ duplicate binary;
