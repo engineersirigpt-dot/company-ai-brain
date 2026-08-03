@@ -43,6 +43,40 @@ if not ENQ_API_KEY.isascii():                                  # H1: key format 
     raise RuntimeError("fail-closed: ENQ_API_KEY ต้องเป็น ASCII")
 
 
+# ---- B3: startup capability fail-closed — DSN ต้องชี้ role ที่ถูก surface (กัน config drift เช่น READ=rfq_app) ----
+def _caps(dsn: str, sql: str):
+    c = psycopg2.connect(dsn)
+    try:
+        with c.cursor() as cur:
+            cur.execute(sql); return cur.fetchone()
+    finally:
+        c.close()
+
+def _assert_dsn_roles():
+    # READ: ต้อง EXECUTE get_extraction_status + อ่าน endpoint column ; ต้อง**ไม่**อ่าน PII/run/attachment/ledger + ไม่ mutate
+    st, draft, name, pii, run, att, ledger = _caps(READ_DSN, """SELECT
+        has_function_privilege(current_user,'rfq.get_extraction_status(uuid)','EXECUTE'),
+        has_function_privilege(current_user,'rfq.create_rfq_draft(jsonb,text,text,text)','EXECUTE'),
+        has_column_privilege(current_user,'rfq.rfq','customer_name_raw','SELECT'),
+        has_column_privilege(current_user,'rfq.rfq','customer_notes','SELECT'),
+        has_column_privilege(current_user,'rfq.rfq_ai_extraction_run','input_sha256','SELECT'),
+        has_column_privilege(current_user,'rfq.rfq_attachment','object_store_key','SELECT'),
+        has_column_privilege(current_user,'rfq.rfq_extraction_request','outcome','SELECT')""")
+    if not (st and name and not draft and not pii and not run and not att and not ledger):
+        raise RuntimeError("fail-closed: RFQ_READ_DSN role ผิด surface (ต้องเป็น read allowlist เช่น rfq_read_api) "
+                           f"[status={st} name={name} draft={draft} pii={pii} run={run} att={att} ledger={ledger}]")
+    # WRITE (inbound): ต้อง begin ได้ ; ต้อง**ไม่** claim และ**ไม่**มี direct table SELECT
+    begin, claim, sel = _caps(WRITE_DSN, """SELECT
+        has_function_privilege(current_user,'rfq.begin_rfq_extraction(uuid,text,text,text,text,uuid,uuid,jsonb,text,text,text)','EXECUTE'),
+        has_function_privilege(current_user,'rfq.claim_rfq_extraction(uuid,text,text,text)','EXECUTE'),
+        has_column_privilege(current_user,'rfq.rfq','customer_name_raw','SELECT')""")
+    if not (begin and not claim and not sel):
+        raise RuntimeError("fail-closed: RFQ_WRITE_DSN role ผิด surface (ต้องเป็น inbound เช่น rfq_ingest) "
+                           f"[begin={begin} claim={claim} sel_rfq={sel}]")
+
+_assert_dsn_roles()                                            # บังคับเสมอ — ต่อ DB ไม่ได้/role ผิด = startup fail (fail-closed)
+
+
 # ---- B2/ASGI middleware จำกัด raw body (นับ bytes จริง ก่อน JSON parse; รองรับ chunked) ----
 class LimitBodyMiddleware:
     def __init__(self, app, max_bytes: int):

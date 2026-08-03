@@ -129,6 +129,20 @@ except psycopg2.Error as e:
     fenced = e.pgcode == "RFS01"
 check("old-lease apply fenced → RFS01", fenced)
 
+# ---- B3: worker role capability fail-closed (rfq_worker ผ่าน ; inbound DSN ต้อง raise) ----
+try:
+    w.assert_worker_role(WDSN); _wok = True
+except Exception:
+    _wok = False
+check("B3 worker role assert ผ่านด้วย rfq_worker DSN", _wok)
+try:
+    w.assert_worker_role(os.environ["RFQ_WRITE_DSN"]); _wbad = False   # inbound (rfq_ingest) → claim ไม่ได้
+except RuntimeError:
+    _wbad = True
+except Exception:
+    _wbad = False
+check("B3 worker role assert FAIL ด้วย inbound DSN (surface ผิด)", _wbad)
+
 sup.close()
 nfail = res.count(False)
 print(f"===== ORCHESTRATION TEST: {res.count(True)} passed, {nfail} failed =====")

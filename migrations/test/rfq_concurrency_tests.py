@@ -469,12 +469,24 @@ def t11_ingest_allowlist(sup):
     # cross-boundary: inbound เรียก worker fn ไม่ได้ ; worker เรียก inbound fn ไม่ได้
     checks.append(('inbound !claim', sql1(sup, "SELECT has_function_privilege('rfq_ingest','claim_rfq_extraction(uuid,text,text,text)','EXECUTE')") is False, 'ingest-can-claim'))
     checks.append(('worker !create_rfq_draft', sql1(sup, "SELECT has_function_privilege('rfq_worker','create_rfq_draft(jsonb,text,text,text)','EXECUTE')") is False, 'worker-can-draft'))
-    # M1: rfq_read_api = SELECT business tree เท่านั้น + get_extraction_status ; อ่าน sensitive tables ตรง ๆ ไม่ได้
-    checks.append(('read_api CAN SELECT rfq_item',      sql1(sup, "SELECT has_table_privilege('rfq_read_api','rfq.rfq_item','SELECT')") is True, 'read_api-no-item'))
-    checks.append(('read_api !SELECT extraction_run',   sql1(sup, "SELECT has_table_privilege('rfq_read_api','rfq.rfq_ai_extraction_run','SELECT')") is False, 'read_api-can-run'))
-    checks.append(('read_api !SELECT attachment',       sql1(sup, "SELECT has_table_privilege('rfq_read_api','rfq.rfq_attachment','SELECT')") is False, 'read_api-can-attach'))
-    checks.append(('read_api CAN get_extraction_status', sql1(sup, "SELECT has_function_privilege('rfq_read_api','get_extraction_status(uuid)','EXECUTE')") is True, 'read_api-no-status'))
-    checks.append(('read_api !create_rfq_draft',        sql1(sup, "SELECT has_function_privilege('rfq_read_api','create_rfq_draft(jsonb,text,text,text)','EXECUTE')") is False, 'read_api-can-draft'))
+    # M1: rfq_read_api = **column-level** SELECT (business columns) + get_extraction_status ; ไม่มี PII/sensitive/ledger + ไม่ mutate
+    def hcol(t, c): return sql1(sup, "SELECT has_column_privilege('rfq_read_api',%s,%s,'SELECT')", (f'rfq.{t}', c))
+    checks.append(('read_api CAN col rfq_item.job_name',      hcol('rfq_item', 'job_name') is True, 'read_api-no-jobname'))
+    checks.append(('read_api CAN col rfq.customer_name_raw',  hcol('rfq', 'customer_name_raw') is True, 'read_api-no-name'))
+    # B1: PII/notes/spec columns ที่ endpoint ไม่คืน ต้อง denied
+    checks.append(('read_api !col rfq.customer_notes (PII)',  hcol('rfq', 'customer_notes') is False, 'read_api-can-notes'))
+    checks.append(('read_api !col rfq.contact_phone (PII)',   hcol('rfq', 'contact_phone') is False, 'read_api-can-phone'))
+    checks.append(('read_api !col rfq.contact_email (PII)',   hcol('rfq', 'contact_email') is False, 'read_api-can-email'))
+    checks.append(('read_api !col rfq_item.notes',            hcol('rfq_item', 'notes') is False, 'read_api-can-item-notes'))
+    # B2: sensitive/trusted/ledger tables denied (ledger outcome เก็บ lease/ref/hash)
+    checks.append(('read_api !col extraction_run.input_sha256', hcol('rfq_ai_extraction_run', 'input_sha256') is False, 'read_api-can-run'))
+    checks.append(('read_api !col attachment.object_store_key', hcol('rfq_attachment', 'object_store_key') is False, 'read_api-can-attach'))
+    checks.append(('read_api !col ledger.outcome',            hcol('rfq_extraction_request', 'outcome') is False, 'read_api-can-ledger'))
+    checks.append(('read_api !col field_evidence.value_snapshot', hcol('rfq_field_evidence', 'value_snapshot') is False, 'read_api-can-evidence'))
+    # exact function allowlist ของ read_api = get_extraction_status เท่านั้น
+    effr = sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='rfq' AND has_function_privilege('rfq_read_api', p.oid, 'EXECUTE')""")
+    checks.append(('read_api function allowlist = get_extraction_status เท่านั้น', effr == ['get_extraction_status'], effr))
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "role boundaries: inbound=draft+begin, worker=claim/apply/fail/list, read_api=business-SELECT+status; no cross-surface, no broad SELECT"
     record('T11 role allowlist boundaries (M1/M2)', allok, detail)

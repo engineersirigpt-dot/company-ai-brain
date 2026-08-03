@@ -44,11 +44,11 @@ ENQ_API_KEY=dev-local-key uvicorn enq_api.main:app --host 127.0.0.1 --port 8090
 
 | method | path | ทำอะไร | DB role |
 |---|---|---|---|
-| GET | `/health` | เช็ค DB | rfq_app |
+| GET | `/health` | เช็ค DB | rfq_read_api |
 | POST | `/enq/draft` | สร้าง RFQ DRAFT จาก payload `draft-v1` (manual) | **rfq_ingest** (write) |
-| GET | `/enq/rfq/{id}` | อ่าน RFQ tree กลับ | **rfq_app** (read) |
+| GET | `/enq/rfq/{id}` | อ่าน RFQ tree กลับ | **rfq_read_api** (read) |
 | POST | `/enq/extractions` | เริ่ม AI extraction (begin) → `202` durable run | **rfq_ingest** (write) |
-| GET | `/enq/extractions/{run_id}` | สถานะ run (projection ปลอดภัย) | **rfq_app** (read) |
+| GET | `/enq/extractions/{run_id}` | สถานะ run (projection ปลอดภัย) | **rfq_read_api** (read) |
 
 ```bash
 # manual draft
@@ -75,7 +75,7 @@ enq_api/worker.py (durable poller, แยก process — ไม่ใช่ Back
 ```
 - **server-controlled ทั้งหมด:** actor/service/target/provider/model/purpose/`provider_input_ref`/`input_sha256`/lease/egress — client ส่งได้แค่ source ref + correlation
 - **provider สังเคราะห์** ([`provider.py`](provider.py)) — LOCAL mock, deterministic, **ไม่เรียก cloud/ข้อมูลจริง**
-- รัน worker: `ENQ_API_KEY=... RFQ_WRITE_DSN=... python -m enq_api.worker`
+- รัน worker: `RFQ_WORKER_DSN=... python -m enq_api.worker`  (worker ใช้ `RFQ_WORKER_DSN` = rfq_worker_login เท่านั้น)
 
 ## tests
 
@@ -97,7 +97,7 @@ GET safe projection (no leak), should_execute=false→no provider, reclaim + old
 - **B2/F1** **operation-aware error mapper** `_http_for_pg(op, sqlstate)` + custom SQLSTATE จาก 007
   (`RFS01`/`RFN01`/`RFR01`) → แยก state-conflict/not-found/invalid-result; log เฉพาะ schema identifier (ไม่ log ค่าดิบ)
 - **B2/M1** raw body limit ที่ ASGI middleware (นับ bytes ก่อน parse, กัน chunked) + JSON depth; `http.disconnect` → หยุด ไม่เรียก downstream
-- **B3** connect ด้วย LOGIN role non-superuser (`rfq_ingest_login`/`rfq_app_login`) — ไม่ใช่ postgres, ไม่ `SET ROLE`
+- **B3** connect ด้วย LOGIN role non-superuser แยกตาม surface (inbound `rfq_ingest_login` / worker `rfq_worker_login` / read `rfq_read_api_login`) — ไม่ใช่ postgres, ไม่ `SET ROLE` ; **startup fail-closed** ถ้า DSN ชี้ role ผิด surface
 - **H1(idem)** `X-Request-Id` **required** สำหรับ POST; key เดิม+payload ต่าง → `409`
 - **H2** route เป็น sync `def` (threadpool) + statement/lock/idle timeout; **H2(test)** runner bind loopback + Docker-assigned port
 - **H3** `schema_version` = required `Literal['draft-v1']` + `extra="forbid"`; DB allowlist = ด่านสุดท้าย

@@ -138,8 +138,28 @@ def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) ->
     return results
 
 
+def assert_worker_role(dsn: str = WORKER_DSN):
+    """B3: fail-closed ถ้า WORKER_DSN ชี้ role ผิด surface (ต้อง claim/list ได้ ; begin/draft/direct-SELECT ไม่ได้)"""
+    c = psycopg2.connect(dsn)
+    try:
+        with c.cursor() as cur:
+            cur.execute("""SELECT
+                has_function_privilege(current_user,'rfq.claim_rfq_extraction(uuid,text,text,text)','EXECUTE'),
+                has_function_privilege(current_user,'rfq.list_claimable_extractions(int)','EXECUTE'),
+                has_function_privilege(current_user,'rfq.begin_rfq_extraction(uuid,text,text,text,text,uuid,uuid,jsonb,text,text,text)','EXECUTE'),
+                has_function_privilege(current_user,'rfq.create_rfq_draft(jsonb,text,text,text)','EXECUTE'),
+                has_column_privilege(current_user,'rfq.rfq','customer_name_raw','SELECT')""")
+            claim, lst, begin, draft, sel = cur.fetchone()
+    finally:
+        c.close()
+    if not (claim and lst and not begin and not draft and not sel):
+        raise RuntimeError("fail-closed: RFQ_WORKER_DSN role ผิด surface (ต้องเป็น rfq_worker) "
+                           f"[claim={claim} list={lst} begin={begin} draft={draft} sel={sel}]")
+
+
 def main():
     worker_id = os.environ.get("ENQ_WORKER_ID", "enq-worker-1")
+    assert_worker_role()                                        # B3: ยืนยัน role ก่อนเริ่ม poll
     log.info("enq worker '%s' start — poll every %.1fs (local/synthetic, no cloud)", worker_id, POLL_INTERVAL_S)
     while True:
         try:

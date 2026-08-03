@@ -202,6 +202,19 @@ if WDSN and RDSN:
     check("M1 read login CANNOT SELECT rfq_ai_extraction_run (42501)", ok is False and code == "42501", code)
     ok, code = attempt(RDSN, "SELECT * FROM rfq_attachment LIMIT 1")
     check("M1 read login CANNOT SELECT rfq_attachment (42501)", ok is False and code == "42501", code)
+    # B1: PII/notes columns ที่ endpoint ไม่คืน ต้อง denied (column-level grant, ไม่ใช่ table-level)
+    ok, code = attempt(RDSN, "SELECT customer_notes FROM rfq LIMIT 1")
+    check("B1 read login CANNOT SELECT PII customer_notes (42501)", ok is False and code == "42501", code)
+    ok, code = attempt(RDSN, "SELECT contact_phone FROM rfq LIMIT 1")
+    check("B1 read login CANNOT SELECT PII contact_phone (42501)", ok is False and code == "42501", code)
+    ok, code = attempt(RDSN, "SELECT notes FROM rfq_item LIMIT 1")
+    check("B1 read login CANNOT SELECT rfq_item.notes (42501)", ok is False and code == "42501", code)
+    # B2: ledger outcome (lease/ref/hash) ต้อง denied
+    ok, code = attempt(RDSN, "SELECT outcome FROM rfq_extraction_request LIMIT 1")
+    check("B2 read login CANNOT SELECT ledger outcome (42501)", ok is False and code == "42501", code)
+    # positive: business column ที่ endpoint คืน อ่านได้ + get_extraction_status
+    ok, code = attempt(RDSN, "SELECT customer_name_raw FROM rfq LIMIT 1")
+    check("read login CAN SELECT business col customer_name_raw", ok is True, code)
     ok, code = attempt(RDSN, "SELECT * FROM get_extraction_status('00000000-0000-0000-0000-000000000000'::uuid)")
     check("M1 read login CAN EXECUTE get_extraction_status", ok is True, code)
 else:
@@ -222,6 +235,11 @@ rccode, err = import_with({})
 check("startup fail-closed (no key) → error", rccode != 0 and "fail-closed" in err, err[-200:])
 rccode, err = import_with({"ENQ_DEV_MODE": "1"})
 check("ENQ_DEV_MODE=1 without key → still fail-closed (no bypass)", rccode != 0 and "fail-closed" in err, err[-200:])
+# B3: DSN ชี้ role ผิด surface (READ_DSN=rfq_app มี SELECT ALL) → startup fail (ไม่ใช่แค่รายงาน)
+if os.environ.get("RFQ_READ_DSN"):
+    app_dsn = os.environ["RFQ_READ_DSN"].replace("rfq_read_api_login", "rfq_app_login").replace("password=readapi", "password=app")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key", "RFQ_READ_DSN": app_dsn})
+    check("B3 startup fail-closed: READ_DSN=rfq_app (SELECT ALL) → error", rccode != 0 and "fail-closed" in err and "READ_DSN" in err, err[-200:])
 
 nfail = res.count(False)
 print(f"===== API TEST: {res.count(True)} passed, {nfail} failed =====")
