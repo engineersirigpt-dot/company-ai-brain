@@ -489,7 +489,13 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       - **M1**: `apply_rfq_extraction` เปลี่ยน aggregate ทั้งก้อนแต่ไม่ bump → เพิ่ม bump **หนึ่งครั้ง** ที่ success path (หลัง validation ครบ, ก่อน SUCCEEDED) ; replay (ledger-first return) + fail (RAISE/rollback) ไม่ bump ; **N1** `_bump` ใช้ `clock_timestamp()` + validate actor + not-found guard
       - tests: **T23** (แต่ละ mutation bump ; stale token → 40001 ; terminal reject ไม่ bump ; **B1** raised_by_ref=NULL+actor→ok / blank actor→reject) ; **M1** orchestration (apply 1→2 ; replay ยัง 2 ; fail ยัง 1 ; multi-item bump ครั้งเดียว) ; T03a อ่าน version สด ; T10 +`_bump_rfq_version`
       - suites: **migration ALL PASSED (concurrency 24) · orchestration 58→62 · API 73** — local + synthetic
-      - **draft-edit/upsert endpoint ยังไม่มี** = future consumer ของ pattern นี้ (V3 = prerequisite ทำ pattern ให้พร้อม)
+      - **draft-edit/upsert endpoint** = consumer ตัวแรกของ pattern → ทำแล้ว (ด้านล่าง)
+- [x] **Draft-edit/upsert endpoint (consumer แรกของ V3) — ✅ first cut (migration `012_rfq_draft_edit.sql`, `47921cd`) รอ Codex review**
+      - `upsert_rfq_draft(rfq, expected_row_version, actor, patch)` = write workflow ครบวง: อ่าน Draft → แก้ → ตรวจ `expected_row_version` → lock/freeze(DRAFT) → save → **bump** (`_bump_rfq_version`)
+      - patch `{header:{fields}, items:[{line_no,fields}]}` (shape เดียวกับ extract, ไม่มี evidence) ; header→UPDATE (c_hdr) ; items→**upsert by line_no** (UPDATE/INSERT, c_itemf) ; F4a stale version→40001 ; reject unknown key (22023) / non-DRAFT / blank actor / empty patch
+      - **scope first cut** (flag Codex): update header + upsert item fields เท่านั้น ; **ยังไม่ทำ**: delete item, quantity/component/tree, **evidence reconciliation** (human edit ทับ AI field → field_evidence เดิม stale), READY_FOR_REVIEW edit, DRAFT→READY_FOR_REVIEW submit transition
+      - tests: **T24** (8 เคส: header/item update, item insert, stale→40001, non-DRAFT/unknown/actor/empty reject) ; T10 catalog + T09 ingest-denied +`upsert_rfq_draft`
+      - suites: **migration ALL PASSED (concurrency 25) · orchestration 62 · API 73** — local + synthetic
 - [ ] **V4 (MED, ก่อน revision endpoint)** attachment/field-evidence carry-forward policy — attachment ใช้ link/lineage ไม่ duplicate binary;
       evidence สร้าง derivation provenance (map old subject→new) ไม่ copy UUID เก่า
 - [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — เติม master-gateway revalidate / egress gate / rules ครบก่อน Ready จริง
