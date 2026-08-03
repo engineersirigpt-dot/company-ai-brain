@@ -490,12 +490,16 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       - tests: **T23** (แต่ละ mutation bump ; stale token → 40001 ; terminal reject ไม่ bump ; **B1** raised_by_ref=NULL+actor→ok / blank actor→reject) ; **M1** orchestration (apply 1→2 ; replay ยัง 2 ; fail ยัง 1 ; multi-item bump ครั้งเดียว) ; T03a อ่าน version สด ; T10 +`_bump_rfq_version`
       - suites: **migration ALL PASSED (concurrency 24) · orchestration 58→62 · API 73** — local + synthetic
       - **draft-edit/upsert endpoint** = consumer ตัวแรกของ pattern → ทำแล้ว (ด้านล่าง)
-- [x] **Draft-edit/upsert endpoint (consumer แรกของ V3) — ✅ first cut (migration `012_rfq_draft_edit.sql`, `47921cd`) รอ Codex review**
-      - `upsert_rfq_draft(rfq, expected_row_version, actor, patch)` = write workflow ครบวง: อ่าน Draft → แก้ → ตรวจ `expected_row_version` → lock/freeze(DRAFT) → save → **bump** (`_bump_rfq_version`)
-      - patch `{header:{fields}, items:[{line_no,fields}]}` (shape เดียวกับ extract, ไม่มี evidence) ; header→UPDATE (c_hdr) ; items→**upsert by line_no** (UPDATE/INSERT, c_itemf) ; F4a stale version→40001 ; reject unknown key (22023) / non-DRAFT / blank actor / empty patch
-      - **scope first cut** (flag Codex): update header + upsert item fields เท่านั้น ; **ยังไม่ทำ**: delete item, quantity/component/tree, **evidence reconciliation** (human edit ทับ AI field → field_evidence เดิม stale), READY_FOR_REVIEW edit, DRAFT→READY_FOR_REVIEW submit transition
-      - tests: **T24** (8 เคส: header/item update, item insert, stale→40001, non-DRAFT/unknown/actor/empty reject) ; T10 catalog + T09 ingest-denied +`upsert_rfq_draft`
-      - suites: **migration ALL PASSED (concurrency 25) · orchestration 62 · API 73** — local + synthetic
+- [x] **Draft-edit endpoint (consumer แรกของ V3) — ✅ first cut + Codex review B1/M1/M2/M3 (migration `012_rfq_draft_edit.sql`, `47921cd`→`07bba26`) รอ Codex confirm**
+      - `upsert_rfq_draft(rfq, expected_row_version, actor, patch)` = write workflow ครบวง: อ่าน Draft → แก้ → ตรวจ `expected_row_version` → lock/freeze(DRAFT+is_current) → save → reconcile evidence → **bump**
+      - patch `{header:{fields}, items:[{line_no,fields}]}` ; header→UPDATE (c_hdr) ; items→**update existing by line_no** (c_itemf) ; F4a stale→40001 ; reject unknown key (22023)/non-DRAFT/blank actor/empty
+      - **B1 evidence reconciliation**: field ที่ค่าจริงเปลี่ยน (before/after `to_jsonb` diff) → supersede AI evidence เดิม (verification_status=CORRECTED, เก็บไว้ไม่ลบ) + append MANUAL/HUMAN_EXTRACTED ของค่าใหม่ (`_reconcile_field_evidence`) ; no churn ถ้าค่าเดิม ; current = latest created_at ที่ไม่ CORRECTED/REJECTED
+      - **M1 null-clear**: `CASE WHEN f ? key` (ไม่ใช่ COALESCE) → omit=ไม่เปลี่ยน / null=clear (nullable) / null บน NOT NULL=reject 23502 / value=cast+set
+      - **M2 limits**: patch ≤1MB, items ≤100, reject empty header.fields/items/item.fields + duplicate line_no + line_no ≤0
+      - **#3 update-only**: item INSERT ถอดออก (asymmetric ถ้าไม่มี delete) → line_no ไม่พบ = reject 23503 ; insert/delete item = slice ถัดไป
+      - tests: **T24** (12 เคส: header/item update, insert-rejected, stale→40001, non-DRAFT/unknown/actor/M2-empty/dup reject, M1 null-clear + null-on-NOT-NULL, B1 supersede+MANUAL+no-churn) · **T25** (M3 2-connection concurrency: A lock→B blocked→40001 / A rollback→B retry ok) · T10 +`_reconcile_field_evidence` · T09 ingest-denied
+      - **ยังไม่ทำ** (slice ถัดไป): insert/delete item, quantity/component/tree, READY_FOR_REVIEW edit, `submit_for_review` (DRAFT→READY_FOR_REVIEW) transition
+      - suites: **migration ALL PASSED (concurrency 26) · orchestration 62 · API 73** — local + synthetic
 - [ ] **V4 (MED, ก่อน revision endpoint)** attachment/field-evidence carry-forward policy — attachment ใช้ link/lineage ไม่ duplicate binary;
       evidence สร้าง derivation provenance (map old subject→new) ไม่ copy UUID เก่า
 - [ ] **F5** validator ยัง minimal (`pkg-minimal-v1`) — เติม master-gateway revalidate / egress gate / rules ครบก่อน Ready จริง
