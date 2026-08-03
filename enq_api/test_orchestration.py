@@ -17,7 +17,7 @@ from enq_api import main as m, worker as w, provider as prov
 
 client = TestClient(m.app)
 KEY = {"X-API-Key": "test-key"}
-WDSN = w.WRITE_DSN                                              # rfq_ingest_login (worker/write)
+WDSN = w.WORKER_DSN                                            # M2: rfq_worker_login (claim/apply/fail/list)
 SUPER_DSN = os.environ["SUPER_DSN"]                            # superuser — seed trusted tables + toggles
 WORKER = "w-test"
 H64 = "a" * 64

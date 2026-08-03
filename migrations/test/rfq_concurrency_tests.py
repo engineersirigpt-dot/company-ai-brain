@@ -430,7 +430,8 @@ def t10_catalog_and_policy(sup):
            "all 10 fns: owner=rfq_owner, definer/invoker ตามชนิด, pinned search_path, no PUBLIC exec; helpers hidden; no 6-arg; trusted version")
 
 def t11_ingest_allowlist(sup):
-    """Codex go/no-go #2/F1: rfq_ingest = create-only (EXECUTE create_rfq_draft เท่านั้น, ไม่มี SELECT/DML/fn อื่น)"""
+    """Codex #2/F1/M1/M2: role boundary — inbound(rfq_ingest)=create_rfq_draft+begin, worker(rfq_worker)=claim/apply/fail/list,
+    read_api(rfq_read_api)=business SELECT+get_extraction_status ; แต่ละ role ข้าม surface ของกันไม่ได้ + ไม่มี broad SELECT/DML"""
     ing = connect(role='rfq_ingest')
     checks = []
     try:
@@ -453,18 +454,30 @@ def t11_ingest_allowlist(sup):
     ing.close()
     sel = sql1(sup, "SELECT has_table_privilege('rfq_ingest','rfq.rfq','SELECT')")
     checks.append(('ingest table SELECT=false', sel is False, sel))
-    # effective allowlist (F8): enumerate ทุก function ใน schema rfq ที่ rfq_ingest execute ได้
-    # = create_rfq_draft (006) + begin/claim/apply/fail_rfq_extraction (007) + list_claimable_extractions (008 worker poll)
-    #   (get_extraction_status = rfq_app เท่านั้น จึงไม่อยู่ในชุดนี้)
-    eff = sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p
-        JOIN pg_namespace n ON n.oid=p.pronamespace
-        WHERE n.nspname='rfq' AND has_function_privilege('rfq_ingest', p.oid, 'EXECUTE')""")
-    expect = ['apply_rfq_extraction','begin_rfq_extraction','claim_rfq_extraction','create_rfq_draft',
-              'fail_rfq_extraction','list_claimable_extractions']
-    checks.append(('ingest effective EXECUTE = ENQ write + worker-poll functions only', eff == expect, eff))
+    # M2: effective allowlist ต่อ role — enumerate fn ใน schema rfq ที่แต่ละ role execute ได้
+    def eff_of(role):
+        return sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p
+            JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname='rfq' AND has_function_privilege(%s, p.oid, 'EXECUTE')""", (role,))
+    # rfq_ingest = inbound เท่านั้น (create_rfq_draft + begin) ; ไม่มี claim/apply/fail/list (M2)
+    checks.append(('inbound(rfq_ingest) EXECUTE = create_rfq_draft + begin เท่านั้น',
+                   eff_of('rfq_ingest') == ['begin_rfq_extraction','create_rfq_draft'], eff_of('rfq_ingest')))
+    # rfq_worker = worker เท่านั้น (list_claimable + claim/apply/fail) ; ไม่มี draft/begin
+    checks.append(('worker(rfq_worker) EXECUTE = claim/apply/fail/list_claimable เท่านั้น',
+                   eff_of('rfq_worker') == ['apply_rfq_extraction','claim_rfq_extraction','fail_rfq_extraction','list_claimable_extractions'],
+                   eff_of('rfq_worker')))
+    # cross-boundary: inbound เรียก worker fn ไม่ได้ ; worker เรียก inbound fn ไม่ได้
+    checks.append(('inbound !claim', sql1(sup, "SELECT has_function_privilege('rfq_ingest','claim_rfq_extraction(uuid,text,text,text)','EXECUTE')") is False, 'ingest-can-claim'))
+    checks.append(('worker !create_rfq_draft', sql1(sup, "SELECT has_function_privilege('rfq_worker','create_rfq_draft(jsonb,text,text,text)','EXECUTE')") is False, 'worker-can-draft'))
+    # M1: rfq_read_api = SELECT business tree เท่านั้น + get_extraction_status ; อ่าน sensitive tables ตรง ๆ ไม่ได้
+    checks.append(('read_api CAN SELECT rfq_item',      sql1(sup, "SELECT has_table_privilege('rfq_read_api','rfq.rfq_item','SELECT')") is True, 'read_api-no-item'))
+    checks.append(('read_api !SELECT extraction_run',   sql1(sup, "SELECT has_table_privilege('rfq_read_api','rfq.rfq_ai_extraction_run','SELECT')") is False, 'read_api-can-run'))
+    checks.append(('read_api !SELECT attachment',       sql1(sup, "SELECT has_table_privilege('rfq_read_api','rfq.rfq_attachment','SELECT')") is False, 'read_api-can-attach'))
+    checks.append(('read_api CAN get_extraction_status', sql1(sup, "SELECT has_function_privilege('rfq_read_api','get_extraction_status(uuid)','EXECUTE')") is True, 'read_api-no-status'))
+    checks.append(('read_api !create_rfq_draft',        sql1(sup, "SELECT has_function_privilege('rfq_read_api','create_rfq_draft(jsonb,text,text,text)','EXECUTE')") is False, 'read_api-can-draft'))
     allok = all(ok for _, ok, _ in checks)
-    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "exact allowlist: create_rfq_draft only; no other fn, no table SELECT/DML"
-    record('T11 ingest exact allowlist', allok, detail)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "role boundaries: inbound=draft+begin, worker=claim/apply/fail/list, read_api=business-SELECT+status; no cross-surface, no broad SELECT"
+    record('T11 role allowlist boundaries (M1/M2)', allok, detail)
 
 def t12_ingest_atomicity(sup):
     """Codex #10: fail กลาง insert → ไม่มี partial draft"""
@@ -556,7 +569,7 @@ def t15_claim_race(sup):
     run = _seed_ext_run(sup, 't15')
     res = {}
     def worker(name):
-        c = connect(role='rfq_ingest')
+        c = connect(role='rfq_worker')
         try:
             with c.cursor() as cur:
                 cur.execute("SELECT claim_rfq_extraction(%s,%s,'enq',%s)", (run, name, f'cl-{name}'))
@@ -575,7 +588,7 @@ def t15_claim_race(sup):
 def t16_reclaim_fencing(sup):
     """Codex R6/C4/#8: lease หมด → worker ใหม่ reclaim ได้; worker เก่า (token เดิม) apply ถูก fence"""
     run = _seed_ext_run(sup, 't16')
-    a = connect(role='rfq_ingest')
+    a = connect(role='rfq_worker')
     with a.cursor() as cur:
         cur.execute("SELECT claim_rfq_extraction(%s,'wA','enq','clA')", (run,))
         old_lease = cur.fetchone()[0]['lease_token']
@@ -583,7 +596,7 @@ def t16_reclaim_fencing(sup):
     with sup.cursor() as cur:
         cur.execute("UPDATE rfq.rfq_ai_extraction_run SET lease_expires_at = now()-interval '1 min' WHERE id=%s", (run,))
     # B reclaims with new request → should_execute true, attempt 2
-    b = connect(role='rfq_ingest')
+    b = connect(role='rfq_worker')
     with b.cursor() as cur:
         cur.execute("SELECT claim_rfq_extraction(%s,'wB','enq','clB')", (run,))
         rec = cur.fetchone()[0]
@@ -606,7 +619,7 @@ def t16_reclaim_fencing(sup):
 def t17_service_binding(sup):
     """Codex B6: claim ด้วย service A แล้ว apply ด้วย service B → reject (lease bind service)"""
     run = _seed_ext_run(sup, 't17')
-    c = connect(role='rfq_ingest'); lease = None; denied = False
+    c = connect(role='rfq_worker'); lease = None; denied = False
     with c.cursor() as cur:
         cur.execute("SELECT (claim_rfq_extraction(%s,'wA','svc-a','cl17'))->>'lease_token'", (run,))
         lease = cur.fetchone()[0]
@@ -622,9 +635,9 @@ def t17_service_binding(sup):
     record('T17 apply service binding (svc-a claim → svc-b apply reject)', denied, f"denied={denied}(want RFS01)")
 
 def t18_temptable_no_hijack(sup):
-    """Codex B5: caller (rfq_ingest) สร้าง temp _w/_e ก่อน → ไม่กระทบ SECURITY DEFINER apply (เลิกใช้ temp table แล้ว)"""
+    """Codex B5: caller (rfq_worker) สร้าง temp _w/_e ก่อน → ไม่กระทบ SECURITY DEFINER apply (เลิกใช้ temp table แล้ว)"""
     run = _seed_ext_run(sup, 't18')
-    c = connect(role='rfq_ingest'); ok = False
+    c = connect(role='rfq_worker'); ok = False
     with c.cursor() as cur:
         cur.execute("CREATE TEMP TABLE _w (x int)")   # attacker pre-creates hostile-shaped temp tables
         cur.execute("CREATE TEMP TABLE _e (y int)")
@@ -647,7 +660,7 @@ def _fence_lockwait(sup, tag, op):
     → ต้อง RFS01 (fence ด้วย clock_timestamp ไม่ใช่ now()=txn-start) + run ยัง RUNNING (reclaim ได้)"""
     run = _seed_ext_run(sup, tag)
     rfq_id = sql1(sup, "SELECT rfq_id FROM rfq_ai_extraction_run WHERE id=%s", (run,))
-    a = connect(role='rfq_ingest')                          # wA claim → RUNNING + lease (autocommit)
+    a = connect(role='rfq_worker')                          # wA claim → RUNNING + lease (autocommit)
     lease = sql1(a, "SELECT (claim_rfq_extraction(%s,'wA','enq',%s))->>'lease_token'", (run, f'cl-{tag}'))
     holder = connect(); holder.autocommit = False           # superuser: ถือ parent lock ข้าม expiry
     holder.cursor().execute("SELECT id FROM rfq WHERE id=%s FOR UPDATE", (rfq_id,))
@@ -657,7 +670,7 @@ def _fence_lockwait(sup, tag, op):
     payload = ('{"schema_version":"extract-v1.1","input_sha256":"'+('a'*64)+'","items":[{"line_no":1,'
                '"fields":{"job_name":"x"}}],"evidence":[{"subject_type":"ITEM","ref":{"line_no":1},'
                '"field_name":"job_name","source_type":"PDF"}]}')
-    b = connect(role='rfq_ingest'); b.autocommit = False    # B: txn เริ่มตอนเรียก (now() < expiry) แล้ว block
+    b = connect(role='rfq_worker'); b.autocommit = False    # B: txn เริ่มตอนเรียก (now() < expiry) แล้ว block
     res = {}
     def run_b():
         try:

@@ -19,15 +19,26 @@ docker run -d --name rfq_dev -e POSTGRES_PASSWORD=test -e POSTGRES_DB=rfqtest -p
 ENQ_API_KEY=dev-local-key uvicorn enq_api.main:app --host 127.0.0.1 --port 8090
 ```
 
-### env (Codex transport fixes)
+### DB role model (M1/M2 role split — migration 009)
+
+4 non-superuser role แยกตาม surface (credential เดียวถูกเจาะ = ทำได้เฉพาะ surface ตัวเอง):
+
+| role (login) | ใช้โดย | ทำได้ |
+|---|---|---|
+| **rfq_ingest** (`rfq_ingest_login`) | FastAPI inbound (`RFQ_WRITE_DSN`) | `create_rfq_draft`, `begin_rfq_extraction` เท่านั้น |
+| **rfq_worker** (`rfq_worker_login`) | worker (`RFQ_WORKER_DSN`) | `list_claimable`, `claim`, `apply`, `fail` เท่านั้น |
+| **rfq_read_api** (`rfq_read_api_login`) | FastAPI read (`RFQ_READ_DSN`) | SELECT business tree tables + `get_extraction_status` (M1: ไม่มี SELECT ALL — อ่าน run/attachment/trusted ตรง ๆ ไม่ได้) |
+| **rfq_app** (`rfq_app_login`) | reviewer (internal, ไม่ใช่ public API) | SELECT ALL + reviewer capability |
+
+### env
 
 | var | ค่า | หมายเหตุ |
 |---|---|---|
-| `ENQ_API_KEY` | **required** — auth key (ต้องส่ง `X-API-Key` ทุก `/enq/*` route) | **fail-closed**: ไม่ตั้ง → startup error; ไม่มี dev bypass อีกต่อไป (compare_digest) |
-| `RFQ_WRITE_DSN` | DSN ของ **rfq_ingest_login** (non-superuser) | default = `rfq_ingest_login@localhost:5433` |
-| `RFQ_READ_DSN` | DSN ของ **rfq_app_login** (non-superuser) | default = `rfq_app_login@localhost:5433` |
-| `ENQ_MAX_BODY_BYTES` | จำกัด raw body (default `1000000`) | นับ bytes จริงที่ ASGI ก่อน parse (กัน chunked bypass) |
-| `ENQ_MAX_JSON_DEPTH` | จำกัด nesting (default `12`) | |
+| `ENQ_API_KEY` | **required** — auth key (`X-API-Key` ทุก `/enq/*`) | **fail-closed**: ไม่ตั้ง → startup error (compare_digest, ASCII) |
+| `RFQ_WRITE_DSN` | inbound = **rfq_ingest_login** | default `@localhost:5433` |
+| `RFQ_READ_DSN` | public read = **rfq_read_api_login** (M1 allowlist) | default `@localhost:5433` |
+| `RFQ_WORKER_DSN` | worker = **rfq_worker_login** (M2) | ใช้โดย `python -m enq_api.worker` |
+| `ENQ_MAX_BODY_BYTES` / `ENQ_MAX_JSON_DEPTH` | body/depth limit (default `1000000`/`12`) | |
 
 ## endpoints
 

@@ -10,7 +10,8 @@ flow ต่อ run (Codex):
   apply / fail_rfq_extraction → transaction ใหม่
 
 boundary:
-  - worker ใช้ role เดียว = rfq_ingest_login (write) ; poll ผ่าน list_claimable (definer, คืนแค่ run_id)
+  - worker ใช้ role แยก = rfq_worker_login (M2: list_claimable/claim/apply/fail เท่านั้น ; ไม่มี draft/begin)
+    poll ผ่าน list_claimable (definer, คืนแค่ run_id)
   - actor/service/lease/ref/hash เป็น server/DB-controlled — worker ไม่แต่ง
   - apply/fail request_id = stable ต่อ (run, lease) → retry idempotent
   - lease หมดระหว่าง provider → apply ถูก fence (RFS01) → worker ทิ้ง งานถูก reclaim
@@ -27,8 +28,9 @@ from enq_api import provider
 log = logging.getLogger("enq_worker")
 
 SERVICE           = "enq"                                       # server-controlled
-_DEV_DSN_W = "host=localhost port=5433 dbname=rfqtest user=rfq_ingest_login password=ingest connect_timeout=5"
-WRITE_DSN         = os.environ.get("RFQ_WRITE_DSN", _DEV_DSN_W)
+# M2: worker ใช้ role แยก (rfq_worker) = list_claimable/claim/apply/fail เท่านั้น — ไม่ใช่ inbound rfq_ingest
+_DEV_DSN_WK = "host=localhost port=5433 dbname=rfqtest user=rfq_worker_login password=worker connect_timeout=5"
+WORKER_DSN        = os.environ.get("RFQ_WORKER_DSN", _DEV_DSN_WK)
 POLL_LIMIT        = int(os.environ.get("ENQ_WORKER_POLL_LIMIT", "50"))
 POLL_INTERVAL_S   = float(os.environ.get("ENQ_WORKER_INTERVAL", "2.0"))
 PROVIDER_MARGIN_S = float(os.environ.get("ENQ_PROVIDER_MARGIN_S", "30"))   # provider timeout = lease_remaining - margin
@@ -59,7 +61,7 @@ def _call_json(dsn: str, sql: str, params) -> dict | None:
         c.close()
 
 
-def claimable(dsn: str = WRITE_DSN, limit: int = POLL_LIMIT) -> list:
+def claimable(dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) -> list:
     c = _conn(dsn)
     try:
         with c.cursor() as cur:
@@ -82,7 +84,7 @@ def _lease_budget(lease_exp_iso: str | None) -> float | None:
     return remaining - PROVIDER_MARGIN_S
 
 
-def process_run(run_id, worker_id: str, dsn: str = WRITE_DSN) -> dict:
+def process_run(run_id, worker_id: str, dsn: str = WORKER_DSN) -> dict:
     """claim → provider (นอก txn) → apply/fail ; คืน report ไม่ raise ในกรณีปกติ"""
     run_id = str(run_id)                                       # psycopg2 mogrify string literal → uuid cast
     claim_req = "claim:" + uuid.uuid4().hex                     # claim = per-attempt (reclaim = attempt ใหม่)
@@ -125,7 +127,7 @@ def _terminal(dsn, run_id, kind, sql, params, reason=None) -> dict:
         return {"run_id": str(run_id), "action": kind + "_rejected", "pgcode": getattr(e, "pgcode", None)}
 
 
-def poll_once(worker_id: str, dsn: str = WRITE_DSN, limit: int = POLL_LIMIT) -> list:
+def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) -> list:
     results = []
     for run_id in claimable(dsn, limit):
         try:

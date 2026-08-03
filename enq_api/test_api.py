@@ -184,13 +184,26 @@ if WDSN and RDSN:
     ok, code = attempt(WDSN, "INSERT INTO rfq(rfq_no) VALUES ('x')")
     check("write login direct INSERT denied (42501)", ok is False and code == "42501", code)
     ok, code = attempt(WDSN, DRAFT_CALL.replace("%s, 'enq', %s", "'cap-w', 'enq', 'cap-w-1'"))
-    check("write login CAN call create_rfq_draft", ok is True, code)
+    check("inbound login CAN call create_rfq_draft", ok is True, code)
+    # M2: inbound (rfq_ingest) เรียก worker fn (claim/apply/fail) ไม่ได้
+    ok, code = attempt(WDSN, "SELECT claim_rfq_extraction('00000000-0000-0000-0000-000000000000'::uuid,'w','enq','cap-w-claim')")
+    check("M2 inbound login CANNOT claim (42501)", ok is False and code == "42501", code)
+    ok, code = attempt(WDSN, "SELECT list_claimable_extractions(1)")
+    check("M2 inbound login CANNOT list_claimable (42501)", ok is False and code == "42501", code)
+    # read (rfq_read_api): business SELECT ได้ แต่ sensitive tables + create ไม่ได้
     ok, code = attempt(RDSN, "SELECT id FROM rfq LIMIT 1")
-    check("read login CAN direct SELECT", ok is True, code)
+    check("read login CAN direct SELECT rfq (business)", ok is True, code)
     ok, code = attempt(RDSN, "INSERT INTO rfq(rfq_no) VALUES ('x')")
     check("read login direct INSERT denied (42501)", ok is False and code == "42501", code)
     ok, code = attempt(RDSN, DRAFT_CALL.replace("%s, 'enq', %s", "'cap-r', 'enq', 'cap-r-1'"))
     check("read login CANNOT call create_rfq_draft (42501)", ok is False and code == "42501", code)
+    # M1: read login อ่าน sensitive tables ตรง ๆ ไม่ได้ (safe projection ไม่ถูก bypass ด้วย DB privilege)
+    ok, code = attempt(RDSN, "SELECT * FROM rfq_ai_extraction_run LIMIT 1")
+    check("M1 read login CANNOT SELECT rfq_ai_extraction_run (42501)", ok is False and code == "42501", code)
+    ok, code = attempt(RDSN, "SELECT * FROM rfq_attachment LIMIT 1")
+    check("M1 read login CANNOT SELECT rfq_attachment (42501)", ok is False and code == "42501", code)
+    ok, code = attempt(RDSN, "SELECT * FROM get_extraction_status('00000000-0000-0000-0000-000000000000'::uuid)")
+    check("M1 read login CAN EXECUTE get_extraction_status", ok is True, code)
 else:
     print("SKIP login least-privilege (no RFQ_WRITE_DSN/RFQ_READ_DSN in env)")
 

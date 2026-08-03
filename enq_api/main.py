@@ -31,9 +31,9 @@ MAX_BODY_BYTES = int(os.environ.get("ENQ_MAX_BODY_BYTES", "1000000"))
 MAX_JSON_DEPTH = int(os.environ.get("ENQ_MAX_JSON_DEPTH", "12"))
 SERVICE        = "enq"                                          # #3 hard-coded server-side
 _DEV_DSN_W = "host=localhost port=5433 dbname=rfqtest user=rfq_ingest_login password=ingest connect_timeout=5"
-_DEV_DSN_R = "host=localhost port=5433 dbname=rfqtest user=rfq_app_login password=app connect_timeout=5"
-WRITE_DSN = os.environ.get("RFQ_WRITE_DSN", _DEV_DSN_W)         # B3: non-superuser login roles
-READ_DSN  = os.environ.get("RFQ_READ_DSN",  _DEV_DSN_R)
+_DEV_DSN_R = "host=localhost port=5433 dbname=rfqtest user=rfq_read_api_login password=readapi connect_timeout=5"
+WRITE_DSN = os.environ.get("RFQ_WRITE_DSN", _DEV_DSN_W)         # B3: inbound (create_rfq_draft + begin) — rfq_ingest
+READ_DSN  = os.environ.get("RFQ_READ_DSN",  _DEV_DSN_R)         # M1: public read = rfq_read_api (allowlist, ไม่ใช่ SELECT ALL)
 
 # B1: fail-closed — บังคับ auth เสมอ (ไม่มี unauthenticated dev mode อีกต่อไป)
 #     local dev ให้ตั้ง ENQ_API_KEY เป็น key ทดสอบคงที่ แล้วส่ง X-API-Key ทุก request
