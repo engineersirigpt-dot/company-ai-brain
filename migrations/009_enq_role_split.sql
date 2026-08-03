@@ -54,34 +54,47 @@ GRANT SELECT (rfq_item_id, sequence_no, packing_name_raw, quantity_per_pack, uni
 GRANT SELECT (rfq_item_id, delivery_no, destination_raw, requested_date)                        ON rfq_delivery TO rfq_read_api;
 GRANT EXECUTE ON FUNCTION get_extraction_status(uuid) TO rfq_read_api;
 
--- assert M1 (fail-closed ถ้า grant drift):
-DO $assert$ BEGIN
-  -- positive: endpoint columns + status function อ่านได้
-  IF NOT (has_column_privilege('rfq_read_api','rfq.rfq','customer_name_raw','SELECT')
-          AND has_column_privilege('rfq_read_api','rfq.rfq_item','job_name','SELECT')
-          AND has_function_privilege('rfq_read_api','rfq.get_extraction_status(uuid)','EXECUTE')) THEN
-    RAISE EXCEPTION 'M1 regression: rfq_read_api อ่าน endpoint column/status ไม่ได้';
-  END IF;
-  -- B1: PII/notes/spec columns ที่ API ไม่คืน ต้อง denied
-  IF has_column_privilege('rfq_read_api','rfq.rfq','contact_name','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq','contact_phone','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq','contact_email','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq','customer_notes','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_item','description','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_item','intended_use','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_item','notes','SELECT') THEN
-    RAISE EXCEPTION 'M1 regression: rfq_read_api อ่าน PII/notes column ได้';
-  END IF;
-  -- B2: sensitive/trusted/ledger tables ต้อง denied ทุก column (ledger outcome เก็บ lease/ref/hash)
-  IF has_column_privilege('rfq_read_api','rfq.rfq_ai_extraction_run','input_sha256','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_attachment','object_store_key','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_extraction_request','outcome','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_source_ingest','source_sha256','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_field_evidence','value_snapshot','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_redaction_attestation','redacted_sha256','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_egress_approval','reason','SELECT')
-     OR has_column_privilege('rfq_read_api','rfq.rfq_ai_provider','provider_code','SELECT') THEN
-    RAISE EXCEPTION 'M1 regression: rfq_read_api อ่าน sensitive/ledger column ได้';
+-- assert M1 (F2): **exact (table,column) allowlist** ของ rfq_read_api = ตรง GET /enq/rfq เป๊ะ
+--   (ไม่ใช่ sentinel blacklist — จับได้ทั้ง extra column, missing column, table-level, และ DML)
+DO $assert$
+DECLARE v_extra text; v_missing text; v_tab text;
+BEGIN
+  CREATE TEMP TABLE _rd_exp(t text, c text) ON COMMIT DROP;
+  INSERT INTO _rd_exp(t,c) VALUES
+    ('rfq','id'),('rfq','rfq_no'),('rfq','status_code'),('rfq','revision_no'),('rfq','enquiry_ref'),
+    ('rfq','source_channel'),('rfq','customer_name_raw'),('rfq','priority_code'),
+    ('rfq_item','id'),('rfq_item','rfq_id'),('rfq_item','line_no'),('rfq_item','job_name'),('rfq_item','is_reprint'),
+    ('rfq_item','previous_job_ref'),('rfq_item','finished_width_mm'),('rfq_item','finished_length_mm'),
+    ('rfq_item','finished_depth_mm'),('rfq_item','finishing_state'),('rfq_item','packing_state'),('rfq_item','artwork_state'),
+    ('rfq_quantity_option','rfq_item_id'),('rfq_quantity_option','option_no'),('rfq_quantity_option','quantity'),
+    ('rfq_quantity_option','unit_ref'),('rfq_quantity_option','is_primary'),
+    ('rfq_component','rfq_item_id'),('rfq_component','component_no'),('rfq_component','component_name'),
+    ('rfq_component','paper_name_snapshot'),('rfq_component','paper_gsm_snapshot'),('rfq_component','print_sides_code'),
+    ('rfq_component','color_outside_count'),('rfq_component','color_inside_count'),
+    ('rfq_process_requirement','rfq_item_id'),('rfq_process_requirement','sequence_no'),('rfq_process_requirement','process_ref'),
+    ('rfq_process_requirement','process_name_raw'),('rfq_process_requirement','side_code'),
+    ('rfq_packing_requirement','rfq_item_id'),('rfq_packing_requirement','sequence_no'),('rfq_packing_requirement','packing_name_raw'),
+    ('rfq_packing_requirement','quantity_per_pack'),('rfq_packing_requirement','unit_ref'),
+    ('rfq_delivery','rfq_item_id'),('rfq_delivery','delivery_no'),('rfq_delivery','destination_raw'),('rfq_delivery','requested_date');
+  -- extra: column SELECT ที่ grant แต่ไม่อยู่ใน allowlist (จับ over-grant ทุกชนิด รวม PII/ledger/spec)
+  SELECT string_agg(t||'.'||c, ', ' ORDER BY t,c) INTO v_extra FROM (
+    SELECT table_name t, column_name c FROM information_schema.role_column_grants
+      WHERE grantee='rfq_read_api' AND table_schema='rfq' AND privilege_type='SELECT'
+    EXCEPT SELECT t,c FROM _rd_exp) x;
+  IF v_extra IS NOT NULL THEN RAISE EXCEPTION 'M1 exact-allowlist: rfq_read_api มี column นอก allowlist: %', v_extra; END IF;
+  -- missing: allowlist column ที่ endpoint ใช้แต่ไม่ถูก grant
+  SELECT string_agg(t||'.'||c, ', ' ORDER BY t,c) INTO v_missing FROM (
+    SELECT t,c FROM _rd_exp
+    EXCEPT SELECT table_name, column_name FROM information_schema.role_column_grants
+      WHERE grantee='rfq_read_api' AND table_schema='rfq' AND privilege_type='SELECT') x;
+  IF v_missing IS NOT NULL THEN RAISE EXCEPTION 'M1 exact-allowlist: rfq_read_api ขาด column ที่ endpoint ใช้: %', v_missing; END IF;
+  -- ต้องไม่มี table-level privilege ใด ๆ (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) บน rfq schema
+  SELECT string_agg(table_name||':'||privilege_type, ', ') INTO v_tab FROM information_schema.role_table_grants
+    WHERE grantee='rfq_read_api' AND table_schema='rfq';
+  IF v_tab IS NOT NULL THEN RAISE EXCEPTION 'M1: rfq_read_api มี table-level privilege (ต้อง column SELECT เท่านั้น): %', v_tab; END IF;
+  -- get_extraction_status ต้องเรียกได้ (positive)
+  IF NOT has_function_privilege('rfq_read_api','rfq.get_extraction_status(uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'M1: rfq_read_api เรียก get_extraction_status ไม่ได้';
   END IF;
 END $assert$;
 

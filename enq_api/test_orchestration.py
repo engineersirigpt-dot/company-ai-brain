@@ -143,6 +143,29 @@ except Exception:
     _wbad = False
 check("B3 worker role assert FAIL ด้วย inbound DSN (surface ผิด)", _wbad)
 
+# F1: worker capability drift ภายใน role เดิม → exact function-surface จับได้ (Codex reproduction)
+def _osx(q):
+    with sup.cursor() as c: c.execute(q)
+APPLY_SIG = "rfq.apply_rfq_extraction(uuid,uuid,jsonb,text,text,text)"
+_osx(f"REVOKE EXECUTE ON FUNCTION {APPLY_SIG} FROM rfq_worker")           # under-grant
+try:
+    w.assert_worker_role(WDSN); _u = False
+except RuntimeError:
+    _u = True
+except Exception:
+    _u = False
+_osx(f"GRANT EXECUTE ON FUNCTION {APPLY_SIG} TO rfq_worker")
+check("F1 worker under-grant (revoke apply) → assert fail", _u)
+_osx("GRANT EXECUTE ON FUNCTION rfq.create_rfq_draft(jsonb,text,text,text) TO rfq_worker")   # over-grant
+try:
+    w.assert_worker_role(WDSN); _o = False
+except RuntimeError:
+    _o = True
+except Exception:
+    _o = False
+_osx("REVOKE EXECUTE ON FUNCTION rfq.create_rfq_draft(jsonb,text,text,text) FROM rfq_worker")
+check("F1 worker over-grant (create_rfq_draft) → assert fail", _o)
+
 sup.close()
 nfail = res.count(False)
 print(f"===== ORCHESTRATION TEST: {res.count(True)} passed, {nfail} failed =====")

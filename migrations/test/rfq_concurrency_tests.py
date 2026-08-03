@@ -429,6 +429,24 @@ def t10_catalog_and_policy(sup):
     record('T10 catalog + policy-spoof structural', not bad, "; ".join(bad) or
            "all 10 fns: owner=rfq_owner, definer/invoker ตามชนิด, pinned search_path, no PUBLIC exec; helpers hidden; no 6-arg; trusted version")
 
+EXPECTED_RD = [  # F2: (table, column) ที่ rfq_read_api ควรอ่านได้ = ตรง GET /enq/rfq (mirror 009 exact allowlist)
+    ("rfq","id"),("rfq","rfq_no"),("rfq","status_code"),("rfq","revision_no"),("rfq","enquiry_ref"),
+    ("rfq","source_channel"),("rfq","customer_name_raw"),("rfq","priority_code"),
+    ("rfq_item","id"),("rfq_item","rfq_id"),("rfq_item","line_no"),("rfq_item","job_name"),("rfq_item","is_reprint"),
+    ("rfq_item","previous_job_ref"),("rfq_item","finished_width_mm"),("rfq_item","finished_length_mm"),
+    ("rfq_item","finished_depth_mm"),("rfq_item","finishing_state"),("rfq_item","packing_state"),("rfq_item","artwork_state"),
+    ("rfq_quantity_option","rfq_item_id"),("rfq_quantity_option","option_no"),("rfq_quantity_option","quantity"),
+    ("rfq_quantity_option","unit_ref"),("rfq_quantity_option","is_primary"),
+    ("rfq_component","rfq_item_id"),("rfq_component","component_no"),("rfq_component","component_name"),
+    ("rfq_component","paper_name_snapshot"),("rfq_component","paper_gsm_snapshot"),("rfq_component","print_sides_code"),
+    ("rfq_component","color_outside_count"),("rfq_component","color_inside_count"),
+    ("rfq_process_requirement","rfq_item_id"),("rfq_process_requirement","sequence_no"),("rfq_process_requirement","process_ref"),
+    ("rfq_process_requirement","process_name_raw"),("rfq_process_requirement","side_code"),
+    ("rfq_packing_requirement","rfq_item_id"),("rfq_packing_requirement","sequence_no"),("rfq_packing_requirement","packing_name_raw"),
+    ("rfq_packing_requirement","quantity_per_pack"),("rfq_packing_requirement","unit_ref"),
+    ("rfq_delivery","rfq_item_id"),("rfq_delivery","delivery_no"),("rfq_delivery","destination_raw"),("rfq_delivery","requested_date"),
+]
+
 def t11_ingest_allowlist(sup):
     """Codex #2/F1/M1/M2: role boundary — inbound(rfq_ingest)=create_rfq_draft+begin, worker(rfq_worker)=claim/apply/fail/list,
     read_api(rfq_read_api)=business SELECT+get_extraction_status ; แต่ละ role ข้าม surface ของกันไม่ได้ + ไม่มี broad SELECT/DML"""
@@ -487,6 +505,23 @@ def t11_ingest_allowlist(sup):
     effr = sql1(sup, """SELECT array_agg(p.proname ORDER BY p.proname) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND has_function_privilege('rfq_read_api', p.oid, 'EXECUTE')""")
     checks.append(('read_api function allowlist = get_extraction_status เท่านั้น', effr == ['get_extraction_status'], effr))
+    # F2: exact (table,column) allowlist — deliberate drift ต้องถูกจับ (ไม่ใช่ sentinel blacklist)
+    _rows = ",".join("('%s','%s')" % (t, c) for t, c in EXPECTED_RD)
+    def _rd_extra():
+        return sql1(sup, "SELECT string_agg(t||'.'||c, ',') FROM ("
+                   "SELECT table_name t, column_name c FROM information_schema.role_column_grants "
+                   "WHERE grantee='rfq_read_api' AND table_schema='rfq' AND privilege_type='SELECT' "
+                   "EXCEPT SELECT * FROM (VALUES " + _rows + ") e(t,c)) x")
+    checks.append(('F2 baseline: read_api ไม่มี column นอก allowlist', _rd_extra() is None, _rd_extra()))
+    with sup.cursor() as _c:
+        _c.execute("GRANT SELECT (sample_description) ON rfq.rfq_item TO rfq_read_api")       # extra บน business table
+        _c.execute("GRANT SELECT (original_filename) ON rfq.rfq_attachment TO rfq_read_api")  # extra บน sensitive table
+    _e = _rd_extra() or ""
+    checks.append(('F2 exact-allowlist จับ drift (business + sensitive column)',
+                   'rfq_item.sample_description' in _e and 'rfq_attachment.original_filename' in _e, _e))
+    with sup.cursor() as _c:
+        _c.execute("REVOKE SELECT (sample_description) ON rfq.rfq_item FROM rfq_read_api")
+        _c.execute("REVOKE SELECT (original_filename) ON rfq.rfq_attachment FROM rfq_read_api")
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or "role boundaries: inbound=draft+begin, worker=claim/apply/fail/list, read_api=business-SELECT+status; no cross-surface, no broad SELECT"
     record('T11 role allowlist boundaries (M1/M2)', allok, detail)

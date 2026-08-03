@@ -19,4 +19,5 @@ export ENQ_API_KEY=test-key
 unset ENQ_DEV_MODE || true
 export RFQ_WRITE_DSN="host=127.0.0.1 port=${PORT} dbname=rfqtest user=rfq_ingest_login password=ingest connect_timeout=5"     # inbound
 export RFQ_READ_DSN="host=127.0.0.1 port=${PORT} dbname=rfqtest user=rfq_read_api_login password=readapi connect_timeout=5"   # M1 read allowlist
+export SUPER_DSN="host=127.0.0.1 port=${PORT} dbname=rfqtest user=postgres password=test connect_timeout=5"                   # F1 drift tests (grant/revoke)
 PYTHONIOENCODING=utf-8 "${PY:-python}" enq_api/test_api.py

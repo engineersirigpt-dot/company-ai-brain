@@ -43,7 +43,20 @@ if not ENQ_API_KEY.isascii():                                  # H1: key format 
     raise RuntimeError("fail-closed: ENQ_API_KEY ต้องเป็น ASCII")
 
 
-# ---- B3: startup capability fail-closed — DSN ต้องชี้ role ที่ถูก surface (กัน config drift เช่น READ=rfq_app) ----
+# ---- B3/F1: startup capability fail-closed — เทียบ **exact function surface** + ห้าม direct table DML (กัน config drift ทุกชนิด) ----
+# exact effective function set ต่อ schema rfq (เหมือน T11) ; ไม่ใช่ sentinel บางตัว → จับทั้ง over-grant และ under-grant
+INBOUND_FN = ["begin_rfq_extraction", "create_rfq_draft"]
+READ_FN    = ["get_extraction_status"]
+_FN_SQL  = """SELECT coalesce(array_agg(p.proname ORDER BY p.proname), ARRAY[]::text[])
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='rfq' AND has_function_privilege(current_user, p.oid, 'EXECUTE')"""
+_DML_SQL = """SELECT count(*) FROM information_schema.tables t
+    WHERE t.table_schema='rfq' AND t.table_type='BASE TABLE'
+      AND (has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'INSERT')
+        OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'UPDATE')
+        OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'DELETE')
+        OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'TRUNCATE'))"""
+
 def _caps(dsn: str, sql: str):
     c = psycopg2.connect(dsn)
     try:
@@ -52,27 +65,16 @@ def _caps(dsn: str, sql: str):
     finally:
         c.close()
 
+def _assert_role(dsn: str, label: str, expect_fn: list[str]):
+    fn = _caps(dsn, _FN_SQL)[0]
+    if fn != expect_fn:
+        raise RuntimeError(f"fail-closed: {label} function surface ผิด (ได้ {fn}, ต้อง {expect_fn}) — role over/under-granted?")
+    if _caps(dsn, _DML_SQL)[0] > 0:
+        raise RuntimeError(f"fail-closed: {label} มี direct table DML บน schema rfq (ต้องผ่าน SECURITY DEFINER function เท่านั้น)")
+
 def _assert_dsn_roles():
-    # READ: ต้อง EXECUTE get_extraction_status + อ่าน endpoint column ; ต้อง**ไม่**อ่าน PII/run/attachment/ledger + ไม่ mutate
-    st, draft, name, pii, run, att, ledger = _caps(READ_DSN, """SELECT
-        has_function_privilege(current_user,'rfq.get_extraction_status(uuid)','EXECUTE'),
-        has_function_privilege(current_user,'rfq.create_rfq_draft(jsonb,text,text,text)','EXECUTE'),
-        has_column_privilege(current_user,'rfq.rfq','customer_name_raw','SELECT'),
-        has_column_privilege(current_user,'rfq.rfq','customer_notes','SELECT'),
-        has_column_privilege(current_user,'rfq.rfq_ai_extraction_run','input_sha256','SELECT'),
-        has_column_privilege(current_user,'rfq.rfq_attachment','object_store_key','SELECT'),
-        has_column_privilege(current_user,'rfq.rfq_extraction_request','outcome','SELECT')""")
-    if not (st and name and not draft and not pii and not run and not att and not ledger):
-        raise RuntimeError("fail-closed: RFQ_READ_DSN role ผิด surface (ต้องเป็น read allowlist เช่น rfq_read_api) "
-                           f"[status={st} name={name} draft={draft} pii={pii} run={run} att={att} ledger={ledger}]")
-    # WRITE (inbound): ต้อง begin ได้ ; ต้อง**ไม่** claim และ**ไม่**มี direct table SELECT
-    begin, claim, sel = _caps(WRITE_DSN, """SELECT
-        has_function_privilege(current_user,'rfq.begin_rfq_extraction(uuid,text,text,text,text,uuid,uuid,jsonb,text,text,text)','EXECUTE'),
-        has_function_privilege(current_user,'rfq.claim_rfq_extraction(uuid,text,text,text)','EXECUTE'),
-        has_column_privilege(current_user,'rfq.rfq','customer_name_raw','SELECT')""")
-    if not (begin and not claim and not sel):
-        raise RuntimeError("fail-closed: RFQ_WRITE_DSN role ผิด surface (ต้องเป็น inbound เช่น rfq_ingest) "
-                           f"[begin={begin} claim={claim} sel_rfq={sel}]")
+    _assert_role(READ_DSN,  "RFQ_READ_DSN (read allowlist เช่น rfq_read_api)", READ_FN)
+    _assert_role(WRITE_DSN, "RFQ_WRITE_DSN (inbound เช่น rfq_ingest)",         INBOUND_FN)
 
 _assert_dsn_roles()                                            # บังคับเสมอ — ต่อ DB ไม่ได้/role ผิด = startup fail (fail-closed)
 

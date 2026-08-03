@@ -138,23 +138,32 @@ def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) ->
     return results
 
 
+WORKER_FN = ["apply_rfq_extraction", "claim_rfq_extraction", "fail_rfq_extraction", "list_claimable_extractions"]
+
 def assert_worker_role(dsn: str = WORKER_DSN):
-    """B3: fail-closed ถ้า WORKER_DSN ชี้ role ผิด surface (ต้อง claim/list ได้ ; begin/draft/direct-SELECT ไม่ได้)"""
+    """B3/F1: fail-closed ถ้า WORKER_DSN ชี้ role ผิด surface — เทียบ exact function set + ห้าม direct table DML
+    (จับทั้ง over-grant, under-grant เช่น apply/fail ถูก revoke, และ reviewer/draft/begin ที่ถูก grant เกิน)"""
+    fn = _call_json_row(dsn, """SELECT coalesce(array_agg(p.proname ORDER BY p.proname), ARRAY[]::text[])
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='rfq' AND has_function_privilege(current_user, p.oid, 'EXECUTE')""")[0]
+    if fn != WORKER_FN:
+        raise RuntimeError(f"fail-closed: RFQ_WORKER_DSN function surface ผิด (ได้ {fn}, ต้อง {WORKER_FN}) — role over/under-granted?")
+    if _call_json_row(dsn, """SELECT count(*) FROM information_schema.tables t
+        WHERE t.table_schema='rfq' AND t.table_type='BASE TABLE'
+          AND (has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'INSERT')
+            OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'UPDATE')
+            OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'DELETE')
+            OR has_table_privilege(current_user,'rfq.'||quote_ident(t.table_name),'TRUNCATE'))""")[0] > 0:
+        raise RuntimeError("fail-closed: RFQ_WORKER_DSN มี direct table DML บน schema rfq (ต้องผ่าน SECURITY DEFINER function เท่านั้น)")
+
+
+def _call_json_row(dsn: str, sql: str):
     c = psycopg2.connect(dsn)
     try:
         with c.cursor() as cur:
-            cur.execute("""SELECT
-                has_function_privilege(current_user,'rfq.claim_rfq_extraction(uuid,text,text,text)','EXECUTE'),
-                has_function_privilege(current_user,'rfq.list_claimable_extractions(int)','EXECUTE'),
-                has_function_privilege(current_user,'rfq.begin_rfq_extraction(uuid,text,text,text,text,uuid,uuid,jsonb,text,text,text)','EXECUTE'),
-                has_function_privilege(current_user,'rfq.create_rfq_draft(jsonb,text,text,text)','EXECUTE'),
-                has_column_privilege(current_user,'rfq.rfq','customer_name_raw','SELECT')""")
-            claim, lst, begin, draft, sel = cur.fetchone()
+            cur.execute(sql); return cur.fetchone()
     finally:
         c.close()
-    if not (claim and lst and not begin and not draft and not sel):
-        raise RuntimeError("fail-closed: RFQ_WORKER_DSN role ผิด surface (ต้องเป็น rfq_worker) "
-                           f"[claim={claim} list={lst} begin={begin} draft={draft} sel={sel}]")
 
 
 def main():

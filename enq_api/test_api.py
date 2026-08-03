@@ -241,6 +241,29 @@ if os.environ.get("RFQ_READ_DSN"):
     rccode, err = import_with({"ENQ_API_KEY": "test-key", "RFQ_READ_DSN": app_dsn})
     check("B3 startup fail-closed: READ_DSN=rfq_app (SELECT ALL) → error", rccode != 0 and "fail-closed" in err and "READ_DSN" in err, err[-200:])
 
+# F1: exact function-surface — capability drift ภายใน role เดิม → startup fail (Codex reproduction)
+if os.environ.get("SUPER_DSN"):
+    _sup = psycopg2.connect(os.environ["SUPER_DSN"]); _sup.autocommit = True
+    def _sx(q):
+        with _sup.cursor() as c: c.execute(q)
+    APPLY_SIG = "rfq.apply_rfq_extraction(uuid,uuid,jsonb,text,text,text)"
+    # inbound over-granted apply → WRITE function set มี extra → startup fail
+    _sx(f"GRANT EXECUTE ON FUNCTION {APPLY_SIG} TO rfq_ingest")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+    _sx(f"REVOKE EXECUTE ON FUNCTION {APPLY_SIG} FROM rfq_ingest")
+    check("F1 inbound over-grant (apply) → startup fail", rccode != 0 and "fail-closed" in err and "WRITE_DSN" in err, err[-200:])
+    # read over-granted list_claimable → READ function set มี extra → startup fail
+    _sx("GRANT EXECUTE ON FUNCTION rfq.list_claimable_extractions(int) TO rfq_read_api")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+    _sx("REVOKE EXECUTE ON FUNCTION rfq.list_claimable_extractions(int) FROM rfq_read_api")
+    check("F1 read over-grant (list_claimable) → startup fail", rccode != 0 and "fail-closed" in err and "READ_DSN" in err, err[-200:])
+    # inbound under-granted (revoke create_rfq_draft) → WRITE function set ขาด → startup fail
+    _sx("REVOKE EXECUTE ON FUNCTION rfq.create_rfq_draft(jsonb,text,text,text) FROM rfq_ingest")
+    rccode, err = import_with({"ENQ_API_KEY": "test-key"})
+    _sx("GRANT EXECUTE ON FUNCTION rfq.create_rfq_draft(jsonb,text,text,text) TO rfq_ingest")
+    check("F1 inbound under-grant (revoke create_rfq_draft) → startup fail", rccode != 0 and "fail-closed" in err and "WRITE_DSN" in err, err[-200:])
+    _sup.close()
+
 nfail = res.count(False)
 print(f"===== API TEST: {res.count(True)} passed, {nfail} failed =====")
 sys.exit(1 if nfail else 0)
