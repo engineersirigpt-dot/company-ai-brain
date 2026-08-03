@@ -38,6 +38,22 @@ APPLY_RETRIES     = int(os.environ.get("ENQ_APPLY_RETRIES", "5"))          # M3:
 APPLY_BACKOFF_S   = float(os.environ.get("ENQ_APPLY_BACKOFF_S", "0.2"))
 
 
+def _validate_config():
+    """fail-fast config (Codex backlog (b)) — ค่าที่ผิดทำ retry loop/sleep พังแบบเงียบ
+    โดยเฉพาะ ENQ_APPLY_RETRIES < 1 → `for attempt in range(0)` ข้าม loop → `raise last` ที่ last=None → raise None"""
+    problems = []
+    if APPLY_RETRIES < 1:     problems.append("ENQ_APPLY_RETRIES ต้อง >= 1 (ตอนนี้ %r → retry loop ไม่รัน → raise None)" % APPLY_RETRIES)
+    if APPLY_BACKOFF_S < 0:   problems.append("ENQ_APPLY_BACKOFF_S ต้อง >= 0 (ตอนนี้ %r → time.sleep ค่าติดลบ)" % APPLY_BACKOFF_S)
+    if POLL_LIMIT < 1:        problems.append("ENQ_WORKER_POLL_LIMIT ต้อง >= 1 (ตอนนี้ %r → ไม่ claim งานเลย)" % POLL_LIMIT)
+    if POLL_INTERVAL_S < 0:   problems.append("ENQ_WORKER_INTERVAL ต้อง >= 0 (ตอนนี้ %r)" % POLL_INTERVAL_S)
+    if PROVIDER_MARGIN_S < 0: problems.append("ENQ_PROVIDER_MARGIN_S ต้อง >= 0 (ตอนนี้ %r)" % PROVIDER_MARGIN_S)
+    if problems:
+        raise ValueError("worker config ไม่ถูกต้อง: " + " ; ".join(problems))
+
+
+_validate_config()                                             # import-time fail-fast (default ทุกค่า valid — ไม่กระทบ test)
+
+
 def _conn(dsn: str):
     c = psycopg2.connect(dsn); c.autocommit = False
     with c.cursor() as cur:

@@ -212,6 +212,27 @@ rb4, ob4, _ = _m3f1("xm3b2c", lambda sha: {"schema_version": "extract-v1.1", "in
 check("B2 NaN (allow_nan=False → ValueError) → run FAILED", ob4.get("action") == "fail" and ob4.get("status") == "FAILED", ob4)
 check("B1/B2 FAILED runs ไม่กลับเข้า claimable", all(x not in claim_ids() for x in (rb1, rb2, rb3, rb4)), claim_ids())
 
+# ---- backlog (a): lone-surrogate / NUL — json.dumps(ensure_ascii=True) escape ได้ แต่ DB jsonb reject (class 22) → INVALID_RESULT → FAILED ----
+rls, ols, nls = _m3f1("xm3ls", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha, "note": "\ud800"})
+check("(a) lone surrogate → DB class22 → run FAILED", ols.get("action") == "fail" and ols.get("status") == "FAILED", ols)
+rnu, onu, _ = _m3f1("xm3nul", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha, "note": "\u0000"})
+check("(a) NUL char → DB class22 → run FAILED", onu.get("action") == "fail" and onu.get("status") == "FAILED", onu)
+check("(a) surrogate/NUL provider ครั้งเดียว + ไม่ claimable", nls == 1 and rls not in claim_ids() and rnu not in claim_ids(), (nls, claim_ids()))
+
+# ---- backlog (b): config fail-fast — ค่าผิดต้อง raise ตอน validate (กัน ENQ_APPLY_RETRIES=0 → raise None) ----
+def _cfg_raises(**over):
+    saved = {k: getattr(w, k) for k in over}
+    try:
+        for k, v in over.items(): setattr(w, k, v)
+        try: w._validate_config(); return False
+        except ValueError: return True
+    finally:
+        for k, v in saved.items(): setattr(w, k, v)
+check("(b) ENQ_APPLY_RETRIES=0 → _validate_config raise (กัน raise None)", _cfg_raises(APPLY_RETRIES=0), None)
+check("(b) ENQ_APPLY_BACKOFF_S<0 → raise", _cfg_raises(APPLY_BACKOFF_S=-1.0), None)
+check("(b) ENQ_WORKER_POLL_LIMIT=0 → raise", _cfg_raises(POLL_LIMIT=0), None)
+check("(b) default config ผ่าน validate (ไม่ raise)", w._validate_config() is None, None)
+
 # ---- M3 fail-retry: durable fail (connection drop ก่อน/หลัง commit) ----
 def _m3fail(tag, flaky_fn):
     r = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": tag}); rid = r.json()["run_id"]
