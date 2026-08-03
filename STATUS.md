@@ -446,13 +446,17 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         **M1/M2 + B1-B3 + F1-F7 = CLOSED** — เข้า **deploy-readiness track** ได้ (ขอบเขต GO = DB-role surface + local/synthetic เท่านั้น)
       → **operational note (non-blocking, deploy work):** capability assert ทำงานตอน **startup** ไม่ใช่ continuous monitor →
         ตอน deploy ต้องมี restart/health automation หรือ privilege-drift monitoring (ถ้า DBA เปลี่ยน grant ระหว่าง process รัน)
-- [x] **M3 durable terminal retry (commit `451a91a`) — worker durability ปิดแล้ว**
+- [x] **M3 durable terminal retry (commit `451a91a` → M3-F1 fix `a3a5503`) — worker durability ปิดครบ (local+synthetic)**
       **error contract:** `ProviderError` = terminal (fail/burn run) vs **`ProviderTransient`** = retryable (timeout/5xx/conn) → ไม่ burn run
-      **durable apply/fail:** `_terminal()` retry ด้วย **request_id เดิม** บน transient DB error (OperationalError/serialize/deadlock/lock/canceled/class08,57)
+      **durable apply/fail:** `_call_retry` retry ด้วย **request_id เดิม** บน transient DB error (OperationalError/serialize/deadlock/lock/canceled/class08,57)
         → 'provider สำเร็จ + apply connection ขาด' → retry → ledger คืน SUCCEEDED เดิม (idempotent, **ไม่เรียก provider ซ้ำ**) ไม่ว่า commit สำเร็จหรือไม่
-      **provider transient** → run คง RUNNING (ไม่ FAILED) → reclaim ; ส่ง `idempotency_key` (stable ต่อ attempt) ให้ provider จริง dedupe re-call ตอน reclaim
-      → tests (orchestration 31→**39**): apply transient ก่อน/หลัง commit → SUCCEEDED+provider เรียกครั้งเดียว ; provider transient→RUNNING ; provider terminal→FAILED
-      → **M3 (worker-level) CLOSED** — ส่วนที่รอ provider จริงคือ provider ฝั่งนั้น**บริโภค** idempotency_key + คืน transient/terminal จริง (ทำตอนต่อ provider จริง)
+      **provider transient** → run คง RUNNING (ไม่ FAILED) → reclaim ; ส่ง `idempotency_key` (stable ข้าม claim/reclaim ของ run = `run:input_sha256`) ให้ provider จริง dedupe re-call
+      **M3a — same-process DB retry (commit outcome unknown):** ✅ CLOSED (stable request_id + ledger replay)
+      **M3b — invalid provider result terminalization (Codex M3-F1):** ✅ CLOSED @ `a3a5503` — provider คืน dict แต่ DB validator reject
+        (RFR01 / class 22 / 23502/23503/23505/23514/54000) → `_do_apply` escalate เป็น `fail_rfq_extraction(INVALID_EXTRACTION_RESULT)` = run **FAILED** (terminal, ไม่ค้าง RUNNING → ไม่ reclaim → ไม่เรียก provider ซ้ำ) ; RFS01 fenced (drop, ห้าม fail lease เก่า) ; RFN01 alert
+      **M3c — cross-process crash / exactly-once ข้าม process:** ⏳ EXTERNAL gate — worker บังคับ dedupe เองไม่ได้ ; ปิดเมื่อ provider จริงพิสูจน์ idempotency (key เดิม→ผลเดิม, ไม่ side-effect ซ้ำ) หรือมี durable result checkpoint ก่อน apply
+      → tests (orchestration 39→**46**): +invalid-result (`{}`→22023 / evidence ไม่ครบ→RFR01 / dup line_no→23505 ทั้งหมด→FAILED, provider เรียกครั้งเดียว, ไม่กลับเข้า claimable) +fail-retry (drop ก่อน/หลัง commit → FAILED, provider ครั้งเดียว)
+      → suites: **orchestration 46 · API 73 · migration ALL PASSED**
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
