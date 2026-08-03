@@ -34,7 +34,7 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_owner')  THEN DROP OWNED BY rfq_owner;  DROP ROLE rfq_owner;  END IF;
 END $$;
 SQL
-  for f in 001_rfq_core.sql 002_triggers.sql 003_field_policy.sql 005_service_layer_v2.sql 006_enq_ingest.sql 007_enq_extraction.sql 008_enq_orchestration.sql 009_enq_role_split.sql 010_rfq_signoff_v2.sql 011_rfq_readiness_versioning.sql "$@"; do
+  for f in 001_rfq_core.sql 002_triggers.sql 003_field_policy.sql 005_service_layer_v2.sql 006_enq_ingest.sql 007_enq_extraction.sql 008_enq_orchestration.sql 009_enq_role_split.sql 010_rfq_signoff_v2.sql 011_rfq_readiness_versioning.sql 012_rfq_draft_edit.sql "$@"; do
     $PSQL < "$f" >/dev/null
   done
 }

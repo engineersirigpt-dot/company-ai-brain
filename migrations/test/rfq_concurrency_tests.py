@@ -17,7 +17,7 @@ rfq_concurrency_tests.py — 2-connection deterministic concurrency/permission t
 รันผ่าน run_migrations.sh (โหลด 001+002+003+005 ลง ephemeral postgres:16 ก่อน)
 ค่า connection อ่านจาก env (ดีฟอลต์ = container ทดสอบ localhost:5433)
 """
-import os, sys, time, threading
+import os, sys, time, threading, json
 import psycopg2
 from psycopg2 import errorcodes
 
@@ -90,6 +90,19 @@ def seed_review_rfq(sup, rfq_no, blocking_clar=False):
         if blocking_clar:
             clar = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',true,'AI','bot','tester')", (rfq, rfq))
     return dict(rfq=rfq, item=item, qty=qty, comp=comp, signoff=so, clar=clar)
+
+def seed_draft_rfq(sup, rfq_no):
+    """DRAFT RFQ + 1 item (row_version=1) สำหรับ draft-edit/upsert"""
+    with sup.cursor() as cur:
+        cur.execute("SET search_path TO rfq")
+        cur.execute("""INSERT INTO rfq (rfq_no,enquiry_ref,source_channel,customer_ref,sales_owner_ref,
+            status_code,created_by_ref,updated_by_ref) VALUES (%s,%s,'EMAIL','C','A','DRAFT','P','P') RETURNING id""",
+            (rfq_no, 'ENQ-' + rfq_no))
+        rfq = cur.fetchone()[0]
+        cur.execute("""INSERT INTO rfq_item (rfq_id,line_no,job_name,finishing_state,packing_state,artwork_state,sample_state)
+            VALUES (%s,1,'orig job','UNKNOWN','UNKNOWN','UNKNOWN','UNKNOWN') RETURNING id""", (rfq,))
+        item = cur.fetchone()[0]
+    return dict(rfq=rfq, item=item)
 
 def seed_ready_estimate(sup, rfq_no):
     f = seed_review_rfq(sup, rfq_no)
@@ -368,6 +381,7 @@ def t09_authz_separation(sup):
     denied_exec('ingest revoke_signoff',      "SELECT revoke_signoff(%s,'forged','x')", (so,))
     denied_exec('ingest create_rfq_revision', "SELECT create_rfq_revision(%s,'r','forged')", (rfq,))
     denied_exec('ingest resolve_clarification', "SELECT resolve_clarification(%s,'OPEN','forged')", (so,))
+    denied_exec('ingest upsert_rfq_draft',    "SELECT upsert_rfq_draft(%s,1,'forged','{}'::jsonb)", (rfq,))
     ing.close()
     # rfq_app คงสิทธิ์ reviewer/Ready ไว้; rfq_ingest ต้องไม่มี
     app_exec = sql1(sup, "SELECT has_function_privilege('rfq_app','mark_ready(uuid,int,text)','EXECUTE')")
@@ -383,7 +397,7 @@ def t09_authz_separation(sup):
 def t10_catalog_and_policy(sup):
     """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
     svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
-           'add_signoff', 'revoke_signoff', '_lock_rfq_for_input', '_reviewer_latest_confirmed', '_bump_rfq_version',
+           'add_signoff', 'revoke_signoff', 'upsert_rfq_draft', '_lock_rfq_for_input', '_reviewer_latest_confirmed', '_bump_rfq_version',
            'create_rfq_draft', '_reject_unknown_keys', '_child_array',
            'begin_rfq_extraction', 'claim_rfq_extraction', 'apply_rfq_extraction', 'fail_rfq_extraction',
            'list_claimable_extractions', 'get_extraction_status',
@@ -984,6 +998,63 @@ def t23_readiness_versioning(sup):
         "readiness mutations bump row_version ; stale token -> 40001 ; terminal reject ไม่ bump ; B1 actor/provenance แยก"
     record('T23 readiness versioning (V3)', allok, detail)
 
+def t24_draft_edit(sup):
+    """draft-edit/upsert (012): read Draft -> edit -> expected_row_version -> lock/freeze -> save -> bump (V3 consumer)"""
+    checks = []
+    def rv(rfq): return rowver(sup, rfq)
+    def edit(rfq, ver, actor, patch):
+        return sql1(sup, "SELECT upsert_rfq_draft(%s,%s,%s,%s::jsonb)", (rfq, ver, actor, json.dumps(patch)))
+    def err(rfq, ver, actor, patch):
+        try: edit(rfq, ver, actor, patch); return None
+        except psycopg2.Error as e: return e.pgcode
+
+    f = seed_draft_rfq(sup, 'T24'); rfq = f['rfq']
+
+    # 1) header edit -> field updated + bump
+    v0 = rv(rfq)
+    o1 = edit(rfq, v0, 'editor-1', {"header": {"fields": {"customer_name_raw": "ACME Co"}}})
+    nm = sql1(sup, "SELECT customer_name_raw FROM rfq WHERE id=%s", (rfq,))
+    checks.append(('1 header edit -> updated + bump', nm == 'ACME Co' and rv(rfq) == v0 + 1 and o1.get('edited_header') is True, (nm, o1)))
+
+    # 2) update existing item (line_no=1) -> items_updated=1
+    v1 = rv(rfq)
+    o2 = edit(rfq, v1, 'editor-1', {"items": [{"line_no": 1, "fields": {"job_name": "edited job", "finishing_state": "SPECIFIED"}}]})
+    jn = sql1(sup, "SELECT job_name FROM rfq_item WHERE rfq_id=%s AND line_no=1", (rfq,))
+    checks.append(('2 item update (existing) -> updated + bump', jn == 'edited job' and o2.get('items_updated') == 1 and rv(rfq) == v1 + 1, (jn, o2)))
+
+    # 3) upsert NEW item (line_no=2) -> items_inserted=1
+    v2 = rv(rfq)
+    o3 = edit(rfq, v2, 'editor-1', {"items": [{"line_no": 2, "fields": {"job_name": "new item"}}]})
+    n2 = sql1(sup, "SELECT count(*) FROM rfq_item WHERE rfq_id=%s AND line_no=2", (rfq,))
+    checks.append(('3 item upsert (new line_no) -> inserted + bump', n2 == 1 and o3.get('items_inserted') == 1 and rv(rfq) == v2 + 1, (n2, o3)))
+
+    # 4) stale expected_row_version -> 40001 (optimistic concurrency)
+    checks.append(('4 stale expected_row_version -> 40001',
+                   err(rfq, 1, 'editor-1', {"header": {"fields": {"customer_name_raw": "x"}}}) == errorcodes.SERIALIZATION_FAILURE, None))
+
+    # 5) non-DRAFT (READY_FOR_REVIEW) -> reject 23514 (freeze)
+    g = seed_review_rfq(sup, 'T24r')
+    checks.append(('5 non-DRAFT -> reject 23514',
+                   err(g['rfq'], rv(g['rfq']), 'editor-1', {"header": {"fields": {"customer_name_raw": "x"}}}) == errorcodes.CHECK_VIOLATION, None))
+
+    # 6) unknown field -> reject 22023 (_reject_unknown_keys)
+    checks.append(('6 unknown field -> reject 22023',
+                   err(rfq, rv(rfq), 'editor-1', {"header": {"fields": {"nonexistent": "x"}}}) == errorcodes.INVALID_PARAMETER_VALUE, None))
+
+    # 7) actor blank -> reject 23514
+    checks.append(('7 actor blank -> reject 23514',
+                   err(rfq, rv(rfq), '   ', {"header": {"fields": {"customer_name_raw": "x"}}}) == errorcodes.CHECK_VIOLATION, None))
+
+    # 8) empty patch -> reject 23514 ; version ไม่ขยับจาก call ที่ reject
+    v_end = rv(rfq)
+    checks.append(('8 empty patch -> reject 23514',
+                   err(rfq, v_end, 'editor-1', {}) == errorcodes.CHECK_VIOLATION and rv(rfq) == v_end, None))
+
+    allok = all(ok for _, ok, _ in checks)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or \
+        "draft-edit: header/item update + item upsert + stale->40001 + non-DRAFT/unknown/actor/empty rejects (ไม่ bump)"
+    record('T24 draft-edit/upsert (V3 consumer)', allok, detail)
+
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
     tests = [t01_concurrent_mark_ready, t02_concurrent_revision, t03_readiness_toctou,
@@ -991,7 +1062,7 @@ def main():
              t09_authz_separation, t10_catalog_and_policy,
              t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
              t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack,
-             t19_fence_fail, t20_fence_apply, t21_signoff_v2, t22_signoff_decision_order, t23_readiness_versioning]
+             t19_fence_fail, t20_fence_apply, t21_signoff_v2, t22_signoff_decision_order, t23_readiness_versioning, t24_draft_edit]
     for t in tests:
         try:
             t(sup)
