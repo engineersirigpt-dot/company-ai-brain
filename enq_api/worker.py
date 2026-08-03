@@ -121,22 +121,36 @@ def process_run(run_id, worker_id: str, dsn: str = WORKER_DSN) -> dict:
 _TRANSIENT_PG = {"40001", "40P01", "55P03", "57014", "53300", "53400",
                  "08000", "08003", "08006", "08001", "08004", "57P01", "57P02", "57P03"}
 # M3-F1: provider คืน payload แต่ DB validator reject = invalid provider result → escalate เป็น FAILED (ไม่ค้าง RUNNING)
+# B1: 54000 (ProgramLimitExceeded) สืบทอด OperationalError → ต้อง classify เป็น invalid ไม่ใช่ transient
 _INVALID_RESULT_PG = {"RFR01", "23502", "23503", "23505", "23514", "54000"}   # + class '22'
-
-def _is_transient(e) -> bool:
-    return isinstance(e, psycopg2.OperationalError) or getattr(e, "pgcode", None) in _TRANSIENT_PG
 
 def _is_invalid_result(code) -> bool:
     return code in _INVALID_RESULT_PG or (code is not None and code[:2] == "22")
 
+def _classify(e) -> str:
+    """operation-aware classifier เดียว (ใช้ทั้ง retry + final dispatch) — คืน INVALID_RESULT|FENCED|NOT_FOUND|TRANSIENT|OPERATIONAL
+    B1: invalid-result ต้องมา **ก่อน** generic OperationalError — 54000 สืบทอด OperationalError แต่เป็น payload ผิด contract
+        → terminal FAILED ไม่ใช่ retry/reclaim ; precedence = INVALID_RESULT > FENCED > NOT_FOUND > TRANSIENT > OPERATIONAL"""
+    code = getattr(e, "pgcode", None)
+    if _is_invalid_result(code):     # 220xx/RFR01/23502/23503/23505/23514/54000 = payload ผิด contract → terminal
+        return "INVALID_RESULT"
+    if code == "RFS01":              # lease หมด/ถูก fence → ทิ้งผล lease เก่า (ห้าม fail)
+        return "FENCED"
+    if code == "RFN01":              # run หาย → alert (state lost)
+        return "NOT_FOUND"
+    if isinstance(e, psycopg2.OperationalError) or code in _TRANSIENT_PG:
+        return "TRANSIENT"           # connection/serialize/deadlock/lock/canceled → retry (idempotent replay)
+    return "OPERATIONAL"             # RFI01/permission/programming → operational alert (ไม่ใช่ provider transient)
+
 def _call_retry(dsn, sql, params):
-    """transient-retry core (request_id เดิม = idempotent replay) ; raise psycopg2.Error ถ้า terminal หรือ retry หมด"""
+    """transient-retry core (request_id เดิม = idempotent replay) ; raise psycopg2.Error ถ้า terminal/invalid หรือ retry หมด
+    B1: retry **เฉพาะ** TRANSIENT — invalid-result (รวม 54000) raise กลับทันที ไม่ retry"""
     last = None
     for attempt in range(APPLY_RETRIES):
         try:
             return (_call_json(dsn, sql, params) or {}), attempt + 1
         except psycopg2.Error as e:
-            if not _is_transient(e):
+            if _classify(e) != "TRANSIENT":
                 raise
             last = e
             log.warning("transient (%s) attempt %d/%d — retry (idempotent)", getattr(e, "pgcode", None), attempt + 1, APPLY_RETRIES)
@@ -150,26 +164,34 @@ def _do_fail(dsn, run_id, lease, error_code, worker_id, fail_req, reason=None) -
                              (run_id, lease, error_code, worker_id, SERVICE, fail_req))
         return {"run_id": str(run_id), "action": "fail", "status": r.get("status"), "reason": reason, "attempts": att}
     except psycopg2.Error as e:
-        kind = "fail_retry_exhausted" if _is_transient(e) else "fail_rejected"   # transient หมด → RUNNING/reclaim
+        kind = "fail_retry_exhausted" if _classify(e) == "TRANSIENT" else "fail_rejected"   # transient หมด → RUNNING/reclaim
         return {"run_id": str(run_id), "action": kind, "pgcode": getattr(e, "pgcode", None)}
 
 def _do_apply(dsn, run_id, lease, result, worker_id, apply_req, fail_req) -> dict:
-    """apply_rfq_extraction แบบ durable retry ; ถ้า DB reject ว่า invalid provider result → escalate เป็น FAILED (M3-F1)"""
+    """apply_rfq_extraction แบบ durable retry ; invalid provider result → escalate เป็น FAILED (M3-F1 + B1 54000 + B2 serialize)"""
+    # B2: serialize **ก่อน** ถึง DB — provider result ที่ไม่ JSON-safe (Decimal/bytes/NaN/Infinity/circular/lone-surrogate)
+    #     = invalid provider result → FAILED (ไม่หลุดเป็น unhandled exception → run ไม่ค้าง RUNNING) ; ห้าม log payload ดิบ
+    #     ensure_ascii=True → non-BMP/lone-surrogate ถูก escape แล้วให้ DB jsonb reject (class 22) ; allow_nan=False → reject NaN/Inf
+    try:
+        encoded = json.dumps(result, ensure_ascii=True, allow_nan=False)
+    except (TypeError, ValueError, RecursionError) as e:       # ValueError ครอบ UnicodeError/allow_nan ด้วย
+        return _do_fail(dsn, run_id, lease, "INVALID_EXTRACTION_RESULT", worker_id, fail_req,
+                        reason="provider result not JSON-serializable: " + type(e).__name__)
     try:
         r, att = _call_retry(dsn, "SELECT apply_rfq_extraction(%s,%s,%s::jsonb,%s,%s,%s)",
-                             (run_id, lease, json.dumps(result, ensure_ascii=False), worker_id, SERVICE, apply_req))
+                             (run_id, lease, encoded, worker_id, SERVICE, apply_req))
         return {"run_id": str(run_id), "action": "apply", "status": r.get("status"), "rfq_id": r.get("rfq_id"), "attempts": att}
     except psycopg2.Error as e:
-        code = getattr(e, "pgcode", None)
-        if _is_transient(e):                                   # transient หมด — run ยัง RUNNING → reclaim (ไม่ burn)
-            return {"run_id": str(run_id), "action": "apply_retry_exhausted", "pgcode": code}
-        if _is_invalid_result(code):                           # M3-F1: provider result ผิด contract → fail run (terminal)
+        cat = _classify(e); code = getattr(e, "pgcode", None)
+        if cat == "INVALID_RESULT":                            # M3-F1/B1: payload ผิด contract (รวม 54000) → fail run (terminal)
             return _do_fail(dsn, run_id, lease, "INVALID_EXTRACTION_RESULT", worker_id, fail_req, reason="invalid provider result " + str(code))
-        if code == "RFS01":                                    # lease หมด/ถูก fence — ทิ้งผล ปล่อย owner ใหม่
+        if cat == "TRANSIENT":                                 # transient หมด — run ยัง RUNNING → reclaim (ไม่ burn)
+            return {"run_id": str(run_id), "action": "apply_retry_exhausted", "pgcode": code}
+        if cat == "FENCED":                                    # lease หมด/ถูก fence — ทิ้งผล ปล่อย owner ใหม่
             return {"run_id": str(run_id), "action": "apply_fenced", "pgcode": code}
-        if code == "RFN01":                                    # run หาย — alert (state lost)
+        if cat == "NOT_FOUND":                                 # run หาย — alert (state lost)
             return {"run_id": str(run_id), "action": "apply_run_not_found", "pgcode": code}
-        return {"run_id": str(run_id), "action": "apply_rejected", "pgcode": code}   # RFI01/permission — operational alert
+        return {"run_id": str(run_id), "action": "apply_rejected", "pgcode": code}   # OPERATIONAL: RFI01/permission
 
 
 def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) -> list:

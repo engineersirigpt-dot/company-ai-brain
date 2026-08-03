@@ -6,6 +6,7 @@ Extraction orchestration tests — Codex acceptance checklist (local + synthetic
        reclaim + old-lease fencing (RFS01)
 """
 import os, sys, json, uuid
+from decimal import Decimal
 os.environ.setdefault("ENQ_API_KEY", "test-key")
 os.environ.pop("ENQ_DEV_MODE", None)
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -196,6 +197,20 @@ r3, o3, _ = _m3f1("xm3f1c", lambda sha: {"schema_version": "extract-v1.1", "inpu
     "items": [{"line_no": 1, "fields": {"job_name": "a"}}, {"line_no": 1, "fields": {"job_name": "b"}}], "evidence": []})
 check("M3-F1 dup line_no → 23505 → run FAILED", o3.get("action") == "fail" and o3.get("status") == "FAILED", o3)
 check("M3-F1 FAILED runs ไม่กลับเข้า claimable", all(x not in claim_ids() for x in (r1, r2, r3)), claim_ids())
+
+# ---- B1: 54000 (payload > 1MB) สืบทอด OperationalError แต่ต้อง classify เป็น invalid → FAILED (ไม่ใช่ retry_exhausted/RUNNING) ----
+rb1, ob1, nb1 = _m3f1("xm3b1", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha, "pad": "x" * 1_100_000})
+check("B1 payload >1MB → 54000 → run FAILED (ไม่ค้าง RUNNING)", ob1.get("action") == "fail" and ob1.get("status") == "FAILED", ob1)
+check("B1 (54000) provider เรียกครั้งเดียว + ไม่ claimable", nb1 == 1 and rb1 not in claim_ids(), (nb1, ob1))
+
+# ---- B2: provider result ไม่ JSON-safe (serialize fail ก่อนถึง DB) → FAILED (ไม่หลุดเป็น unhandled → RUNNING) ----
+rb2, ob2, nb2 = _m3f1("xm3b2a", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha, "amount": Decimal("1.25")})
+check("B2 Decimal (TypeError) → run FAILED ; provider ครั้งเดียว", ob2.get("action") == "fail" and ob2.get("status") == "FAILED" and nb2 == 1, (ob2, nb2))
+rb3, ob3, _ = _m3f1("xm3b2b", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha, "blob": b"x"})
+check("B2 bytes (TypeError) → run FAILED", ob3.get("action") == "fail" and ob3.get("status") == "FAILED", ob3)
+rb4, ob4, _ = _m3f1("xm3b2c", lambda sha: {"schema_version": "extract-v1.1", "input_sha256": sha, "n": float("nan")})
+check("B2 NaN (allow_nan=False → ValueError) → run FAILED", ob4.get("action") == "fail" and ob4.get("status") == "FAILED", ob4)
+check("B1/B2 FAILED runs ไม่กลับเข้า claimable", all(x not in claim_ids() for x in (rb1, rb2, rb3, rb4)), claim_ids())
 
 # ---- M3 fail-retry: durable fail (connection drop ก่อน/หลัง commit) ----
 def _m3fail(tag, flaky_fn):
