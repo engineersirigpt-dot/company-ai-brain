@@ -34,6 +34,8 @@ WORKER_DSN        = os.environ.get("RFQ_WORKER_DSN", _DEV_DSN_WK)
 POLL_LIMIT        = int(os.environ.get("ENQ_WORKER_POLL_LIMIT", "50"))
 POLL_INTERVAL_S   = float(os.environ.get("ENQ_WORKER_INTERVAL", "2.0"))
 PROVIDER_MARGIN_S = float(os.environ.get("ENQ_PROVIDER_MARGIN_S", "30"))   # provider timeout = lease_remaining - margin
+APPLY_RETRIES     = int(os.environ.get("ENQ_APPLY_RETRIES", "5"))          # M3: durable apply/fail retry บน transient
+APPLY_BACKOFF_S   = float(os.environ.get("ENQ_APPLY_BACKOFF_S", "0.2"))
 
 
 def _conn(dsn: str):
@@ -105,8 +107,11 @@ def process_run(run_id, worker_id: str, dsn: str = WORKER_DSN) -> dict:
 
     # ---- provider call: นอก DB transaction เท่านั้น ----
     try:
-        result = provider.extract(input_ref=ref, input_sha256=sha,
-                                  execution_target=target, timeout_s=budget)
+        result = provider.extract(input_ref=ref, input_sha256=sha, execution_target=target,
+                                  timeout_s=budget, idempotency_key=f"{run_id}:{sha}")   # M3: stable ต่อ attempt
+    except provider.ProviderTransient as e:
+        # M3: ชั่วคราว — ไม่ fail run (ไม่ burn) ; ปล่อย RUNNING → lease หมด → worker ใหม่ reclaim
+        return {"run_id": str(run_id), "action": "provider_transient", "reason": str(e)}
     except provider.ProviderError as e:
         return _terminal(dsn, run_id, "fail",
                          "SELECT fail_rfq_extraction(%s,%s,%s,%s,%s,%s)",
@@ -117,14 +122,29 @@ def process_run(run_id, worker_id: str, dsn: str = WORKER_DSN) -> dict:
                      (run_id, lease, json.dumps(result, ensure_ascii=False), worker_id, SERVICE, apply_req))
 
 
+# M3: pgcode ที่ retry ได้ (transient) — serialize/deadlock/lock/canceled/insufficient-resource/connection class 08/57
+_TRANSIENT_PG = {"40001", "40P01", "55P03", "57014", "53300", "53400",
+                 "08000", "08003", "08006", "08001", "08004", "57P01", "57P02", "57P03"}
+
 def _terminal(dsn, run_id, kind, sql, params, reason=None) -> dict:
-    """เรียก apply/fail ; ถ้า DB reject (เช่น lease ถูก fence RFS01) → report ไม่ raise"""
-    try:
-        r = _call_json(dsn, sql, params) or {}
-        return {"run_id": str(run_id), "action": kind, "status": r.get("status"),
-                "rfq_id": r.get("rfq_id"), "reason": reason}
-    except psycopg2.Error as e:
-        return {"run_id": str(run_id), "action": kind + "_rejected", "pgcode": getattr(e, "pgcode", None)}
+    """เรียก apply/fail แบบ durable (M3): retry บน transient error ด้วย **request_id เดิม**
+    → 'provider สำเร็จ + apply connection ขาด' จะ retry แล้ว ledger คืน SUCCEEDED เดิม (idempotent, ไม่เรียก provider ซ้ำ)
+    business reject (RFS01 fenced ฯลฯ) = terminal → รายงานทันที ไม่ retry"""
+    last = None
+    for attempt in range(APPLY_RETRIES):
+        try:
+            r = _call_json(dsn, sql, params) or {}
+            return {"run_id": str(run_id), "action": kind, "status": r.get("status"),
+                    "rfq_id": r.get("rfq_id"), "reason": reason, "attempts": attempt + 1}
+        except psycopg2.Error as e:
+            code = getattr(e, "pgcode", None)
+            if not (isinstance(e, psycopg2.OperationalError) or code in _TRANSIENT_PG):
+                return {"run_id": str(run_id), "action": kind + "_rejected", "pgcode": code}   # terminal reject
+            last = e
+            log.warning("%s transient (%s) attempt %d/%d — retry (idempotent)", kind, code, attempt + 1, APPLY_RETRIES)
+            time.sleep(APPLY_BACKOFF_S * (attempt + 1))
+    # หมด retry — run อาจยัง RUNNING ; ปล่อย lease หมด → reclaim (ไม่ burn)
+    return {"run_id": str(run_id), "action": kind + "_retry_exhausted", "pgcode": getattr(last, "pgcode", None)}
 
 
 def poll_once(worker_id: str, dsn: str = WORKER_DSN, limit: int = POLL_LIMIT) -> list:

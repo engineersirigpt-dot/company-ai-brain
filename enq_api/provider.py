@@ -11,11 +11,17 @@ from typing import Any
 
 
 class ProviderError(Exception):
-    """provider call ล้มเหลว → worker เรียก fail_rfq_extraction"""
+    """provider ล้มเหลว **ถาวร** (result ใช้ไม่ได้/unsupported) → worker เรียก fail_rfq_extraction (burn run)"""
+
+
+class ProviderTransient(Exception):
+    """provider ล้มเหลว **ชั่วคราว** (timeout/5xx/connection) → worker ไม่ fail run ; ปล่อย lease หมด → reclaim
+    (provider จริงต้องรับ idempotency_key ที่ stable ต่อ attempt เพื่อ dedupe การเรียกซ้ำตอน reclaim)"""
 
 
 def extract(*, input_ref: str | None, input_sha256: str, execution_target: str,
-            correlation: dict[str, Any] | None = None, timeout_s: float | None = None) -> dict[str, Any]:
+            correlation: dict[str, Any] | None = None, timeout_s: float | None = None,
+            idempotency_key: str | None = None) -> dict[str, Any]:
     """
     mock extraction: อ่าน input (ref/hash) → คืน tree + evidence (extract-v1.1)
 
@@ -23,6 +29,8 @@ def extract(*, input_ref: str | None, input_sha256: str, execution_target: str,
     - **ต้อง echo input_sha256** กลับใน payload (apply ตรวจว่าตรง run snapshot)
     - deterministic: ไม่มี randomness, ไม่มี network — เหมาะกับ test/CI
     - timeout_s = lease budget (provider จริงต้องใช้เป็น request timeout < lease) — synthetic ไม่ใช้
+    - idempotency_key = stable ต่อ extraction attempt (M3) — provider จริงใช้ dedupe re-call ตอน reclaim ; synthetic ไม่ใช้
+    - error contract: ProviderError = terminal (fail run) ; ProviderTransient = retryable (leave RUNNING → reclaim)
     """
     if execution_target != "LOCAL":
         raise ProviderError("synthetic provider รองรับเฉพาะ LOCAL (cloud extraction = increment ถัดไป)")

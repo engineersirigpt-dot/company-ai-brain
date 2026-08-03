@@ -129,6 +129,52 @@ except psycopg2.Error as e:
     fenced = e.pgcode == "RFS01"
 check("old-lease apply fenced → RFS01", fenced)
 
+# ---- M3: durable apply/fail retry (idempotent) + transient vs terminal provider error ----
+def _run_status(rid):
+    with sup.cursor() as c:
+        c.execute("SELECT status_code FROM rfq.rfq_ai_extraction_run WHERE id=%s", (rid,))
+        r = c.fetchone(); return r[0] if r else None
+_ocj = w._call_json
+# M3-a: apply connection ขาด **ก่อน commit** → retry ด้วย request_id เดิม → apply สดสำเร็จ ; provider เรียกครั้งเดียว
+ra = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xm3a"}); run_a = ra.json()["run_id"]
+c1 = []; prov.extract = lambda **kw: (c1.append(1), orig(**kw))[1]; st1 = {"hit": False}
+def _flaky_pre(dsn, sql, params):
+    if "apply_rfq_extraction" in sql and not st1["hit"]:
+        st1["hit"] = True; raise psycopg2.OperationalError("drop before commit")
+    return _ocj(dsn, sql, params)
+w._call_json = _flaky_pre
+try: outa = w.process_run(run_a, WORKER, WDSN)
+finally: w._call_json = _ocj; prov.extract = orig
+check("M3 apply transient(ก่อน commit) → retry → SUCCEEDED", outa.get("action") == "apply" and outa.get("status") == "SUCCEEDED", outa)
+check("M3 provider เรียกครั้งเดียว (ไม่ re-call ตอน apply retry)", len(c1) == 1, len(c1))
+check("M3 apply retried (attempts≥2)", outa.get("attempts", 1) >= 2, outa)
+# M3-a2: apply **commit แล้ว** แต่ผลหาย (drop หลัง commit) → retry → ledger คืน SUCCEEDED เดิม ; provider เรียกครั้งเดียว
+rb = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xm3a2"}); run_b2 = rb.json()["run_id"]
+c2 = []; prov.extract = lambda **kw: (c2.append(1), orig(**kw))[1]; st2 = {"hit": False}
+def _flaky_post(dsn, sql, params):
+    r = _ocj(dsn, sql, params)                              # รันจริง (commit)
+    if "apply_rfq_extraction" in sql and not st2["hit"]:
+        st2["hit"] = True; raise psycopg2.OperationalError("drop after commit")
+    return r
+w._call_json = _flaky_post
+try: outb = w.process_run(run_b2, WORKER, WDSN)
+finally: w._call_json = _ocj; prov.extract = orig
+check("M3 apply committed+drop → retry ledger คืน SUCCEEDED เดิม", outb.get("action") == "apply" and outb.get("status") == "SUCCEEDED", outb)
+check("M3 (committed case) provider เรียกครั้งเดียว", len(c2) == 1, len(c2))
+# M3-b: provider **transient** → ไม่ fail run ; run คง RUNNING → reclaim ได้
+rc = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xm3b"}); run_c = rc.json()["run_id"]
+prov.extract = lambda **kw: (_ for _ in ()).throw(prov.ProviderTransient("timeout"))
+try: outc = w.process_run(run_c, WORKER, WDSN)
+finally: prov.extract = orig
+check("M3 provider transient → action=provider_transient (ไม่ fail)", outc.get("action") == "provider_transient", outc)
+check("M3 provider transient → run คง RUNNING (reclaimable)", _run_status(run_c) == "RUNNING", _run_status(run_c))
+# M3-c: provider **terminal** → run FAILED
+rd = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xm3c"}); run_d = rd.json()["run_id"]
+prov.extract = lambda **kw: (_ for _ in ()).throw(prov.ProviderError("bad result"))
+try: outd = w.process_run(run_d, WORKER, WDSN)
+finally: prov.extract = orig
+check("M3 provider terminal → run FAILED", outd.get("action") == "fail" and outd.get("status") == "FAILED", outd)
+
 # ---- B3: worker role capability fail-closed (rfq_worker ผ่าน ; inbound DSN ต้อง raise) ----
 try:
     w.assert_worker_role(WDSN); _wok = True
