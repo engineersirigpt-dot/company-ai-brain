@@ -397,7 +397,7 @@ def t09_authz_separation(sup):
 def t10_catalog_and_policy(sup):
     """Codex #1/#3: catalog assertions + policy-version spoof เป็นไปไม่ได้เชิงโครงสร้าง"""
     svc = ['mark_ready', 'create_rfq_revision', 'add_clarification', 'resolve_clarification',
-           'add_signoff', 'revoke_signoff', 'upsert_rfq_draft', '_lock_rfq_for_input', '_reviewer_latest_confirmed', '_bump_rfq_version',
+           'add_signoff', 'revoke_signoff', 'upsert_rfq_draft', '_lock_rfq_for_input', '_reviewer_latest_confirmed', '_bump_rfq_version', '_reconcile_field_evidence',
            'create_rfq_draft', '_reject_unknown_keys', '_child_array',
            'begin_rfq_extraction', 'claim_rfq_extraction', 'apply_rfq_extraction', 'fail_rfq_extraction',
            'list_claimable_extractions', 'get_extraction_status',
@@ -437,6 +437,8 @@ def t10_catalog_and_policy(sup):
             bad.append(f"_reviewer_latest_confirmed:{role}-can-execute")
         if sql1(sup, "SELECT has_function_privilege(%s,'_bump_rfq_version(uuid,text)','EXECUTE')", (role,)):
             bad.append(f"_bump_rfq_version:{role}-can-execute")
+        if sql1(sup, "SELECT has_function_privilege(%s,'_reconcile_field_evidence(uuid,text,uuid,text,jsonb,text)','EXECUTE')", (role,)):
+            bad.append(f"_reconcile_field_evidence:{role}-can-execute")
     # policy spoof เชิงโครงสร้าง: mark_ready 6-arg (รับ policy version) ต้องไม่มีอยู่
     six = sql1(sup, """SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='rfq' AND p.proname='mark_ready' AND p.pronargs=6""")
@@ -999,7 +1001,7 @@ def t23_readiness_versioning(sup):
     record('T23 readiness versioning (V3)', allok, detail)
 
 def t24_draft_edit(sup):
-    """draft-edit/upsert (012): read Draft -> edit -> expected_row_version -> lock/freeze -> save -> bump (V3 consumer)"""
+    """draft-edit (012): update-only header/item + null-clear + evidence reconciliation + limits (V3 consumer)"""
     checks = []
     def rv(rfq): return rowver(sup, rfq)
     def edit(rfq, ver, actor, patch):
@@ -1012,32 +1014,30 @@ def t24_draft_edit(sup):
 
     # 1) header edit -> field updated + bump
     v0 = rv(rfq)
-    o1 = edit(rfq, v0, 'editor-1', {"header": {"fields": {"customer_name_raw": "ACME Co"}}})
+    o1 = edit(rfq, v0, 'editor-1', {"header": {"fields": {"customer_name_raw": "ACME Co", "contact_phone": "0812345678"}}})
     nm = sql1(sup, "SELECT customer_name_raw FROM rfq WHERE id=%s", (rfq,))
     checks.append(('1 header edit -> updated + bump', nm == 'ACME Co' and rv(rfq) == v0 + 1 and o1.get('edited_header') is True, (nm, o1)))
 
-    # 2) update existing item (line_no=1) -> items_updated=1
+    # 2) item update (existing line_no=1) -> items_updated=1
     v1 = rv(rfq)
     o2 = edit(rfq, v1, 'editor-1', {"items": [{"line_no": 1, "fields": {"job_name": "edited job", "finishing_state": "SPECIFIED"}}]})
     jn = sql1(sup, "SELECT job_name FROM rfq_item WHERE rfq_id=%s AND line_no=1", (rfq,))
     checks.append(('2 item update (existing) -> updated + bump', jn == 'edited job' and o2.get('items_updated') == 1 and rv(rfq) == v1 + 1, (jn, o2)))
 
-    # 3) upsert NEW item (line_no=2) -> items_inserted=1
-    v2 = rv(rfq)
-    o3 = edit(rfq, v2, 'editor-1', {"items": [{"line_no": 2, "fields": {"job_name": "new item"}}]})
-    n2 = sql1(sup, "SELECT count(*) FROM rfq_item WHERE rfq_id=%s AND line_no=2", (rfq,))
-    checks.append(('3 item upsert (new line_no) -> inserted + bump', n2 == 1 and o3.get('items_inserted') == 1 and rv(rfq) == v2 + 1, (n2, o3)))
+    # 3) item insert (new line_no) -> REJECT 23503 (update-only first cut)
+    checks.append(('3 item insert (new line_no) -> reject 23503 (update-only)',
+                   err(rfq, rv(rfq), 'editor-1', {"items": [{"line_no": 9, "fields": {"job_name": "new"}}]}) == errorcodes.FOREIGN_KEY_VIOLATION, None))
 
-    # 4) stale expected_row_version -> 40001 (optimistic concurrency)
+    # 4) stale expected_row_version -> 40001
     checks.append(('4 stale expected_row_version -> 40001',
                    err(rfq, 1, 'editor-1', {"header": {"fields": {"customer_name_raw": "x"}}}) == errorcodes.SERIALIZATION_FAILURE, None))
 
-    # 5) non-DRAFT (READY_FOR_REVIEW) -> reject 23514 (freeze)
+    # 5) non-DRAFT (READY_FOR_REVIEW) -> reject 23514
     g = seed_review_rfq(sup, 'T24r')
     checks.append(('5 non-DRAFT -> reject 23514',
                    err(g['rfq'], rv(g['rfq']), 'editor-1', {"header": {"fields": {"customer_name_raw": "x"}}}) == errorcodes.CHECK_VIOLATION, None))
 
-    # 6) unknown field -> reject 22023 (_reject_unknown_keys)
+    # 6) unknown field -> reject 22023
     checks.append(('6 unknown field -> reject 22023',
                    err(rfq, rv(rfq), 'editor-1', {"header": {"fields": {"nonexistent": "x"}}}) == errorcodes.INVALID_PARAMETER_VALUE, None))
 
@@ -1045,15 +1045,97 @@ def t24_draft_edit(sup):
     checks.append(('7 actor blank -> reject 23514',
                    err(rfq, rv(rfq), '   ', {"header": {"fields": {"customer_name_raw": "x"}}}) == errorcodes.CHECK_VIOLATION, None))
 
-    # 8) empty patch -> reject 23514 ; version ไม่ขยับจาก call ที่ reject
-    v_end = rv(rfq)
-    checks.append(('8 empty patch -> reject 23514',
-                   err(rfq, v_end, 'editor-1', {}) == errorcodes.CHECK_VIOLATION and rv(rfq) == v_end, None))
+    # 8) empty patch / empty header.fields / empty items / empty item.fields / duplicate line_no -> reject 23514 (M2)
+    vN = rv(rfq)
+    m2 = [err(rfq, vN, 'editor-1', {}),
+          err(rfq, vN, 'editor-1', {"header": {"fields": {}}}),
+          err(rfq, vN, 'editor-1', {"items": []}),
+          err(rfq, vN, 'editor-1', {"items": [{"line_no": 1, "fields": {}}]}),
+          err(rfq, vN, 'editor-1', {"items": [{"line_no": 1, "fields": {"job_name": "a"}}, {"line_no": 1, "fields": {"job_name": "b"}}]})]
+    checks.append(('8 M2 empty/dup no-op -> reject 23514 ; ไม่ bump',
+                   all(c == errorcodes.CHECK_VIOLATION for c in m2) and rv(rfq) == vN, m2))
+
+    # 9) M1 null-clear: key:null บน nullable -> clear ; omit -> unchanged
+    v9 = rv(rfq)
+    edit(rfq, v9, 'editor-1', {"header": {"fields": {"contact_phone": None}}})
+    ph = sql1(sup, "SELECT contact_phone FROM rfq WHERE id=%s", (rfq,))
+    checks.append(('9 M1 explicit null -> clear nullable (contact_phone -> NULL)', ph is None and rv(rfq) == v9 + 1, ph))
+
+    # 10) M1 null บน NOT NULL field -> reject 23502
+    checks.append(('10 M1 null on NOT NULL (finishing_state) -> reject 23502',
+                   err(rfq, rv(rfq), 'editor-1', {"items": [{"line_no": 1, "fields": {"finishing_state": None}}]}) == errorcodes.NOT_NULL_VIOLATION, None))
+
+    # 11) B1 evidence reconciliation: AI evidence เดิม -> human edit -> superseded + MANUAL current
+    fe = seed_draft_rfq(sup, 'T24e'); rfqe = fe['rfq']; ite = fe['item']
+    with sup.cursor() as cur:
+        cur.execute("SET search_path TO rfq")
+        cur.execute("""INSERT INTO rfq_ai_extraction_run (rfq_id,execution_target,provider_name,model_name,egress_policy_version,egress_decision_code,status_code)
+            VALUES (%s,'LOCAL','typhoon','v1','pol-v1','LOCAL_ONLY','SUCCEEDED') RETURNING id""", (rfqe,))
+        run_e = cur.fetchone()[0]
+        cur.execute("""INSERT INTO rfq_field_evidence (rfq_id,subject_type,subject_id,field_name,value_snapshot,source_type,derivation_type,extraction_run_id,verification_status)
+            VALUES (%s,'ITEM',%s,'job_name','"orig job"'::jsonb,'PDF','AI_EXTRACTED',%s,'UNVERIFIED')""", (rfqe, ite, run_e))
+    edit(rfqe, rv(rfqe), 'editor-9', {"items": [{"line_no": 1, "fields": {"job_name": "corrected job"}}]})
+    ai_status = sql1(sup, "SELECT verification_status FROM rfq_field_evidence WHERE subject_id=%s AND field_name='job_name' AND derivation_type='AI_EXTRACTED'", (ite,))
+    man = None
+    with sup.cursor() as cur:
+        cur.execute("SET search_path TO rfq")
+        cur.execute("""SELECT source_type,derivation_type,verification_status,value_snapshot,verified_by_ref
+            FROM rfq_field_evidence WHERE subject_id=%s AND field_name='job_name' AND source_type='MANUAL'""", (ite,))
+        man = cur.fetchone()
+    checks.append(('11 B1 AI evidence superseded (CORRECTED)', ai_status == 'CORRECTED', ai_status))
+    checks.append(('11 B1 MANUAL/HUMAN_EXTRACTED current + value ใหม่ + actor',
+                   man is not None and man[0] == 'MANUAL' and man[1] == 'HUMAN_EXTRACTED' and man[3] == 'corrected job' and man[4] == 'editor-9', man))
+
+    # 12) B1 no churn: แก้ค่าเดิม (เท่าค่าปัจจุบัน) -> ไม่มี evidence ใหม่
+    before_cnt = sql1(sup, "SELECT count(*) FROM rfq_field_evidence WHERE subject_id=%s AND field_name='job_name'", (ite,))
+    edit(rfqe, rv(rfqe), 'editor-9', {"items": [{"line_no": 1, "fields": {"job_name": "corrected job"}}]})   # ค่าเดิม
+    after_cnt = sql1(sup, "SELECT count(*) FROM rfq_field_evidence WHERE subject_id=%s AND field_name='job_name'", (ite,))
+    checks.append(('12 B1 no-change value -> ไม่ churn evidence', before_cnt == after_cnt, (before_cnt, after_cnt)))
 
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or \
-        "draft-edit: header/item update + item upsert + stale->40001 + non-DRAFT/unknown/actor/empty rejects (ไม่ bump)"
-    record('T24 draft-edit/upsert (V3 consumer)', allok, detail)
+        "draft-edit update-only: header/item + null-clear + evidence reconcile (supersede+MANUAL, no churn) + limits/dup rejects"
+    record('T24 draft-edit (V3 consumer)', allok, detail)
+
+def t25_draft_edit_concurrency(sup):
+    """M3: concurrent editors — parent lock serialize + optimistic version (commit->40001, rollback->retry ok)"""
+    checks = []
+    def one(rfq_no, a_commit):
+        f = seed_draft_rfq(sup, rfq_no); rfq = f['rfq']; v = rowver(sup, rfq)
+        A = connect(role='rfq_app', app_name='rfq-edit-A'); B = connect(role='rfq_app', app_name='rfq-edit-B')
+        A.autocommit = False; B.autocommit = False
+        pidA, pidB = A.info.backend_pid, B.info.backend_pid
+        cA = A.cursor(); cA.execute("SELECT upsert_rfq_draft(%s,%s,%s,%s::jsonb)",
+                                    (rfq, v, 'A', json.dumps({"header": {"fields": {"customer_name_raw": "A-value"}}}))); cA.fetchone()
+        res = {}
+        def run_b():
+            try:
+                cB = B.cursor(); cB.execute("SELECT upsert_rfq_draft(%s,%s,%s,%s::jsonb)",
+                                            (rfq, v, 'B', json.dumps({"header": {"fields": {"customer_name_raw": "B-value"}}}))); B.commit(); res['ok'] = True
+            except Exception as e:
+                res['err'] = e; B.rollback()
+        tb = threading.Thread(target=run_b); tb.start()
+        blocked = wait_blocked(sup, pidB, pidA)
+        if a_commit: A.commit()
+        else: A.rollback()
+        tb.join(15); A.close(); B.close()
+        name = sql1(sup, "SELECT customer_name_raw FROM rfq WHERE id=%s", (rfq,))
+        return blocked, res, name, rowver(sup, rfq), v
+
+    # commit variant: B blocked -> 40001 ; only A persist ; bump ครั้งเดียว
+    bl, res, nm, fv, v = one('T25', True)
+    checks.append(('commit: B blocked -> 40001 ; A persist ; bump ครั้งเดียว',
+                   bl and getattr(res.get('err'), 'pgcode', None) == errorcodes.SERIALIZATION_FAILURE and nm == 'A-value' and fv == v + 1,
+                   (bl, getattr(res.get('err'), 'pgcode', None), nm, fv)))
+    # rollback variant: A rollback -> B (token เดิม) สำเร็จ ; B persist
+    bl2, res2, nm2, fv2, v2 = one('T25r', False)
+    checks.append(('rollback: A rollback -> B (token เดิม) สำเร็จ ; B persist ; bump ครั้งเดียว',
+                   res2.get('ok') is True and nm2 == 'B-value' and fv2 == v2 + 1, (res2, nm2, fv2)))
+
+    allok = all(ok for _, ok, _ in checks)
+    detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or \
+        "concurrent editors serialize on parent lock ; commit->stale 40001 ; rollback->retry succeeds"
+    record('T25 draft-edit concurrency (M3)', allok, detail)
 
 def main():
     sup = connect(app_name='rfq-conc-coordinator')
@@ -1062,7 +1144,7 @@ def main():
              t09_authz_separation, t10_catalog_and_policy,
              t11_ingest_allowlist, t12_ingest_atomicity, t13_ingest_grant_scope, t14_idempotency_concurrency,
              t15_claim_race, t16_reclaim_fencing, t17_service_binding, t18_temptable_no_hijack,
-             t19_fence_fail, t20_fence_apply, t21_signoff_v2, t22_signoff_decision_order, t23_readiness_versioning, t24_draft_edit]
+             t19_fence_fail, t20_fence_apply, t21_signoff_v2, t22_signoff_decision_order, t23_readiness_versioning, t24_draft_edit, t25_draft_edit_concurrency]
     for t in tests:
         try:
             t(sup)
