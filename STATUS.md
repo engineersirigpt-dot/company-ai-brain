@@ -470,11 +470,12 @@ field_path stability, revision chain integrity) ดูรายละเอี�
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
-- [x] **V2 (HIGH) — ✅ ปิดแล้ว (migration `010_rfq_signoff_v2.sql`, `61a26f8`→`ee4486a`) รอ Codex re-review**
+- [x] **V2 (HIGH) — ✅ ปิดแล้ว (migration `010_rfq_signoff_v2.sql`, `61a26f8`→`ee4486a`→`efab38f`) รอ Codex confirm**
       - **latest active-decision rule**: `mark_ready` RFQ-007 เดิม `EXISTS CONFIRMED` → CONFIRMED แล้ว REJECTED/revoke ทีหลังยังผ่าน (stale) ;
         ตอนนี้ helper `_reviewer_latest_confirmed(rfq)` = decision ล่าสุดที่ยัง active (non-revoked) ต้อง CONFIRMED ; NULL/REJECTED/RETURNED → block
       - **B1 (Codex)**: "latest" ยึด **`decision_seq`** (sequence, DEFAULT nextval eval หลัง parent lock ใน add_signoff = serialize order จริง) ไม่ใช่ `signed_at=now()` (=txn-start → เรียงสวน mutation order ได้) ; T22 พิสูจน์ (by_signed_at=REJECTED bug vs by_seq/helper=CONFIRMED)
-      - **revoke_signoff audit-preserving soft revoke**: เดิม DELETE (audit หาย) → set `revoked_at`(clock_timestamp)`/revoked_by_ref/revoke_reason` ; **M1** lock parent→child (protocol เดิม) ; **M2** actor non-blank (function + CHECK `NULLIF(btrim())`), reject double-revoke ; gate มองข้าม revoked ; signature 2→3-arg (+reason)
+      - **revoke_signoff audit-preserving soft revoke**: เดิม DELETE (audit หาย) → set `revoked_at`(clock_timestamp)`/revoked_by_ref/revoke_reason` ; **M1** lock parent→child (protocol เดิม) ; **M2** actor/reason non-blank ; reject double-revoke ; gate มองข้าม revoked ; signature 2→3-arg (+reason)
+      - **re-review Major (`efab38f`)**: `btrim()` 1-arg ตัดแค่ space → reason/actor ที่เป็น **tab/newline ล้วน** หลุด ; แก้เป็น `~ '[^[:space:]]'` (POSIX จับ tab/NL/CR/FF/VT) ทั้ง function + CHECK invariant + normalize `btrim(x, E' \t\n\r\f\v')` ; test D +function reject +CHECK direct-UPDATE violation
       - **B2 (Codex)**: migration wrap `BEGIN/COMMIT` (atomic) ; **Q4**: correction semantics — revoke decision ล่าสุด → fallback active decision เก่ากว่า (documented + test F)
       - tests: **T21** (CONFIRM→REJECT block / REJECT→CONFIRM pass / revoked CONFIRMED block / soft-revoke / actor+reason non-blank / double-revoke / correction fallback F) + **T22** (transaction-order regression) ; อัปเดต 030 st7, T03b, T10
       - suites: **migration ALL PASSED (concurrency 21→23) · orchestration 58 · API 73** — local + synthetic
