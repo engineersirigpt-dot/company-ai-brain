@@ -452,11 +452,14 @@ field_path stability, revision chain integrity) ดูรายละเอี�
         → 'provider สำเร็จ + apply connection ขาด' → retry → ledger คืน SUCCEEDED เดิม (idempotent, **ไม่เรียก provider ซ้ำ**) ไม่ว่า commit สำเร็จหรือไม่
       **provider transient** → run คง RUNNING (ไม่ FAILED) → reclaim ; ส่ง `idempotency_key` (stable ข้าม claim/reclaim ของ run = `run:input_sha256`) ให้ provider จริง dedupe re-call
       **M3a — same-process DB retry (commit outcome unknown):** ✅ CLOSED (stable request_id + ledger replay)
-      **M3b — invalid provider result terminalization (Codex M3-F1):** ✅ CLOSED @ `a3a5503` — provider คืน dict แต่ DB validator reject
-        (RFR01 / class 22 / 23502/23503/23505/23514/54000) → `_do_apply` escalate เป็น `fail_rfq_extraction(INVALID_EXTRACTION_RESULT)` = run **FAILED** (terminal, ไม่ค้าง RUNNING → ไม่ reclaim → ไม่เรียก provider ซ้ำ) ; RFS01 fenced (drop, ห้าม fail lease เก่า) ; RFN01 alert
+      **M3b — invalid provider result terminalization (Codex M3-F1 + B1 + B2):** ✅ CLOSED @ `a3a5503`→`b140b23` — provider คืน dict แต่ใช้ไม่ได้ → run **FAILED** (terminal, ไม่ค้าง RUNNING → ไม่ reclaim → ไม่เรียก provider ซ้ำ)
+        · **DB validator reject** (RFR01 / class 22 / 23502/23503/23505/23514/**54000**) → `_do_apply` escalate เป็น `fail_rfq_extraction(INVALID_EXTRACTION_RESULT)`
+        · **B1** `54000` (ProgramLimitExceeded, payload>1MB) สืบทอด `OperationalError` → เดิมถูก classify เป็น transient (RUNNING) → แก้ด้วย operation-aware `_classify` (precedence **INVALID_RESULT > FENCED > NOT_FOUND > TRANSIENT > OPERATIONAL**) ; `_call_retry` retry เฉพาะ TRANSIENT
+        · **B2** provider result ไม่ JSON-safe (Decimal/bytes/NaN/Infinity/circular/lone-surrogate) → serialize ก่อนถึง DB ใน guarded block (`ensure_ascii=True, allow_nan=False`) → `_do_fail` ; เดิมหลุดเป็น unhandled → RUNNING
+        · RFS01 fenced (drop, ห้าม fail lease เก่า) ; RFN01 alert ; RFI01/permission = operational alert (ไม่ตีเป็น transient)
       **M3c — cross-process crash / exactly-once ข้าม process:** ⏳ EXTERNAL gate — worker บังคับ dedupe เองไม่ได้ ; ปิดเมื่อ provider จริงพิสูจน์ idempotency (key เดิม→ผลเดิม, ไม่ side-effect ซ้ำ) หรือมี durable result checkpoint ก่อน apply
-      → tests (orchestration 39→**46**): +invalid-result (`{}`→22023 / evidence ไม่ครบ→RFR01 / dup line_no→23505 ทั้งหมด→FAILED, provider เรียกครั้งเดียว, ไม่กลับเข้า claimable) +fail-retry (drop ก่อน/หลัง commit → FAILED, provider ครั้งเดียว)
-      → suites: **orchestration 46 · API 73 · migration ALL PASSED**
+      → tests (orchestration 39→46→**52**): +invalid-result (`{}`→22023 / evidence ไม่ครบ→RFR01 / dup line_no→23505) +B1 (payload>1MB→54000) +B2 (Decimal/bytes→TypeError, NaN→ValueError) ทั้งหมด→FAILED, provider ครั้งเดียว, ไม่กลับเข้า claimable ; +fail-retry (drop ก่อน/หลัง commit → FAILED, provider ครั้งเดียว)
+      → suites: **orchestration 52 · API 73 · migration ALL PASSED**
       → **local + synthetic เท่านั้น ยังไม่ deploy**; cloud routing + provider จริง + auth จริง = increment ถัดไป (gated Data Owner/DPO/Legal)
 
 **ยังเหลือ (documented, gated ตาม review — ไม่ block ENQ→initial DRAFT):**
