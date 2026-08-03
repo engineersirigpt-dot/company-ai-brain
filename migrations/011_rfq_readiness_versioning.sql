@@ -18,10 +18,20 @@ SET search_path TO rfq;
 -- helper: bump parent row_version (เรียกหลัง _lock_rfq_for_input = parent ถูก lock แล้ว)
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION _bump_rfq_version(p_rfq_id uuid, p_actor text)
-RETURNS void LANGUAGE sql
+RETURNS void LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = pg_catalog, rfq, pg_temp AS $$
-    UPDATE rfq SET row_version = row_version + 1, updated_at = now(), updated_by_ref = p_actor
+BEGIN
+    -- N1 (Codex): validate actor + guard misuse ; updated_at = clock_timestamp() (เวลา mutation จริง ไม่ใช่ txn-start)
+    --   หมายเหตุ: order-of-truth คือ row_version ไม่ใช่ updated_at
+    IF p_actor IS NULL OR p_actor !~ '[^[:space:]]' THEN
+        RAISE EXCEPTION '_bump_rfq_version: actor required (non-blank)' USING ERRCODE = '23514';
+    END IF;
+    UPDATE rfq SET row_version = row_version + 1, updated_at = clock_timestamp(), updated_by_ref = p_actor
     WHERE id = p_rfq_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION '_bump_rfq_version: rfq % not found', p_rfq_id USING ERRCODE = '23503';   -- กัน misuse เงียบ
+    END IF;
+END;
 $$;
 ALTER FUNCTION _bump_rfq_version(uuid, text) OWNER TO rfq_owner;
 REVOKE ALL ON FUNCTION _bump_rfq_version(uuid, text) FROM PUBLIC;   -- internal helper — ไม่ grant app/ingest
@@ -29,20 +39,27 @@ REVOKE ALL ON FUNCTION _bump_rfq_version(uuid, text) FROM PUBLIC;   -- internal 
 -- ----------------------------------------------------------------------------
 -- re-CREATE readiness mutations ให้ bump row_version (เปลี่ยนเฉพาะเพิ่ม _bump_rfq_version)
 -- ----------------------------------------------------------------------------
+-- B1 (Codex): แยก authenticated actor (p_actor, server-controlled) ออกจาก provenance (p_raised_by_ref, nullable)
+--   เดิม bump ใช้ p_raised_by_ref → raised_by_ref=NULL (schema อนุญาต) ทำ updated_by_ref NOT NULL พัง (23502)
+--   signature 7-arg → 8-arg (+p_actor ท้าย) ; DROP overload 7-arg เก่าทิ้ง (ด้านล่าง) ไม่ปล่อยค้าง
+DROP FUNCTION IF EXISTS add_clarification(uuid, text, uuid, text, boolean, text, text);
 CREATE OR REPLACE FUNCTION add_clarification(
     p_rfq_id uuid, p_subject_type text, p_subject_id uuid, p_question text,
-    p_is_blocking boolean, p_raised_by_type text, p_raised_by_ref text
+    p_is_blocking boolean, p_raised_by_type text, p_raised_by_ref text, p_actor text
 ) RETURNS uuid LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = pg_catalog, rfq, pg_temp AS $$
 DECLARE v_id uuid;
 BEGIN
+    IF p_actor IS NULL OR p_actor !~ '[^[:space:]]' OR length(p_actor) > 200 OR p_actor ~ '[[:cntrl:]]' THEN
+        RAISE EXCEPTION 'add_clarification actor invalid (blank/whitespace/too long/control char)' USING ERRCODE = '23514';
+    END IF;
     PERFORM _lock_rfq_for_input(p_rfq_id);
     INSERT INTO rfq_clarification (rfq_id, subject_type, subject_id, question,
         is_blocking, raised_by_type, raised_by_ref)
     VALUES (p_rfq_id, p_subject_type, p_subject_id, p_question,
-        p_is_blocking, p_raised_by_type, p_raised_by_ref)
+        p_is_blocking, p_raised_by_type, p_raised_by_ref)               -- provenance (nullable) คงเดิม
     RETURNING id INTO v_id;
-    PERFORM _bump_rfq_version(p_rfq_id, p_raised_by_ref);   -- V3: readiness input เปลี่ยน → bump
+    PERFORM _bump_rfq_version(p_rfq_id, btrim(p_actor, E' \t\n\r\f\v'));   -- V3: bump ด้วย authenticated actor (ไม่ใช่ provenance)
     RETURN v_id;
 END;
 $$;
@@ -118,17 +135,17 @@ $$;
 -- ----------------------------------------------------------------------------
 -- ownership + grant (CREATE OR REPLACE รักษา ACL เดิม — re-affirm ให้ชัด)
 -- ----------------------------------------------------------------------------
-ALTER FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text) OWNER TO rfq_owner;
+ALTER FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text, text) OWNER TO rfq_owner;
 ALTER FUNCTION resolve_clarification(uuid, text, text, text, text)   OWNER TO rfq_owner;
 ALTER FUNCTION add_signoff(uuid, text, text, text, text)             OWNER TO rfq_owner;
 ALTER FUNCTION revoke_signoff(uuid, text, text)                      OWNER TO rfq_owner;
 
-REVOKE ALL ON FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION resolve_clarification(uuid, text, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION add_signoff(uuid, text, text, text, text)     FROM PUBLIC;
 REVOKE ALL ON FUNCTION revoke_signoff(uuid, text, text)              FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text) TO rfq_app;
+GRANT EXECUTE ON FUNCTION add_clarification(uuid, text, uuid, text, boolean, text, text, text) TO rfq_app;
 GRANT EXECUTE ON FUNCTION resolve_clarification(uuid, text, text, text, text) TO rfq_app;
 GRANT EXECUTE ON FUNCTION add_signoff(uuid, text, text, text, text)  TO rfq_app;
 GRANT EXECUTE ON FUNCTION revoke_signoff(uuid, text, text)           TO rfq_app;

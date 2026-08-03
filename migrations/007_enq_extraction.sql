@@ -726,6 +726,11 @@ BEGIN
     SELECT count(*) INTO v_miss FROM jsonb_object_keys(v_infer) i WHERE NOT (v_clar ? i);
     IF v_miss > 0 THEN RAISE EXCEPTION 'AI_INFERENCE ต้องมี blocking clarification subject+field เดียวกัน (% field)', v_miss USING ERRCODE='RFR01'; END IF;
 
+    -- V3/M1 (Codex review 9dc9466): apply สำเร็จ = mutation ใหญ่สุดของ RFQ aggregate (header+tree+evidence+clarification)
+    --   → bump row_version **หนึ่งครั้ง** เพื่อ invalidate optimistic token ที่อ่านก่อน apply
+    --   replay = ledger-first RETURN ก่อนถึงตรงนี้ (ไม่ bump ซ้ำ) ; validation fail = RAISE→rollback (ไม่ bump)
+    UPDATE rfq SET row_version = row_version + 1, updated_at = clock_timestamp(), updated_by_ref = p_actor WHERE id = v_rfq;
+
     UPDATE rfq_ai_extraction_run SET status_code='SUCCEEDED', completed_at=now() WHERE id=p_run_id;
     v_prev := jsonb_build_object('rfq_id', v_rfq, 'run_id', p_run_id, 'status', 'SUCCEEDED');
     INSERT INTO rfq_extraction_request (service, operation_code, request_id, rfq_id, run_id, actor_ref, payload_sha256, outcome)

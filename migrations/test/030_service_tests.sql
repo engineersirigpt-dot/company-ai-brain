@@ -69,7 +69,7 @@ BEGIN
     VALUES (b_rfq,'REVIEWER','CONFIRMED','REVIEWER-Y');
 
     -- ST2: mark_ready blocked (open blocking clarification via service)
-    clar := add_clarification(b_rfq,'COMPONENT',b_comp,'ยังไม่ระบุกระดาษ',true,'AI','AI-BOT');
+    clar := add_clarification(b_rfq,'COMPONENT',b_comp,'ยังไม่ระบุกระดาษ',true,'AI','AI-BOT','PREP-B');
     SELECT row_version INTO rv FROM rfq WHERE id=b_rfq;
     BEGIN
         PERFORM mark_ready(b_rfq, rv, 'REVIEWER-Y');

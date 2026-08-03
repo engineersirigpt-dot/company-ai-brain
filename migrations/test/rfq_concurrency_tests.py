@@ -88,7 +88,7 @@ def seed_review_rfq(sup, rfq_no, blocking_clar=False):
         so = cur.fetchone()[0]
         clar = None
         if blocking_clar:
-            clar = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',true,'AI','bot')", (rfq, rfq))
+            clar = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',true,'AI','bot','tester')", (rfq, rfq))
     return dict(rfq=rfq, item=item, qty=qty, comp=comp, signoff=so, clar=clar)
 
 def seed_ready_estimate(sup, rfq_no):
@@ -164,7 +164,7 @@ def t03_readiness_toctou(sup):
     # variant a: reopen answered blocking clarification
     f = seed_review_rfq(sup, 'T03a')
     rfq = f['rfq']
-    clar = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',true,'AI','bot')", (rfq, rfq))
+    clar = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',true,'AI','bot','tester')", (rfq, rfq))
     sql1(sup, "SELECT resolve_clarification(%s,'ANSWERED','ae','a')", (clar,))   # ตอบแล้ว → ไม่ block Ready
     A = connect(role='rfq_app', app_name='rfq-conc-A'); B = connect(role='rfq_app', app_name='rfq-conc-B')
     A.autocommit = False; B.autocommit = False
@@ -925,7 +925,7 @@ def t23_readiness_versioning(sup):
 
     # 1) each readiness mutation bumps row_version
     f = seed_review_rfq(sup, 'T23'); rfq = f['rfq']; v0 = rv(rfq)   # base signoff = direct insert (ไม่ bump)
-    c = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',false,'AI','bot')", (rfq, rfq)); v1 = rv(rfq)
+    c = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',false,'AI','bot','tester')", (rfq, rfq)); v1 = rv(rfq)
     sql1(sup, "SELECT resolve_clarification(%s,'ANSWERED','ae','ans')", (c,)); v2 = rv(rfq)
     so = sql1(sup, "SELECT add_signoff(%s,'REVIEWER','CONFIRMED','rev2')", (rfq,)); v3 = rv(rfq)
     sql1(sup, "SELECT revoke_signoff(%s,'admin','correction')", (so,)); v4 = rv(rfq)
@@ -961,9 +961,21 @@ def t23_readiness_versioning(sup):
         frozen_ok = e.pgcode == errorcodes.CHECK_VIOLATION
     checks.append(('mutation บน terminal RFQ -> reject (freeze) + ไม่ bump', frozen_ok and rv(g['rfq']) == vt, (frozen_ok, vt)))
 
+    # B1 (Codex): add_clarification แยก authenticated actor ออกจาก nullable provenance
+    fb = seed_review_rfq(sup, 'T23b1'); vb0 = rv(fb['rfq'])
+    cb = sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',true,'VALIDATOR',NULL,'validator-svc')", (fb['rfq'], fb['rfq']))
+    checks.append(('B1 raised_by_ref=NULL + actor -> clarification สำเร็จ + bump 1',
+                   cb is not None and rv(fb['rfq']) == vb0 + 1, (cb, vb0, rv(fb['rfq']))))
+    b1blank = False
+    try:
+        sql1(sup, "SELECT add_clarification(%s,'RFQ',%s,'q',true,'AI',NULL,'   ')", (fb['rfq'], fb['rfq']))
+    except psycopg2.Error as e:
+        b1blank = e.pgcode == errorcodes.CHECK_VIOLATION
+    checks.append(('B1 actor blank -> reject ก่อน write', b1blank and rv(fb['rfq']) == vb0 + 1, None))   # version ไม่ขยับจาก call ที่ reject
+
     allok = all(ok for _, ok, _ in checks)
     detail = "; ".join(f"{l}:{c}" for l, ok, c in checks if not ok) or \
-        "readiness mutations bump row_version ; stale token -> 40001 ; terminal reject ไม่ bump"
+        "readiness mutations bump row_version ; stale token -> 40001 ; terminal reject ไม่ bump ; B1 actor/provenance แยก"
     record('T23 readiness versioning (V3)', allok, detail)
 
 def main():

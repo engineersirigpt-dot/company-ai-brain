@@ -278,6 +278,37 @@ def _fail_post(st, d, s, p):
 of6, nf6 = _m3fail("xm3f6", _fail_post)
 check("M3 fail committed+drop → retry ledger คืน FAILED เดิม ; provider ครั้งเดียว", of6.get("action") == "fail" and of6.get("status") == "FAILED" and nf6 == 1, (of6, nf6))
 
+# ---- V3/M1 (Codex review): apply สำเร็จ bump RFQ row_version หนึ่งครั้ง ; replay/fail ไม่ bump ; multi-item bump ครั้งเดียว ----
+def _run_rfq_rv(rid):
+    with sup.cursor() as c:
+        c.execute("SELECT r.row_version FROM rfq.rfq r JOIN rfq.rfq_ai_extraction_run x ON x.rfq_id=r.id WHERE x.id=%s", (str(rid),))
+        row = c.fetchone()
+    return row[0] if row else None
+# (1) begin shell row_version=1 → apply สำเร็จ → 2
+rM1 = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xm1a"}); runM1 = rM1.json()["run_id"]
+oM1 = w.process_run(runM1, WORKER, WDSN)
+check("M1 apply สำเร็จ → row_version 1→2", oM1.get("status") == "SUCCEEDED" and _run_rfq_rv(runM1) == 2, (oM1, _run_rfq_rv(runM1)))
+# (2) replay (M3-a2 committed+drop → ledger คืนก่อน bump) → row_version ยัง 2 (ไม่ double)
+check("M1 apply committed+replay → bump ครั้งเดียว (row_version=2)", _run_rfq_rv(run_b2) == 2, _run_rfq_rv(run_b2))
+# (3) apply fail (invalid {}) → rollback → row_version ยัง 1
+rM1f = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xm1f"}); runM1f = rM1f.json()["run_id"]
+prov.extract = lambda **kw: {}
+try: oM1f = w.process_run(runM1f, WORKER, WDSN)
+finally: prov.extract = orig
+check("M1 apply fail (invalid) → row_version ยัง 1 (rollback)", oM1f.get("status") == "FAILED" and _run_rfq_rv(runM1f) == 1, (oM1f, _run_rfq_rv(runM1f)))
+# (4) multi-item (2 items) → bump ครั้งเดียว (=2 ไม่ใช่ตามจำนวน row)
+rM1mi = client.post("/enq/extractions", json={"source_ingest_id": str(S_OK)}, headers={**KEY, "X-Request-Id": "xm1mi"}); runM1mi = rM1mi.json()["run_id"]
+def _two_items(**kw):
+    p = orig(**kw)
+    p["items"].append({"line_no": 2, "fields": {"job_name": "second"}, "quantity_options": [{"option_no": 1, "fields": {"quantity": 500}}]})
+    p["evidence"].append({"subject_type": "ITEM", "ref": {"line_no": 2}, "field_name": "job_name", "source_type": "PDF", "confidence": 0.9})
+    p["evidence"].append({"subject_type": "QUANTITY", "ref": {"line_no": 2, "option_no": 1}, "field_name": "quantity", "source_type": "PDF", "confidence": 0.9})
+    return p
+prov.extract = _two_items
+try: oM1mi = w.process_run(runM1mi, WORKER, WDSN)
+finally: prov.extract = orig
+check("M1 multi-item apply → bump ครั้งเดียว (row_version=2)", oM1mi.get("status") == "SUCCEEDED" and _run_rfq_rv(runM1mi) == 2, (oM1mi, _run_rfq_rv(runM1mi)))
+
 # ---- B3: worker role capability fail-closed (rfq_worker ผ่าน ; inbound DSN ต้อง raise) ----
 try:
     w.assert_worker_role(WDSN); _wok = True
