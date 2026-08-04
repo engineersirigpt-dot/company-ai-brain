@@ -1,0 +1,14 @@
+
+========== SECURITY: PERMISSION SUITE ==========
+  [ok  ] CANARY-RECALL-001          (+3/-8 roles)
+  [ok  ] CANARY-SALES-001           (+3/-8 roles)
+  [ok  ] CANARY-HR-001              (+3/-8 roles)
+  [ok  ] CANARY-PURCHASING-001      (+3/-8 roles)
+  [ok  ] CANARY-LOGISTICS-001       (+3/-8 roles)
+  [ok  ] CANARY-ENGINEERING-001     (+4/-7 roles)
+  [ok  ] CANARY-PRODUCTION-001      (+6/-5 roles)
+  totals: PASS=7 LEAK=0 INCONCLUSIVE=0
+  auth-gate: VERIFIED (require_auth=True) spoof=[('admin', 'engineering', 403), ('engineering', 'admin', 403), ('hr', 'admin', 403), ('it', 'admin', 403), ('logistics', 'admin', 403), ('management', 'admin', 403), ('prepress', 'admin', 403), ('production', 'admin', 403), ('purchasing', 'admin', 403), ('qc', 'admin', 403), ('sales', 'admin', 403)]
+
+>>> SECURITY exit_code = 0 (GREEN)
+================================================

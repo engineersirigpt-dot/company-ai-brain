@@ -22,6 +22,17 @@ def uid(name: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, "kb-p5b." + name))
 
 
+# run-marker point (Codex M1) — เก็บ run_id จริงใน collection เพื่ออ่านกลับมาเทียบก่อน mutate
+# payload ไม่มี policy v1 field ที่ match filter (policy_status=MARKER ≠ ACTIVE) → inert ต่อทุก probe
+MARKER_ID = uid("run-marker")
+MARKER_KEY = "_p5b_run_marker"
+
+
+def marker_point(run_id: str) -> dict:
+    return {"id": MARKER_ID, "vector": det_vector("run-marker"),
+            "payload": {MARKER_KEY: run_id, "policy_status": "MARKER"}}
+
+
 def det_vector(seed: str, dim: int = VECTOR_DIM) -> list:
     """vector deterministic (ไม่ใช้ random) — เนื้อหาไม่สำคัญต่อ filter/scroll; ต้อง non-zero สำหรับ cosine"""
     h = hashlib.sha256(seed.encode()).digest()

@@ -1,0 +1,1 @@
+{"status":"ok","collection":"company_docs_p5b_run2","vectors":18,"model":"BAAI/bge-m3"}

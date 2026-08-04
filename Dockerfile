@@ -15,9 +15,10 @@ RUN pip install --no-cache-dir -r requirements-api.txt
 COPY requirements-llm.txt .
 RUN pip install --no-cache-dir -r requirements-llm.txt
 
-# Copy source code
+# Copy source code — รวม P1 modules ที่ app/main.py import (policy, qdrant_filter)
+# เพื่อให้ image self-contained ไม่ต้อง bind-mount source (Codex M3)
 COPY app/ ./app/
-COPY rbac_config.py .
+COPY rbac_config.py policy.py qdrant_filter.py ./
 
 # Model จะถูก mount หรือ download ตอน startup
 # ไม่ embed ใน image เพราะ ~570MB

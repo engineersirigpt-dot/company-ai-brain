@@ -17,22 +17,26 @@
 python p5b_gen_keys.py            # stderr: wrote api_keys.p5b.json ; stdout: KB_EVAL_KEYS=...
 export KB_EVAL_KEYS='<ค่าที่พิมพ์ออกมา>'
 
-# 1) unique collection ต่อ run (ต้องมี 'p5b' และห้ามชื่อ company_docs)
-export P5B_COLLECTION="company_docs_p5b_$(date +%s)"
+# 1) unique run/collection (marker จริง — ห้ามชื่อ company_docs, ต้องมี 'p5b')
+export P5B_RUN_ID="run_$(date +%s)"
+export P5B_COLLECTION="company_docs_p5b_$P5B_RUN_ID"
 export P5B_QDRANT_URL="http://localhost:6401"
 
-# 2) ยก stack isolated (project brain_p5b, volume/port ใหม่)
+# 2) ยก stack isolated (immutable image — Dockerfile COPY policy.py/qdrant_filter.py, qdrant pinned digest)
 docker compose -f docker-compose.p5b.yml -p brain_p5b up -d --build
 
-# 3) seed fixtures (conformance + canary) — seeder ปฏิเสธ prod name/target ไม่ว่างเอง
-python p5b_seed.py --recreate
+# 3) seed fixtures (marker + conformance + canary) — guard ด้วย marker จริง, ไม่มี --recreate
+python p5b_seed.py
 
 # === Mandatory acceptance ===
 # A) real-Qdrant filter conformance (scroll, ไม่ใช่ vector top-k)
-python p5b_conformance.py         # ต้อง exit 0 (model == Qdrant)
+python p5b_conformance.py         # ต้อง exit 0 (model == Qdrant สำหรับ fixture matrix)
 
 # B) actual writer lifecycle (เรียก store_in_qdrant จริง)
 python p5b_lifecycle.py           # ต้อง exit 0 (ACTIVE→QUARANTINED / broad→narrow revoke)
+
+# G1) default-deny end-to-end ผ่าน API (UNCLASSIFIED resolver-driven + missing/stale/quarantine)
+python p5b_default_deny.py --api http://localhost:8402   # admin พบ UNCLASSIFIED, อีก 10 ไม่พบ; deny targets ไม่มีใครพบ
 
 # C) API auth + permission canaries (AUTH_MODE=enforce, /search, $0 ไม่ egress)
 python ask_eval.py --api http://localhost:8402

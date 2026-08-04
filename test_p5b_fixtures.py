@@ -66,5 +66,20 @@ for cf, cdef in zip(canaries, manifest["canaries"]):
 check("canary: authorized role match, denied role ไม่ match (ทุก known role)", cok)
 check("canary: point_id เป็น UUID", all(ec.is_uuid(c["id"]) for c in canaries))
 
+# marker point (M1) — ต้อง inert (ไม่ match filter role ใดเลย)
+mp = FX.marker_point("run-x")
+check("marker point inert: ไม่ match filter role ใด",
+      all(not P.matches_policy(mp["payload"], _filter(r)) for r in list(known) + ["admin"]))
+
+# UNCLASSIFIED via resolver (G1) — unknown source → ACTIVE admin-only; admin match, อื่นไม่ match
+from rbac_config import get_rbac
+upol = P.resolve_document_policy({"source": "p5b-unknown-source-xyz.pdf"}, get_rbac)
+check("UNCLASSIFIED resolver: ACTIVE + collection UNCLASSIFIED + admin-only",
+      P.is_active(upol) and upol.collection_group == "UNCLASSIFIED"
+      and tuple(upol.allowed_roles) == ("admin",), upol)
+check("UNCLASSIFIED: admin match, อื่นไม่ match (default-deny)",
+      P.matches_policy(upol.payload(), _filter("admin"))
+      and not any(P.matches_policy(upol.payload(), _filter(r)) for r in known if r != "admin"))
+
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

@@ -273,20 +273,23 @@ def assert_legacy_writer_allowed(sample_payloads: list, tool_name: str) -> None:
 PRODUCTION_COLLECTIONS = frozenset({"company_docs"})
 
 
-def assert_test_collection(collection_name: str, existing_count: int, run_marker_ok: bool) -> None:
+def assert_test_collection(collection_name: str, existing_count: int,
+                           stored_marker, expected_marker) -> None:
     """
-    seeder/lifecycle ต้องเรียกก่อนเขียน — ปฏิเสธ target ที่ไม่ใช่ isolated test (Codex P5B-B1):
+    seeder/lifecycle ต้องเรียกก่อนเขียน — ปฏิเสธ target ที่ไม่ใช่ isolated test (Codex P5B-B1/M1):
       - ชื่อ production (company_docs) → ปฏิเสธ
-      - ชื่อไม่มี 'p5b' (ไม่ชัดว่าเป็น test collection) → ปฏิเสธ
-      - target ไม่ว่าง และไม่มี run-marker ที่ตรง → ปฏิเสธ (กันเขียนทับ collection อื่น)
+      - ชื่อไม่มี 'p5b' → ปฏิเสธ
+      - target ไม่ว่าง และ **marker ที่อ่านจาก collection จริง ไม่ตรง expected** (หรือ expected ว่าง)
+        → ปฏิเสธเขียนทับ (marker เป็นค่าจริงที่อ่านกลับมาเทียบ ไม่ใช่ boolean ที่ caller เปิดเอง)
     """
     if collection_name in PRODUCTION_COLLECTIONS:
         raise RuntimeError(f"[P5B-GUARD] ปฏิเสธ collection ชื่อ production: {collection_name!r}")
     if "p5b" not in collection_name:
         raise RuntimeError(f"[P5B-GUARD] collection ต้องมี 'p5b' ในชื่อ (isolated test only): {collection_name!r}")
-    if existing_count > 0 and not run_marker_ok:
+    if existing_count > 0 and (not expected_marker or stored_marker != expected_marker):
         raise RuntimeError(
-            f"[P5B-GUARD] target ไม่ว่าง ({existing_count} points) และไม่มี run-marker ตรง — ปฏิเสธเขียนทับ")
+            f"[P5B-GUARD] target ไม่ว่าง ({existing_count} points) และ run-marker ไม่ตรง "
+            f"(stored={stored_marker!r} expected={expected_marker!r}) — ปฏิเสธเขียนทับ collection อื่น")
 
 
 def validate_stored_payload(payload) -> tuple:

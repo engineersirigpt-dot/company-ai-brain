@@ -24,7 +24,7 @@
 ยืนยันกับ Qdrant **ของจริง** (ไม่ใช่ model จำลอง):
 - `allowed_roles=["qc","admin"]` → qc+admin match · `allowed_roles="qc"` (scalar) → **qc match** (store-integrity → ต้อง quarantine ที่ write boundary, D1)
 - `acl_schema_version=true` / `1.0` → **ไม่ match** (type-aware M1 ถูกต้อง) · `null`/missing/unknown-role/stale → ไม่ match · `QUARANTINED` → **admin ก็ไม่เห็น**
-→ ปิดข้อค้าง Codex: conservative model (`matches_policy`) **สอดคล้อง Qdrant จริงทุกจุด**
+→ ปิดข้อค้าง Codex: conservative model (`matches_policy`) **สอดคล้องกับ Qdrant จริงครบทุก case ใน fixture matrix ปัจจุบัน** (ไม่ใช่ oracle ของทุก JSON/Qdrant edge)
 
 ## B — Writer lifecycle (`p5b_lifecycle.py`, `store_in_qdrant` จริง)
 ```

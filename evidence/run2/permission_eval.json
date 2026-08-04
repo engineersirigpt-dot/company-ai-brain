@@ -1,0 +1,156 @@
+{
+ "manifest_errs": [],
+ "pairs": [
+  {
+   "canary": "CANARY-RECALL-001",
+   "point_id": "ed8e586a-602e-5eca-8873-f4fc345867d5",
+   "verdict": "PASS",
+   "pos_fail": [],
+   "neg_leak": [],
+   "neg_bad_transport": [],
+   "n_pos": 3,
+   "n_neg": 8
+  },
+  {
+   "canary": "CANARY-SALES-001",
+   "point_id": "90184f24-7a3c-5f19-a2ed-f3252279bf84",
+   "verdict": "PASS",
+   "pos_fail": [],
+   "neg_leak": [],
+   "neg_bad_transport": [],
+   "n_pos": 3,
+   "n_neg": 8
+  },
+  {
+   "canary": "CANARY-HR-001",
+   "point_id": "a7b8dc60-ca54-5857-bdf9-191e2680b4b7",
+   "verdict": "PASS",
+   "pos_fail": [],
+   "neg_leak": [],
+   "neg_bad_transport": [],
+   "n_pos": 3,
+   "n_neg": 8
+  },
+  {
+   "canary": "CANARY-PURCHASING-001",
+   "point_id": "f63e997e-f710-5128-b9d8-49ca0ee1312a",
+   "verdict": "PASS",
+   "pos_fail": [],
+   "neg_leak": [],
+   "neg_bad_transport": [],
+   "n_pos": 3,
+   "n_neg": 8
+  },
+  {
+   "canary": "CANARY-LOGISTICS-001",
+   "point_id": "27214d58-67f1-592b-9a90-d227ae177fca",
+   "verdict": "PASS",
+   "pos_fail": [],
+   "neg_leak": [],
+   "neg_bad_transport": [],
+   "n_pos": 3,
+   "n_neg": 8
+  },
+  {
+   "canary": "CANARY-ENGINEERING-001",
+   "point_id": "c31e09e7-b58c-5627-bfe6-dde27550e8c7",
+   "verdict": "PASS",
+   "pos_fail": [],
+   "neg_leak": [],
+   "neg_bad_transport": [],
+   "n_pos": 4,
+   "n_neg": 7
+  },
+  {
+   "canary": "CANARY-PRODUCTION-001",
+   "point_id": "43570599-02f2-5aca-8b4a-0b174b379f6c",
+   "verdict": "PASS",
+   "pos_fail": [],
+   "neg_leak": [],
+   "neg_bad_transport": [],
+   "n_pos": 6,
+   "n_neg": 5
+  }
+ ],
+ "verdicts": [
+  "PASS",
+  "PASS",
+  "PASS",
+  "PASS",
+  "PASS",
+  "PASS",
+  "PASS"
+ ],
+ "auth_status": "VERIFIED",
+ "spoof": [
+  {
+   "key_role": "admin",
+   "spoof_role": "engineering",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "engineering",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "hr",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "it",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "logistics",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "management",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "prepress",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "production",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "purchasing",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "qc",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  },
+  {
+   "key_role": "sales",
+   "spoof_role": "admin",
+   "status": 403,
+   "transport": "DENIED"
+  }
+ ],
+ "quality": null,
+ "require_auth": true,
+ "exit_code": 0
+}

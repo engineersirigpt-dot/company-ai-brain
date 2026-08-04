@@ -1,0 +1,5 @@
+  [ok] role=qc       match=2 expect=2
+  [ok] role=admin    match=1 expect=1
+  [ok] role=sales    match=0 expect=0
+
+[CONFORMANCE] roles=['qc', 'admin', 'sales'] fails=0 (PASS)

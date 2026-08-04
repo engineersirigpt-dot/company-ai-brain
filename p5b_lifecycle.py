@@ -18,6 +18,7 @@ import policy as P
 import p5b_fixtures as FX
 from qdrant_filter import to_qdrant_filter
 from ingest import store_in_qdrant   # torch-lazy → import ได้ด้วย qdrant_client อย่างเดียว
+from p5b_seed import read_marker
 
 
 def _visible(client, coll, role) -> set:
@@ -40,11 +41,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default=os.getenv("P5B_QDRANT_URL", "http://localhost:6401"))
     ap.add_argument("--collection", default=os.getenv("P5B_COLLECTION", ""))
+    ap.add_argument("--run-id", default=os.getenv("P5B_RUN_ID", ""))
     args = ap.parse_args()
 
     client = QdrantClient(url=args.url)
     count = client.count(args.collection).count
-    P.assert_test_collection(args.collection, count, run_marker_ok=True)  # test collection ของ run นี้
+    # M1: อ่าน marker จริง เทียบ run_id (lifecycle ห้ามส่ง True เอง)
+    P.assert_test_collection(args.collection, count, read_marker(client, args.collection), args.run_id)
     mani = tempfile.mktemp(suffix=".jsonl")
     fails = []
 

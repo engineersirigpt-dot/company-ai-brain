@@ -1,0 +1,20 @@
+[STORE] collection=company_docs_p5b_run2 active=1 upserted, quarantined=0, replaced_sources=1 run_id=20260804T130424
+Total vectors in collection: 19
+== UNCLASSIFIED (admin-only, resolver-driven) ==
+  [ok] role=admin      found=True want=True
+  [ok] role=engineering found=False want=False
+  [ok] role=hr         found=False want=False
+  [ok] role=it         found=False want=False
+  [ok] role=logistics  found=False want=False
+  [ok] role=management found=False want=False
+  [ok] role=prepress   found=False want=False
+  [ok] role=production found=False want=False
+  [ok] role=purchasing found=False want=False
+  [ok] role=qc         found=False want=False
+  [ok] role=sales      found=False want=False
+== missing-ACL / stale-schema / quarantine (ไม่มีใครพบแม้ admin) ==
+  [ok] missing-ACL    leaked=[]
+  [ok] stale-schema   leaked=[]
+  [ok] quarantine     leaked=[]
+
+[DEFAULT-DENY] fails=0 (PASS)

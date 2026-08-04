@@ -1,0 +1,20 @@
+{
+  "run_id": "run2",
+  "collection": "company_docs_p5b_run2",
+  "git_head_at_run": "7c8cbb3b5d282004a28928b0dc9ef0b674e3f1be",
+  "note": "runtime code = P5b fix round (committed as the commit that adds this evidence)",
+  "qdrant_image": "qdrant/qdrant@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286",
+  "qdrant_container_image": "sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286",
+  "api_container_image": "sha256:a88dd46a1037157a9ca987c17f1b603edd8ac3158caf5002cbcafa4f3ead51e9",
+  "auth_mode": "enforce",
+  "api": "http://localhost:8402",
+  "qdrant": "http://localhost:6401",
+  "gates": {
+    "A_conformance": 0,
+    "B_lifecycle": 0,
+    "G1_default_deny": 0,
+    "C_ask_eval": 0,
+    "auth_matrix": "11/11 + no-key 401"
+  },
+  "verdict": "PASS"
+}

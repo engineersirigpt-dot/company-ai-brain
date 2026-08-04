@@ -9,7 +9,8 @@ name: brain_p5b
 services:
 
   qdrant:
-    image: qdrant/qdrant:latest
+    # pinned digest (reproducible acceptance run — Codex M2) : qdrant/qdrant:latest @ 2026-07-17
+    image: qdrant/qdrant@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286
     container_name: brain_qdrant_p5b
     ports:
       - "6401:6333"            # แยกจาก prod 6333
@@ -32,9 +33,8 @@ services:
       # ไม่ตั้ง ANTHROPIC_API_KEY — /ask จะ 503; security gate ใช้ /search ($0, ไม่ egress cloud)
     volumes:
       - hf_cache_p5b:/root/.cache/huggingface
-      - ./app:/app/app:ro
-      - ./policy.py:/app/policy.py:ro          # P1 modules ที่ main.py import (ไม่ได้อยู่ใน image)
-      - ./qdrant_filter.py:/app/qdrant_filter.py:ro
+      # ไม่ bind-mount source — ทดสอบ **immutable image** (app/main.py + policy.py + qdrant_filter.py
+      # + rbac_config.py อยู่ใน image ผ่าน Dockerfile COPY แล้ว, Codex M3)
       - ./api_keys.p5b.json:/app/api_keys.p5b.json:ro   # synthetic registry เท่านั้น (gitignored)
     depends_on:
       - qdrant

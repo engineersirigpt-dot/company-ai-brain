@@ -1,0 +1,13 @@
+no-key -> 401 (expect 401)
+  admin       in-scope=200(exp200) forbidden[sales]=403(exp403)
+  management  in-scope=200(exp200) forbidden[admin]=403(exp403)
+  production  in-scope=200(exp200) forbidden[admin]=403(exp403)
+  prepress    in-scope=200(exp200) forbidden[admin]=403(exp403)
+  qc          in-scope=200(exp200) forbidden[admin]=403(exp403)
+  engineering in-scope=200(exp200) forbidden[admin]=403(exp403)
+  sales       in-scope=200(exp200) forbidden[admin]=403(exp403)
+  purchasing  in-scope=200(exp200) forbidden[admin]=403(exp403)
+  logistics   in-scope=200(exp200) forbidden[admin]=403(exp403)
+  hr          in-scope=200(exp200) forbidden[admin]=403(exp403)
+  it          in-scope=200(exp200) forbidden[admin]=403(exp403)
+AUTH MATRIX: pass=11 fail=0 /11 ; no-key=401

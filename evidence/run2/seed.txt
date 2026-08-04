@@ -1,0 +1,2 @@
+created collection company_docs_p5b_run2
+[SEED] 17 points -> company_docs_p5b_run2 (marker + conformance 9 + canary 7) run_id=run2
