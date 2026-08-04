@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from datetime import datetime
 
 import policy as P
 
@@ -40,6 +41,32 @@ def _good_str(x) -> bool:
 
 def _is_hex_commit(x) -> bool:
     return isinstance(x, str) and 7 <= len(x) <= 64 and all(c in "0123456789abcdef" for c in x.lower())
+
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _is_sha256(x) -> bool:
+    return isinstance(x, str) and bool(_SHA256.match(x))
+
+
+def _is_image_digest(x) -> bool:
+    return isinstance(x, str) and x.startswith("sha256:") and _is_sha256(x[7:])
+
+
+def _valid_iso_tz(x) -> bool:
+    """M2: ต้อง parse เป็น datetime จริงที่มี timezone (regex อย่างเดียวยอม 99:99 ได้)"""
+    if not isinstance(x, str):
+        return False
+    try:
+        dt = datetime.fromisoformat(x.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return dt.utcoffset() is not None
+
+
+def _exact_zero_int(x) -> bool:
+    return type(x) is int and x == 0
 
 
 def _effective_access(role: str):
@@ -303,8 +330,8 @@ def validate_signoff(signoff, cases, corpus) -> list:
         errs.append("signoff data_owner_role ต้องเป็น non-blank str")
     if not _is_hex_commit(signoff.get("git_commit")):
         errs.append("signoff git_commit ต้องเป็น hex commit id (7-64)")
-    if not isinstance(signoff.get("reviewed_at"), str) or not _ISO8601_TZ.match(signoff.get("reviewed_at", "")):
-        errs.append("signoff reviewed_at ต้องเป็น ISO-8601 พร้อม timezone")
+    if not _valid_iso_tz(signoff.get("reviewed_at")):
+        errs.append("signoff reviewed_at ต้องเป็น ISO-8601 timestamp จริงพร้อม timezone")
     # M1: hashing อาจ crash เมื่อ artifacts malformed (NaN/surrogate/None) → คืน controlled error
     try:
         if signoff.get("eval_set_sha256") != eval_set_sha256(cases):
@@ -331,10 +358,22 @@ def decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles,
             + validate_signoff(signoff, cases, corpus))
 
 
+def _evidence_hash_binding(ev, eval_hash, corpus_hash, prefix) -> list:
+    """B2: fields ที่เป็น hash/digest/commit ต้องถูก format + ผูก eval/corpus/index/model/image จริง"""
+    errs = []
+    if not _is_sha256(ev.get("retrieval_index_manifest_sha256")):
+        errs.append(f"{prefix} retrieval_index_manifest_sha256 ต้องเป็น 64-hex sha256")
+    if not _good_str(ev.get("run_id")):
+        errs.append(f"{prefix} run_id หาย/ผิดชนิด")
+    if ev.get("eval_set_sha256") != eval_hash:
+        errs.append(f"{prefix} eval_set_sha256 ไม่ตรง artifacts")
+    if ev.get("corpus_manifest_sha256") != corpus_hash:
+        errs.append(f"{prefix} corpus_manifest_sha256 ไม่ตรง artifacts")
+    return errs
+
+
 def validate_m4_evidence(m4, eval_hash, corpus_hash) -> list:
-    """
-    B3.1: real M4 evidence ต้อง PASS จริง (exact type ไม่ใช่ truthiness) + ผูก artifact hashes
-    """
+    """B3.1/B2: real M4 evidence — exact PASS/int/hash + sentinel id hashes disjoint จาก model inputs"""
     if not isinstance(m4, dict):
         return ["m4_evidence ต้องเป็น validated dict summary"]
     errs = []
@@ -343,27 +382,33 @@ def validate_m4_evidence(m4, eval_hash, corpus_hash) -> list:
             errs.append(f"m4 {f} != PASS ({m4.get(f)!r})")
     if m4.get("sentinel_reached_model") is not False:
         errs.append("m4 sentinel_reached_model ต้องเป็น False (exact)")
-    if m4.get("unauthorized_in_model_inputs") != 0 or isinstance(m4.get("unauthorized_in_model_inputs"), bool):
-        errs.append("m4 unauthorized_in_model_inputs ต้องเป็น 0 (exact int)")
-    for f in ("model_revision", "tokenizer_revision", "image_digest",
-              "retrieval_index_manifest_sha256", "run_id"):
-        if not _good_str(m4.get(f)):
-            errs.append(f"m4 '{f}' หาย/ผิดชนิด")
-    if m4.get("eval_set_sha256") != eval_hash:
-        errs.append("m4 eval_set_sha256 ไม่ตรง artifacts")
-    if m4.get("corpus_manifest_sha256") != corpus_hash:
-        errs.append("m4 corpus_manifest_sha256 ไม่ตรง artifacts")
+    if not _exact_zero_int(m4.get("unauthorized_in_model_inputs")):
+        errs.append("m4 unauthorized_in_model_inputs ต้องเป็น 0 (exact int, ไม่รับ 0.0/False)")
+    sids, mids = m4.get("unauthorized_sentinel_id_hashes"), m4.get("model_input_id_hashes")
+    if not isinstance(sids, list) or not sids or not all(_is_sha256(h) for h in sids):
+        errs.append("m4 unauthorized_sentinel_id_hashes ต้องเป็น list ของ sha256 (ไม่ว่าง)")
+    if not isinstance(mids, list) or not all(_is_sha256(h) for h in mids):
+        errs.append("m4 model_input_id_hashes ต้องเป็น list ของ sha256")
+    if isinstance(sids, list) and isinstance(mids, list) and (set(sids) & set(mids)):
+        errs.append("m4 sentinel id ปรากฏใน model_input_id_hashes (M4 FAIL — sentinel ถึง model)")
+    if not _is_hex_commit(m4.get("model_revision")):
+        errs.append("m4 model_revision ต้องเป็น immutable commit (hex)")
+    if not _is_hex_commit(m4.get("tokenizer_revision")):
+        errs.append("m4 tokenizer_revision ต้องเป็น immutable commit (hex)")
+    if not _is_image_digest(m4.get("image_digest")):
+        errs.append("m4 image_digest ต้องเป็น sha256:<64hex>")
+    errs += _evidence_hash_binding(m4, eval_hash, corpus_hash, "m4")
     return errs
 
 
 def validate_canary_evidence(canary, eval_hash, corpus_hash) -> list:
-    """B3.1: P5b canary evidence ต้อง leak=0/VERIFIED/ทุก arm PASS + ผูก artifact hashes"""
+    """B3.1/B2: P5b canary — leak=0/VERIFIED/ทุก arm PASS + per-arm ERROR/INCONCLUSIVE=0 + count ตรง"""
     if not isinstance(canary, dict):
         return ["canary_evidence ต้องเป็น validated dict summary"]
     errs = []
     if canary.get("status") != "PASS":
         errs.append(f"canary status != PASS ({canary.get('status')!r})")
-    if canary.get("leak_count") != 0 or isinstance(canary.get("leak_count"), bool):
+    if not _exact_zero_int(canary.get("leak_count")):
         errs.append("canary leak_count ต้องเป็น 0 (exact int)")
     if canary.get("auth_status") != "VERIFIED":
         errs.append(f"canary auth_status != VERIFIED ({canary.get('auth_status')!r})")
@@ -371,13 +416,13 @@ def validate_canary_evidence(canary, eval_hash, corpus_hash) -> list:
     if not isinstance(arm_status, dict) or set(arm_status) != set(ARMS_EXACT) \
             or any(arm_status.get(a) != "PASS" for a in ARMS_EXACT):
         errs.append(f"canary arm_status ต้องมี {ARMS_EXACT} = PASS ครบ")
-    for f in ("retrieval_index_manifest_sha256", "run_id"):
-        if not _good_str(canary.get(f)):
-            errs.append(f"canary '{f}' หาย/ผิดชนิด")
-    if canary.get("eval_set_sha256") != eval_hash:
-        errs.append("canary eval_set_sha256 ไม่ตรง artifacts")
-    if canary.get("corpus_manifest_sha256") != corpus_hash:
-        errs.append("canary corpus_manifest_sha256 ไม่ตรง artifacts")
+    ac = canary.get("arm_error_counts")
+    if not isinstance(ac, dict) or set(ac) != set(ARMS_EXACT) or any(not _exact_zero_int(ac.get(a)) for a in ARMS_EXACT):
+        errs.append(f"canary arm_error_counts ต้องมี {ARMS_EXACT} = 0 (ERROR/INCONCLUSIVE)")
+    exp, act = canary.get("expected_query_count"), canary.get("actual_query_count")
+    if type(exp) is not int or type(act) is not int or exp != act or exp < 1:
+        errs.append("canary expected_query_count == actual_query_count (positive int)")
+    errs += _evidence_hash_binding(canary, eval_hash, corpus_hash, "canary")
     return errs
 
 
@@ -392,6 +437,12 @@ def decision_benchmark_manifest(cases, corpus, known_roles, evaluated_roles,
         eh, ch = eval_set_sha256(cases), corpus_manifest_sha256(corpus)
         errs += validate_m4_evidence(m4_evidence, eh, ch)
         errs += validate_canary_evidence(canary_evidence, eh, ch)
+        # B2: M4 กับ canary ต้องมาจาก run/index เดียวกัน (กันประกอบข้าม run)
+        if isinstance(m4_evidence, dict) and isinstance(canary_evidence, dict):
+            if m4_evidence.get("run_id") != canary_evidence.get("run_id"):
+                errs.append("m4/canary run_id ไม่ตรงกัน (คนละ run)")
+            if m4_evidence.get("retrieval_index_manifest_sha256") != canary_evidence.get("retrieval_index_manifest_sha256"):
+                errs.append("m4/canary retrieval_index_manifest_sha256 ไม่ตรงกัน (คนละ index)")
     if errs:
         raise ValueError(f"decision benchmark ยังไม่ผ่าน gate ({len(errs)} ข้อ): {errs[:3]}")
     return {

@@ -51,24 +51,51 @@ def aggregate(per_query: list) -> dict:
     return agg
 
 
-def run_smoke(client, collection: str, cases: list, principal_for, embed_query, scorer,
-              top_n: int, filter_adapter=p2_provider.to_qdrant_filter) -> dict:
+def _eval_one(client, collection, c, principal_for, embed_query, scorer, top_n, filter_adapter):
+    principal = principal_for(c["role"])
+    cands = p2_provider.resolve_and_build(client, collection, principal, c["role"],
+                                          embed_query(c["query"]), top_n, filter_adapter)
+    return {"query_id": c.get("query_id"), "role": c["role"], "intent_id": c.get("intent_id"),
+            **eval_query(c["query"], cands, c["relevance"], scorer)}
+
+
+def run_ranking(client, collection: str, cases: list, principal_for, embed_query, scorer,
+                top_n: int, filter_adapter=p2_provider.to_qdrant_filter) -> dict:
     """
-    mechanics smoke run ต่อ ranking cases → resolve access (fail-closed) → build candidates → eval arms
-    output ติดป้าย **approved=False, decision_eligible=False** — ห้ามใช้เลือก arm/freeze
+    B3: **zero-skip** — ทุก ranking case ต้องสำเร็จ ; error ใด ๆ (auth/qdrant/embed/filter) = **run failure**
+    (re-raise พร้อม context ไม่ catch แล้วเดินต่อ ไม่แปลงเป็น skipped). output mechanics-unapproved
+    permission-denial ไม่ใช่ ranking case (แยก canary suite) — ถ้าเกิดที่นี่ = misconfig = fail
     """
-    per_query, skipped = [], []
+    if not cases:
+        raise ValueError("ranking cases ว่าง")
+    per_query = []
     for c in cases:
-        principal = principal_for(c["role"])
         try:
-            cands = p2_provider.resolve_and_build(client, collection, principal, c["role"],
-                                                  embed_query(c["query"]), top_n, filter_adapter)
+            per_query.append(_eval_one(client, collection, c, principal_for, embed_query, scorer, top_n, filter_adapter))
         except Exception as e:
-            skipped.append({"query_id": c.get("query_id"), "reason": f"{type(e).__name__}: {e}"})
-            continue
-        per_query.append({"query_id": c.get("query_id"), "role": c["role"],
-                          "intent_id": c.get("intent_id"), **eval_query(c["query"], cands, c["relevance"], scorer)})
-    return {"kind": "mechanics-smoke-unapproved", "approved": False, "decision_eligible": False,
-            "top_n": top_n, "n_queries": len(per_query), "n_skipped": len(skipped), "skipped": skipped,
+            raise RuntimeError(f"ranking run FAILED ที่ query {c.get('query_id')!r} "
+                               f"(role={c.get('role')}): {type(e).__name__}: {e}") from e
+    if len(per_query) != len(cases):
+        raise RuntimeError(f"n_completed({len(per_query)}) != n_expected({len(cases)})")
+    return {"kind": "mechanics-ranking-unapproved", "approved": False, "decision_eligible": False,
+            "status": "COMPLETE", "top_n": top_n, "n_expected": len(cases), "n_completed": len(per_query),
             "scorer": getattr(scorer, "metadata", lambda: {"model": "unknown"})(),
+            "aggregate": aggregate(per_query), "per_query": per_query}
+
+
+def run_diagnostic(client, collection: str, cases: list, principal_for, embed_query, scorer,
+                   top_n: int, filter_adapter=p2_provider.to_qdrant_filter) -> dict:
+    """
+    exploratory diagnostic (allow_errors) — catch error ต่อ case, status=INCOMPLETE ถ้ามี error>0
+    **kind=diagnostic-non-evidence** ห้ามใช้เป็น benchmark/evidence
+    """
+    per_query, errors = [], []
+    for c in cases:
+        try:
+            per_query.append(_eval_one(client, collection, c, principal_for, embed_query, scorer, top_n, filter_adapter))
+        except Exception as e:
+            errors.append({"query_id": c.get("query_id"), "reason": f"{type(e).__name__}: {e}"})
+    return {"kind": "diagnostic-non-evidence", "approved": False, "decision_eligible": False,
+            "status": "COMPLETE" if not errors else "INCOMPLETE", "top_n": top_n,
+            "n_expected": len(cases), "n_completed": len(per_query), "n_errors": len(errors), "errors": errors,
             "aggregate": aggregate(per_query), "per_query": per_query}

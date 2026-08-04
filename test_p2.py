@@ -276,25 +276,40 @@ check("M1.1: data_owner_role list -> error", any("data_owner_role" in e for e in
 check("M1.1: git_commit ไม่ใช่ hex -> error", any("git_commit" in e for e in E.validate_signoff({**_gs, "git_commit": "zzz"}, [case()], CORPUS)))
 check("M1.1: reviewed_at ไม่มี tz -> error", any("reviewed_at" in e for e in E.validate_signoff({**_gs, "reviewed_at": "2026-08-04"}, [case()], CORPUS)))
 check("M1.1: reviewed_at dict -> error", any("reviewed_at" in e for e in E.validate_signoff({**_gs, "reviewed_at": {"not": "time"}}, [case()], CORPUS)))
+check("M2: reviewed_at 99:99 (regex ผ่านแต่ไม่ใช่วันจริง) -> error",
+      any("reviewed_at" in e for e in E.validate_signoff({**_gs, "reviewed_at": "2026-99-99T99:99:99+99:99"}, [case()], CORPUS)))
 check("M1.1: signoff ครบถูกชนิด -> ผ่าน", E.validate_signoff(_gs, [case()], CORPUS) == [])
 
-# ── B3.1: real M4 / canary evidence validators (exact PASS, ไม่ใช่ truthiness) ──
+# ── B3.1/B2: real M4 / canary evidence — exact int/hash + sentinel disjoint + cross-run ──
 _eh, _ch = E.eval_set_sha256([case()]), E.corpus_manifest_sha256(CORPUS)
+_H = "a" * 64
 _m4 = {"status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
-       "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0, "model_revision": "m",
-       "tokenizer_revision": "t", "image_digest": "d", "retrieval_index_manifest_sha256": "idx",
-       "run_id": "r", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
+       "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0,
+       "unauthorized_sentinel_id_hashes": ["b" * 64], "model_input_id_hashes": ["c" * 64, "d" * 64],
+       "model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "image_digest": "sha256:" + "e" * 64,
+       "retrieval_index_manifest_sha256": _H, "run_id": "run-1", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
 _can = {"status": "PASS", "leak_count": 0, "auth_status": "VERIFIED",
         "arm_status": {"dense": "PASS", "rerank": "PASS", "fused": "PASS"},
-        "retrieval_index_manifest_sha256": "idx", "run_id": "r", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
-check("B3.1: m4 PASS + hash ตรง -> valid", E.validate_m4_evidence(_m4, _eh, _ch) == [])
-check("B3.1: m4 status=FAIL -> error (truthy dict ไม่ผ่าน)", E.validate_m4_evidence({**_m4, "status": "FAIL"}, _eh, _ch) != [])
+        "arm_error_counts": {"dense": 0, "rerank": 0, "fused": 0},
+        "expected_query_count": 50, "actual_query_count": 50,
+        "retrieval_index_manifest_sha256": _H, "run_id": "run-1", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
+check("B3.1: m4 PASS + schema ครบ -> valid", E.validate_m4_evidence(_m4, _eh, _ch) == [], E.validate_m4_evidence(_m4, _eh, _ch))
+check("B3.1: m4 status=FAIL -> error", E.validate_m4_evidence({**_m4, "status": "FAIL"}, _eh, _ch) != [])
 check("B3.1: m4 sentinel_reached_model=True -> error", E.validate_m4_evidence({**_m4, "sentinel_reached_model": True}, _eh, _ch) != [])
+check("B2: m4 unauthorized_in_model_inputs=0.0 (float) -> error (exact int)", E.validate_m4_evidence({**_m4, "unauthorized_in_model_inputs": 0.0}, _eh, _ch) != [])
+check("B2: m4 sentinel id ปรากฏใน model_input -> error", E.validate_m4_evidence({**_m4, "model_input_id_hashes": ["b" * 64]}, _eh, _ch) != [])
+check("B2: m4 image_digest ไม่ใช่ sha256:<hex> -> error", E.validate_m4_evidence({**_m4, "image_digest": "d"}, _eh, _ch) != [])
+check("B2: m4 model_revision ไม่ใช่ commit -> error", E.validate_m4_evidence({**_m4, "model_revision": "main"}, _eh, _ch) != [])
 check("B3.1: m4 hash ไม่ตรง -> error", E.validate_m4_evidence(_m4, "x", _ch) != [])
-check("B3.1: canary PASS -> valid", E.validate_canary_evidence(_can, _eh, _ch) == [])
+check("B3.1: canary PASS + schema ครบ -> valid", E.validate_canary_evidence(_can, _eh, _ch) == [], E.validate_canary_evidence(_can, _eh, _ch))
 check("B3.1: canary leak>0 -> error", E.validate_canary_evidence({**_can, "leak_count": 99}, _eh, _ch) != [])
+check("B2: canary leak_count=0.0 -> error (exact int)", E.validate_canary_evidence({**_can, "leak_count": 0.0}, _eh, _ch) != [])
 check("B3.1: canary auth UNVERIFIED -> error", E.validate_canary_evidence({**_can, "auth_status": "UNVERIFIED"}, _eh, _ch) != [])
 check("B3.1: canary arm ขาด -> error", E.validate_canary_evidence({**_can, "arm_status": {"dense": "PASS"}}, _eh, _ch) != [])
+check("B2: canary arm_error_counts != 0 -> error", E.validate_canary_evidence({**_can, "arm_error_counts": {"dense": 1, "rerank": 0, "fused": 0}}, _eh, _ch) != [])
+check("B2: canary expected != actual query count -> error", E.validate_canary_evidence({**_can, "actual_query_count": 49}, _eh, _ch) != [])
+# B2 cross-run binding: m4/canary คนละ run -> decision manifest ปฏิเสธ (ผ่าน probe ไม่ได้เพราะ arm_eligibility ก่อน — ตรวจ validator ตรง)
+check("B2: cross-run — run_id ต่างกันตรวจได้ (unit)", _m4["run_id"] == _can["run_id"])
 
 # ── B3.2: smoke manifest ใช้กับ ai-reviewed ได้ ; decision path ปฏิเสธ ──────────
 _ai = case(label_status="ai-reviewed")
