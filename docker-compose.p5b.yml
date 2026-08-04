@@ -31,8 +31,10 @@ services:
       - API_KEYS_FILE=/app/api_keys.p5b.json
       # ไม่ตั้ง ANTHROPIC_API_KEY — /ask จะ 503; security gate ใช้ /search ($0, ไม่ egress cloud)
     volumes:
-      - hf_cache:/root/.cache/huggingface
+      - hf_cache_p5b:/root/.cache/huggingface
       - ./app:/app/app:ro
+      - ./policy.py:/app/policy.py:ro          # P1 modules ที่ main.py import (ไม่ได้อยู่ใน image)
+      - ./qdrant_filter.py:/app/qdrant_filter.py:ro
       - ./api_keys.p5b.json:/app/api_keys.p5b.json:ro   # synthetic registry เท่านั้น (gitignored)
     depends_on:
       - qdrant
@@ -40,6 +42,4 @@ services:
 
 volumes:
   qdrant_data_p5b:            # ประกาศใหม่ — ไม่ใช้ qdrant_data ของ production
-  hf_cache:
-    external: true
-    name: company-ai-brain_hf_cache   # reuse model cache เท่านั้น (read-heavy, ไม่มีข้อมูลลับ)
+  hf_cache_p5b:               # model cache แยกของ p5b (fresh download ครั้งแรก)

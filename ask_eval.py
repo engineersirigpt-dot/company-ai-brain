@@ -24,7 +24,9 @@ import urllib.request
 import eval_contract as ec
 
 DEFAULT_API = "http://localhost:8002"
-TOP_K = 5
+# top_k ต้อง >= จำนวน point ที่ authorized role มองเห็นสูงสุด มิฉะนั้น positive control อาจ miss
+# เพราะ vector top-k (ไม่ใช่ filter ผิด) — Codex เตือนเรื่องนี้. API cap ที่ 10; visible สูงสุด ~8
+TOP_K = 10
 
 
 # ── transport layer ────────────────────────────────────────────────────────────
