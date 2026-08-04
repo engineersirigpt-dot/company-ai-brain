@@ -12,6 +12,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from qdrant_client import QdrantClient
 from rbac_config import get_collection, get_rbac, COLLECTIONS
+import policy  # M2: legacy-writer guard
 
 QDRANT_PATH = "./qdrant_storage"
 COLLECTION_NAME = "company_docs"
@@ -41,6 +42,10 @@ def main(apply: bool):
     print("กำลังดึง points จาก Qdrant...")
     points = scroll_all(client)
     print(f"พบ {len(points)} points\n")
+
+    # M2: retag เขียน payload (collection/level/roles) โดยไม่ผ่าน policy resolver/validator —
+    # ห้ามใช้กับ P1 collection (จะได้ payload ที่ไม่ผ่าน strict contract). fail-fast ถ้าเจอ policy-v1
+    policy.assert_legacy_writer_allowed([p.payload for p in points], "retag_rbac.py")
 
     # จัดกลุ่ม point ID ตาม collection
     by_collection: dict[str, list] = defaultdict(list)

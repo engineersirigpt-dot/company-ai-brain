@@ -12,6 +12,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
+import policy  # M2: กัน malformed policy-v1 หลุดเข้าปลายทาง
 
 LOCAL_PATH = "./qdrant_storage"
 COLLECTION_NAME = "company_docs"
@@ -72,6 +73,15 @@ def migrate(server_url: str, dry_run: bool):
 
         if not results:
             break
+
+        # M2: กัน malformed policy-v1 payload หลุดเข้า collection ปลายทาง (legacy payload ผ่านปกติ)
+        bad = [(p.id, policy.validate_stored_payload(p.payload)[1])
+               for p in results if not policy.validate_stored_payload(p.payload)[0]]
+        if bad:
+            print(f"[POLICY-GUARD] migrate_to_server: policy-v1 payload malformed {len(bad)} จุด — abort")
+            for pid, reason in bad[:10]:
+                print(f"  - {pid}: {reason}")
+            sys.exit(1)
 
         points = [
             PointStruct(

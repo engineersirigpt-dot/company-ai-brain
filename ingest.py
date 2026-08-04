@@ -7,6 +7,8 @@ Usage:
 """
 import sys
 import re
+import json
+import time
 import hashlib
 from pathlib import Path
 
@@ -14,9 +16,12 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import (Distance, VectorParams, PointStruct,
+                                  Filter, FieldCondition, MatchValue, FilterSelector)
 from rbac_config import get_rbac
 import policy  # P1: document-policy resolver — payload v1 + quarantine gate
+
+INGEST_MANIFEST = "ingest_manifest.jsonl"  # durable audit ต่อ source (M3)
 
 QDRANT_PATH = "./qdrant_storage"
 COLLECTION_NAME = "company_docs"
@@ -189,11 +194,19 @@ def embed_chunks(tokenizer, model, chunks: list[dict], batch_size: int = 8) -> l
     return chunks
 
 
-def store_in_qdrant(chunks: list[dict]):
-    """เก็บ chunks + vectors ลง Qdrant local storage"""
-    client = QdrantClient(path=QDRANT_PATH)
+def store_in_qdrant(chunks: list[dict], client=None) -> dict:
+    """
+    เก็บ chunks + vectors ลง Qdrant — **allowlisted policy-v1 writer เดียว** (ผ่าน policy resolver ทุกจุด)
 
-    # สร้าง collection ถ้ายังไม่มี
+    P1 lifecycle:
+      - resolve document policy → payload v1 (schema/policy/status + collection/level/allowed_roles)
+      - **replace-by-source (B1):** delete ทุก point เก่าของ source ที่ ingest รอบนี้ ก่อน upsert
+        generation ใหม่ → เอกสารที่กลายเป็น QUARANTINED หรือ ACL แคบลง จะไม่ทิ้ง point เก่าให้ค้นเจอ
+      - QUARANTINED = contract ผิด → ไม่เข้า active + บันทึก durable manifest (M3)
+    client inject ได้เพื่อ test/allowlist (default = local QdrantClient)
+    """
+    client = client or QdrantClient(path=QDRANT_PATH)
+
     existing = [c.name for c in client.get_collections().collections]
     if COLLECTION_NAME not in existing:
         client.create_collection(
@@ -202,36 +215,54 @@ def store_in_qdrant(chunks: list[dict]):
         )
         print(f"Created collection: {COLLECTION_NAME}")
 
-    # P1: resolve document policy → payload v1 (acl_schema_version/policy_version/policy_status
-    # + collection_group/confidentiality_level/allowed_roles). chunk ทุกตัวของ source เดียวกันได้
-    # policy/version เดียวกัน (resolve ตาม source). QUARANTINED = contract ผิด → ไม่เข้า active generation (§4)
-    active, quarantined = [], []
-    for chunk in chunks:
-        pol = policy.resolve_document_policy({"source": chunk["source"]}, get_rbac)
-        pt = PointStruct(
-            id=str(chunk["id"]),
-            vector=chunk["vector"],
+    run_id = time.strftime("%Y%m%dT%H%M%S")
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    plan = policy.plan_source_replacement(chunks, get_rbac)
+
+    # B1: revoke generation เก่าของทุก source ที่ ingest รอบนี้ ก่อน upsert (fail-closed replacement)
+    for src in plan["delete_sources"]:
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=FilterSelector(filter=Filter(must=[
+                FieldCondition(key="source", match=MatchValue(value=src))])),
+        )
+
+    id_to_pol = {(r["source"], r["id"]): r["policy"] for r in plan["active"]}
+    points = []
+    for ch in chunks:
+        pol = id_to_pol.get((ch["source"], ch["id"]))
+        if pol is None:
+            continue  # quarantined — ไม่เข้า active generation
+        points.append(PointStruct(
+            id=str(ch["id"]),
+            vector=ch["vector"],
             payload={
-                "text": chunk["text"],
-                "parent_text": chunk.get("parent_text", chunk["text"]),
-                "heading": chunk["heading"],
-                "source": chunk["source"],
+                "text": ch["text"],
+                "parent_text": ch.get("parent_text", ch["text"]),
+                "heading": ch["heading"],
+                "source": ch["source"],
                 **pol.payload(),
             },
-        )
-        (active if policy.is_active(pol) else quarantined).append((pt, pol))
+        ))
+    if points:
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
 
-    if quarantined:
-        print(f"[QUARANTINE] {len(quarantined)} chunks ไม่เข้า active search (admin ตรวจ workflow แยก):")
-        for _, pol in quarantined[:10]:
-            print(f"  - source-policy ผิด contract: reason={pol.quarantine_reason}")
+    # M3: durable manifest — terminal outcome ต่อ source (ห้ามรายงาน success กำกวม)
+    with open(INGEST_MANIFEST, "a", encoding="utf-8") as f:
+        for e in policy.ingest_manifest_entries(plan, run_id=run_id, ts=ts):
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
-    client.upsert(collection_name=COLLECTION_NAME, points=[pt for pt, _ in active])
-    print(f"Stored {len(active)} active points in Qdrant (collection: {COLLECTION_NAME})"
-          f"{f', quarantined {len(quarantined)}' if quarantined else ''}")
+    nq = len(plan["quarantined"])
+    if nq:
+        print(f"[QUARANTINE] {nq} chunks ไม่เข้า active (บันทึกใน {INGEST_MANIFEST} เพื่อ admin review):")
+        for r in plan["quarantined"][:10]:
+            print(f"  - source={r['source']!r} reason={r['reason']}")
+    print(f"[STORE] active={len(points)} upserted, quarantined={nq}, "
+          f"replaced_sources={len(plan['delete_sources'])} run_id={run_id}")
 
     info = client.get_collection(COLLECTION_NAME)
     print(f"Total vectors in collection: {info.points_count}")
+    return {"active": len(points), "quarantined": nq}
 
 
 def ingest(md_path: str):
@@ -260,8 +291,12 @@ def ingest(md_path: str):
 
     # 3. Store
     print("\nStoring in Qdrant...")
-    store_in_qdrant(chunks)
-    print("\n[OK] Done!")
+    result = store_in_qdrant(chunks)
+    # M3: ไม่รายงาน success กำกวม — ถ้าไม่มี active เลย ถือว่า ingest ไม่สำเร็จตาม contract
+    if result["active"] == 0:
+        print(f"\n[WARN] ไม่มี active point (quarantined={result['quarantined']}) — ตรวจ {INGEST_MANIFEST}")
+        sys.exit(2)
+    print(f"\n[OK] Done — active={result['active']}, quarantined={result['quarantined']}")
 
 
 if __name__ == "__main__":

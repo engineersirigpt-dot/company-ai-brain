@@ -158,5 +158,94 @@ check("admin เห็นทุก ACTIVE แต่ **ไม่เห็น** st
       adm == {"recall", "sales", "hr", "purchasing", "production", "unclassified"}, adm)
 check("it (ไม่มีสิทธิ์ collection ไหนใน corpus) เห็น 0 (fail-closed)", _visible_ids("it") == set())
 
+# ── N1: unknown auth_mode -> fail-closed (บังคับเหมือน enforce) ────────────────
+p_typo = P.authenticate_service(None, "h", "enfore")
+check("auth_mode typo + key ผิด -> 401 (fail-closed)",
+      auth_raises(lambda: P.resolve_effective_access(p_typo, "qc"), 401))
+p_typo2 = P.authenticate_service({"service": "s", "allowed_roles": ["qc"]}, "h", "enfore")
+check("auth_mode typo + role นอก scope -> 403",
+      auth_raises(lambda: P.resolve_effective_access(p_typo2, "hr"), 403))
+
+# ── M1: type-aware matches_policy (bool != int, float != int, null, scalar) ────
+_mv = lambda k, v: [{"key": k, "value": v}]
+_active_pl = lambda roles: {"acl_schema_version": 1, "policy_version": "poc-v1",
+                            "policy_status": "ACTIVE", "allowed_roles": roles}
+check("stored true vs value 1 -> ไม่ match (bool != int)", P.matches_policy({"k": True}, _mv("k", 1)) is False)
+check("stored 1.0 vs value 1 -> ไม่ match (float != int)", P.matches_policy({"k": 1.0}, _mv("k", 1)) is False)
+check("stored 1 vs value 1 -> match", P.matches_policy({"k": 1}, _mv("k", 1)) is True)
+check("null allowed_roles -> ไม่ match (ต้อง IsNull)", P.matches_policy(_active_pl(None), _filter_for("admin")) is False)
+check("scalar allowed_roles='qc' -> match (เหมือน Qdrant; กันที่ write boundary ไม่ใช่ filter)",
+      P.matches_policy(_active_pl("qc"), _filter_for("qc")) is True)
+
+# ── D1: scalar/malformed allowed_roles -> QUARANTINED ที่ write boundary ───────
+_lookup = lambda coll, level, roles: (lambda s: {"collection_group": coll,
+                                                 "confidentiality_level": level, "allowed_roles": roles})
+def _q(coll, level, roles):
+    return P.resolve_document_policy({"source": "x"}, _lookup(coll, level, roles)).policy_status
+check("allowed_roles scalar 'qc' -> QUARANTINED", _q("SALES", 3, "qc") == "QUARANTINED")
+check("allowed_roles [] -> QUARANTINED", _q("SALES", 3, []) == "QUARANTINED")
+check("allowed_roles มี non-str -> QUARANTINED", _q("SALES", 3, ["qc", 1]) == "QUARANTINED")
+
+# ── M4: strict level/collection type & range (ไม่ coerce) ─────────────────────
+check("level=true -> QUARANTINED", _q("SALES", True, ["qc"]) == "QUARANTINED")
+check("level='3' (str) -> QUARANTINED", _q("SALES", "3", ["qc"]) == "QUARANTINED")
+check("level=2.9 (float) -> QUARANTINED (ไม่ปัดเป็น 2)", _q("SALES", 2.9, ["qc"]) == "QUARANTINED")
+check("level=9 (นอก range) -> QUARANTINED", _q("SALES", 9, ["qc"]) == "QUARANTINED")
+check("collection_group=123 (ไม่ใช่ str) -> QUARANTINED", _q(123, 3, ["qc"]) == "QUARANTINED")
+check("valid mapping ยัง ACTIVE", _q("SALES", 3, ["sales", "admin"]) == "ACTIVE")
+
+# ── B1: replace-by-source lifecycle (revoke gen เก่า) ─────────────────────────
+class LifecycleQdrant:
+    def __init__(self): self.corpus = []
+    def apply(self, chunks, rbac_lookup):
+        plan = P.plan_source_replacement(chunks, rbac_lookup)
+        dele = set(plan["delete_sources"])
+        self.corpus = [p for p in self.corpus if p["payload"].get("source") not in dele]  # revoke ก่อน (B1)
+        for r in plan["active"]:
+            pl = dict(r["policy"].payload()); pl["source"] = r["source"]
+            self.corpus.append({"id": r["id"], "payload": pl})
+        return plan
+    def visible(self, role):
+        return {p["id"] for p in self.corpus if P.matches_policy(p["payload"], _filter_for(role))}
+
+lc = LifecycleQdrant()
+lc.apply([{"source": "QP-721 sales.pdf", "id": "c1"}], get_rbac)                 # gen1 SALES active
+check("B1 gen1: sales เห็น point", lc.visible("sales") == {"c1"})
+lc.apply([{"source": "QP-721 sales.pdf", "id": "c1"}], _lookup("SALES", 3, "qc"))  # gen2 mapping พัง -> quarantine
+check("B1 ACTIVE->QUARANTINED: sales ค้น point เก่าไม่เจอ (revoke gen เก่า)", lc.visible("sales") == set())
+
+lc2 = LifecycleQdrant()
+lc2.apply([{"source": "docX.pdf", "id": "d1"}], _lookup("PRODUCTION", 2, ["production", "qc", "admin"]))
+check("B1 gen1: qc เห็น (broad ACL)", lc2.visible("qc") == {"d1"})
+lc2.apply([{"source": "docX.pdf", "id": "d1"}], _lookup("PRODUCTION", 2, ["production", "admin"]))
+check("B1 broad->narrow: qc ที่ถูกถอน ค้นไม่เจอ", lc2.visible("qc") == set())
+check("B1 broad->narrow: production ที่ยังมีสิทธิ์ ยังเห็น", lc2.visible("production") == {"d1"})
+
+# ── M3: durable manifest (terminal outcome ชัด ไม่ success กำกวม) ──────────────
+plan = P.plan_source_replacement([{"source": "QP-721 sales.pdf", "id": "c1"}, {"source": "", "id": "c2"}], get_rbac)
+entries = P.ingest_manifest_entries(plan, run_id="run-1", ts="2026-08-04T00:00:00")
+outcomes = {e["source"]: e["outcome"] for e in entries}
+check("M3 manifest: active=ACTIVE, empty-source=QUARANTINED, มี run_id/ts/hash/version",
+      outcomes.get("QP-721 sales.pdf") == "ACTIVE" and outcomes.get("") == "QUARANTINED"
+      and all({"source_sha256", "run_id", "ts", "policy_version"} <= set(e) for e in entries), entries)
+
+# ── M2: legacy-writer guard + stored-payload validation ───────────────────────
+def _guard_raises(payloads):
+    try:
+        P.assert_legacy_writer_allowed(payloads, "tool"); return False
+    except RuntimeError:
+        return True
+check("legacy-writer guard: เจอ policy-v1 payload -> raise",
+      _guard_raises([{"text": "x"}, {"policy_version": "poc-v1", "allowed_roles": ["qc"]}]))
+check("legacy-writer guard: legacy payload ล้วน -> ผ่าน",
+      P.assert_legacy_writer_allowed([{"source": "x", "collection_group": "SALES"}], "tool") is None)
+_good_v1 = {"acl_schema_version": 1, "policy_version": "poc-v1", "policy_status": "ACTIVE",
+            "collection_group": "SALES", "confidentiality_level": 3, "allowed_roles": ["sales", "admin"]}
+check("validate_stored_payload: v1 ถูก -> ok", P.validate_stored_payload(_good_v1)[0] is True)
+check("validate_stored_payload: v1 allowed_roles scalar -> invalid",
+      P.validate_stored_payload(dict(_good_v1, allowed_roles="sales"))[0] is False)
+check("validate_stored_payload: legacy (ไม่มี marker) -> ผ่าน (migrate ปกติได้)",
+      P.validate_stored_payload({"source": "x", "collection_group": "SALES"})[0] is True)
+
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

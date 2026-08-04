@@ -25,6 +25,7 @@ from transformers import AutoModel, AutoTokenizer
 
 from ingest import attach_parent_text, chunk_by_headings, embed_chunks
 from rbac_config import get_rbac
+import policy  # M2: legacy-writer guard
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 COLLECTION = os.getenv("COLLECTION_NAME", "company_docs")
@@ -80,6 +81,17 @@ def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
     llm = anthropic.Anthropic()
     qc = QdrantClient(host=QDRANT_HOST, port=6333, timeout=60)
+
+    # M2: writer นี้เขียน payload ผ่าน get_rbac() ตรง ๆ (ไม่มี schema/version/status) — ห้ามใช้กับ
+    # P1 collection มิฉะนั้น point จะหายใต้ filter v1. fail-fast ถ้าเจอ policy-v1 payload
+    try:
+        _sample, _ = qc.scroll(collection_name=COLLECTION, limit=50,
+                               with_payload=True, with_vectors=False)
+        policy.assert_legacy_writer_allowed([p.payload for p in _sample], "ocr_reingest.py")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass  # collection ยังไม่มี/scroll ไม่ได้ = ไม่มี policy-v1 ให้ปกป้อง
 
     print("Loading BGE-M3...", flush=True)
     tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")

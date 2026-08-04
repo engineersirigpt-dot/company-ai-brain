@@ -15,12 +15,16 @@ flow:
 confidentiality_level = egress/classification signal เท่านั้น ยังไม่ใช่ query-time clearance
 """
 from __future__ import annotations
+import hashlib
 from dataclasses import dataclass
 
 # ── versioned policy constants (กัน payload/กติกาเก่าหลุดเข้า query) ─────────────
 ACL_SCHEMA_VERSION = 1
 POLICY_VERSION = "poc-v1"
 ACTIVE, QUARANTINED = "ACTIVE", "QUARANTINED"
+MAX_CONFIDENTIALITY_LEVEL = 3   # 0..3 (egress/classification signal — ยังไม่ใช้ AND สิทธิ์อ่าน)
+
+VALID_AUTH_MODES = frozenset({"enforce", "warn", "off"})
 
 # canonical role set (self-contained; main.VALID_ROLES ต้องอ้างอิงชุดนี้กัน drift)
 KNOWN_ROLES = frozenset({
@@ -106,7 +110,10 @@ def resolve_effective_access(principal: ServicePrincipal, requested_role: str) -
     """
     if not requested_role or requested_role not in KNOWN_ROLES:
         raise AuthError(403, f"unknown_or_empty_role:{requested_role!r}")
-    if principal.auth_mode == "enforce":
+    # N1: auth_mode ที่ไม่รู้จัก (เช่น typo "enfore") → fail-closed = บังคับเหมือน enforce
+    # ไม่พึ่งให้ caller ทุกตัว validate เอง (FastAPI startup guard เป็นแค่ชั้นเสริม)
+    mode = principal.auth_mode if principal.auth_mode in VALID_AUTH_MODES else "enforce"
+    if mode == "enforce":
         if not principal.authenticated:
             raise AuthError(401, "missing_or_invalid_key")
         if requested_role not in principal.allowed_roles:
@@ -132,20 +139,37 @@ def compile_retrieval_filter(access: EffectiveAccess) -> list:
     ]
 
 
+def _type_exact_eq(stored, target) -> bool:
+    """
+    เทียบแบบ type-aware เลียนแบบ Qdrant (M1): Qdrant แยกชนิด — bool != int, int != float
+    (Python มอง True == 1 และ 1 == 1.0 ซึ่งทำให้ fake matcher over-match ถ้าใช้ == ตรง ๆ)
+    """
+    if type(stored) is not type(target):
+        return False
+    return stored == target
+
+
 def matches_policy(payload: dict, spec: list) -> bool:
     """
-    executable semantics ของ filter (ต้องตรงกับที่ Qdrant Filter บังคับทุกประการ)
-    ใช้ใน fake-Qdrant test + เป็นสัญญาว่า Qdrant ต้องทำอะไร
-    field หาย → ไม่ match (fail-closed) ; list payload → ตรวจแบบ contains
+    conservative model ของ Qdrant Filter(must=[...]) — **type-aware** แต่ **ไม่ใช่** oracle
+    ที่ครอบทุก JSON type/edge ของ Qdrant; conformance กับ Qdrant จริง = P5b (real-collection test)
+    กติกาที่จำลอง:
+      - field หาย / null (None) → ไม่ match (Qdrant: null ต้องใช้ IsNull ไม่ใช่ Match) — fail-closed
+      - MatchValue: เทียบ type+value เป๊ะ (true != 1, 1.0 != 1)
+      - MatchAny: stored scalar หรือ array — match เมื่อมีสมาชิก type+value ตรงอย่างน้อยหนึ่ง
+        (หมายเหตุ: scalar `allowed_roles="qc"` **match ได้** เหมือน Qdrant → ต้องกันที่ write boundary
+         ด้วยการ quarantine ไม่ใช่หวังให้ filter ตรวจ shape — ดู D1/resolve_document_policy)
     """
     for cond in spec:
         pv = payload.get(cond["key"], _MISSING)
+        if pv is _MISSING or pv is None:
+            return False
         if "value" in cond:
-            if pv != cond["value"]:
+            if not _type_exact_eq(pv, cond["value"]):
                 return False
-        else:  # match-any / contains
+        else:  # match-any (scalar หรือ array)
             vals = pv if isinstance(pv, list) else [pv]
-            if not any(a in vals for a in cond["any"]):
+            if not any(_type_exact_eq(v, a) for v in vals for a in cond["any"]):
                 return False
     return True
 
@@ -162,34 +186,51 @@ def resolve_document_policy(source_metadata: dict, rbac_lookup) -> DocumentPolic
     """
     source = source_metadata.get("source")
     if not isinstance(source, str) or not source.strip():
-        return _quarantine("missing_or_invalid_source", "", 0, [])
+        return _quarantine("missing_or_invalid_source", "UNCLASSIFIED", 0, [])
     try:
         rbac = rbac_lookup(source)
         coll = rbac["collection_group"]
-        level = int(rbac["confidentiality_level"])
-        roles = list(rbac["allowed_roles"])
+        level = rbac["confidentiality_level"]
+        roles = rbac["allowed_roles"]
     except Exception as e:  # mapping/config ผิดชนิด → quarantine ไม่ให้หลุดเข้า active
-        return _quarantine(f"rbac_lookup_error:{type(e).__name__}", "", 0, [])
+        return _quarantine(f"rbac_lookup_error:{type(e).__name__}", "UNCLASSIFIED", 0, [])
+
+    # D1: allowed_roles ต้องเป็น list[str] เท่านั้น — scalar "qc" (ที่ Qdrant filter ได้แต่ผิด contract)
+    # ต้อง quarantine ที่ write boundary (filter พิสูจน์ array shape เองไม่ได้)
+    _coll = coll if isinstance(coll, str) and coll else "UNCLASSIFIED"
+    if not isinstance(roles, list) or not roles or not all(isinstance(r, str) for r in roles):
+        return _quarantine(f"allowed_roles_not_str_list:{type(roles).__name__}", _coll, 0, [])
+    # M4: strict type/range — ไม่ coerce (bool/str/float ที่แอบผ่าน int() เดิม ต้อง quarantine)
+    if isinstance(level, bool) or not isinstance(level, int) or not (0 <= level <= MAX_CONFIDENTIALITY_LEVEL):
+        return _quarantine(f"bad_confidentiality_level:{level!r}", _coll, 0, list(roles))
+    if not isinstance(coll, str) or not coll:
+        return _quarantine("bad_collection_group", "UNCLASSIFIED", level, list(roles))
 
     candidate = DocumentPolicy(ACL_SCHEMA_VERSION, POLICY_VERSION, ACTIVE, coll, level, tuple(roles))
     ok, reason = validate_document_policy(candidate)
     if not ok:
-        return _quarantine(reason, coll, level, roles)
+        return _quarantine(reason, coll, level, list(roles))
     return candidate
 
 
 def validate_document_policy(policy: DocumentPolicy) -> tuple:
-    """คืน (ok, reason) — ต้องเป็น payload v1 ที่ contract ถูกต้องจึงเข้า active search generation ได้"""
+    """คืน (ok, reason) — payload v1 ที่ contract ถูกต้อง (strict type) จึงเข้า active generation ได้"""
     if policy.acl_schema_version != ACL_SCHEMA_VERSION:
-        return False, f"bad_acl_schema_version:{policy.acl_schema_version}"
+        return False, f"bad_acl_schema_version:{policy.acl_schema_version!r}"
     if policy.policy_version != POLICY_VERSION:
-        return False, f"bad_policy_version:{policy.policy_version}"
+        return False, f"bad_policy_version:{policy.policy_version!r}"
     if policy.policy_status not in (ACTIVE, QUARANTINED):
-        return False, f"bad_policy_status:{policy.policy_status}"
-    if not policy.collection_group:
-        return False, "empty_collection_group"
+        return False, f"bad_policy_status:{policy.policy_status!r}"
+    if not isinstance(policy.collection_group, str) or not policy.collection_group:
+        return False, "bad_collection_group"
+    if isinstance(policy.confidentiality_level, bool) or not isinstance(policy.confidentiality_level, int):
+        return False, f"bad_level_type:{type(policy.confidentiality_level).__name__}"
+    if not (0 <= policy.confidentiality_level <= MAX_CONFIDENTIALITY_LEVEL):
+        return False, f"level_out_of_range:{policy.confidentiality_level}"
     if not policy.allowed_roles:
         return False, "empty_acl"
+    if not all(isinstance(r, str) for r in policy.allowed_roles):
+        return False, "non_str_role_in_acl"
     unknown = set(policy.allowed_roles) - KNOWN_ROLES
     if unknown:
         return False, f"unknown_roles:{sorted(unknown)}"
@@ -204,3 +245,83 @@ def _quarantine(reason: str, coll: str, level: int, roles: list) -> DocumentPoli
 
 def is_active(policy: DocumentPolicy) -> bool:
     return policy.policy_status == ACTIVE
+
+
+# ── legacy-writer guard (M2) — ingest.py = allowlisted policy-v1 writer เดียว ───
+POLICY_V1_MARKERS = ("policy_version", "acl_schema_version", "policy_status")
+
+
+def payload_is_policy_v1(payload) -> bool:
+    return isinstance(payload, dict) and any(k in payload for k in POLICY_V1_MARKERS)
+
+
+def assert_legacy_writer_allowed(sample_payloads: list, tool_name: str) -> None:
+    """
+    fail-fast สำหรับ writer เก่าที่ bypass policy resolver (M2): ถ้า collection มี payload policy-v1
+    อยู่แล้ว ห้าม tool เก่าเขียนทับ (payload ไม่มี schema/status → point หายใต้ filter v1 = availability
+    failure หรือพา malformed v1 เข้าปลายทาง). ให้ใช้ ingest.py หรือทำงานบน collection แยก
+    """
+    if any(payload_is_policy_v1(p) for p in sample_payloads):
+        raise RuntimeError(
+            f"[POLICY-GUARD] {tool_name}: พบ policy-v1 payload ใน collection — tool นี้ bypass "
+            f"policy resolver จึงห้ามใช้กับ P1 collection. ใช้ ingest.py (allowlisted writer) "
+            f"หรือรันบน collection แยก")
+
+
+def validate_stored_payload(payload) -> tuple:
+    """
+    ตรวจ stored payload ว่าถูก contract — ใช้ตอน migrate (M2) กัน malformed policy-v1 หลุดเข้าปลายทาง
+    legacy payload (ไม่มี marker v1) = ผ่าน (migrate corpus เก่าปกติได้); v1 ที่ผิด shape = ไม่ผ่าน
+    """
+    if not payload_is_policy_v1(payload):
+        return True, ""
+    roles = payload.get("allowed_roles")
+    if not isinstance(roles, list):
+        return False, f"allowed_roles_not_list:{type(roles).__name__}"
+    pol = DocumentPolicy(payload.get("acl_schema_version"), payload.get("policy_version"),
+                         payload.get("policy_status"), payload.get("collection_group"),
+                         payload.get("confidentiality_level"), tuple(roles))
+    return validate_document_policy(pol)
+
+
+# ── replace-by-source generation (ปิด B1) + durable manifest (M3) ──────────────
+def plan_source_replacement(chunks: list, rbac_lookup) -> dict:
+    """
+    วางแผน ingest แบบ replace-by-source: **revoke ทุก point เก่าของ source ที่ ingest รอบนี้**
+    ก่อน upsert generation ใหม่ (ปิด B1) — เอกสารที่กลายเป็น QUARANTINED หรือ ACL แคบลง
+    จะไม่ทิ้ง point รุ่นเก่าที่ ACL กว้างกว่าให้ standard retrieval ค้นเจอ
+
+      chunks: list dict มีอย่างน้อย {"source", "id"}
+      return {
+        "delete_sources": [source ที่ต้อง delete-by-source ก่อน upsert],
+        "active":      [{"source","id","policy"}]  (generation ใหม่ที่จะ upsert),
+        "quarantined": [{"source","id","reason"}]  (ไม่เข้า active — ตรวจ workflow แยก),
+      }
+    ผู้เรียก (ingest) ต้อง: delete ทุก source ใน delete_sources ก่อน แล้วจึง upsert เฉพาะ active
+    """
+    active, quarantined = [], []
+    for ch in chunks:
+        pol = resolve_document_policy({"source": ch.get("source")}, rbac_lookup)
+        if is_active(pol):
+            active.append({"source": ch.get("source"), "id": ch.get("id"), "policy": pol})
+        else:
+            quarantined.append({"source": ch.get("source"), "id": ch.get("id"),
+                                "reason": pol.quarantine_reason})
+    delete_sources = sorted({ch.get("source") for ch in chunks
+                             if isinstance(ch.get("source"), str) and ch.get("source")})
+    return {"delete_sources": delete_sources, "active": active, "quarantined": quarantined}
+
+
+def ingest_manifest_entries(plan: dict, run_id: str, ts: str) -> list:
+    """
+    durable manifest ต่อ source (M3) — terminal outcome ACTIVE/QUARANTINED ชัดเจน
+    (ห้ามรายงาน success กำกวมเมื่อทั้งเอกสารถูก quarantine)
+    """
+    def row(source, outcome, reason):
+        src = source if isinstance(source, str) else ""
+        return {"source": src, "source_sha256": hashlib.sha256(src.encode()).hexdigest()[:16],
+                "outcome": outcome, "reason": reason, "policy_version": POLICY_VERSION,
+                "run_id": run_id, "ts": ts}
+    rows = [row(r["source"], ACTIVE, "") for r in plan["active"]]
+    rows += [row(r["source"], QUARANTINED, r["reason"]) for r in plan["quarantined"]]
+    return rows
