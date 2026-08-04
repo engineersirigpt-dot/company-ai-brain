@@ -16,6 +16,7 @@ from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from rbac_config import get_rbac
+import policy  # P1: document-policy resolver — payload v1 + quarantine gate
 
 QDRANT_PATH = "./qdrant_storage"
 COLLECTION_NAME = "company_docs"
@@ -201,8 +202,13 @@ def store_in_qdrant(chunks: list[dict]):
         )
         print(f"Created collection: {COLLECTION_NAME}")
 
-    points = [
-        PointStruct(
+    # P1: resolve document policy → payload v1 (acl_schema_version/policy_version/policy_status
+    # + collection_group/confidentiality_level/allowed_roles). chunk ทุกตัวของ source เดียวกันได้
+    # policy/version เดียวกัน (resolve ตาม source). QUARANTINED = contract ผิด → ไม่เข้า active generation (§4)
+    active, quarantined = [], []
+    for chunk in chunks:
+        pol = policy.resolve_document_policy({"source": chunk["source"]}, get_rbac)
+        pt = PointStruct(
             id=str(chunk["id"]),
             vector=chunk["vector"],
             payload={
@@ -210,14 +216,19 @@ def store_in_qdrant(chunks: list[dict]):
                 "parent_text": chunk.get("parent_text", chunk["text"]),
                 "heading": chunk["heading"],
                 "source": chunk["source"],
-                **get_rbac(chunk["source"]),
+                **pol.payload(),
             },
         )
-        for chunk in chunks
-    ]
+        (active if policy.is_active(pol) else quarantined).append((pt, pol))
 
-    client.upsert(collection_name=COLLECTION_NAME, points=points)
-    print(f"Stored {len(points)} points in Qdrant (collection: {COLLECTION_NAME})")
+    if quarantined:
+        print(f"[QUARANTINE] {len(quarantined)} chunks ไม่เข้า active search (admin ตรวจ workflow แยก):")
+        for _, pol in quarantined[:10]:
+            print(f"  - source-policy ผิด contract: reason={pol.quarantine_reason}")
+
+    client.upsert(collection_name=COLLECTION_NAME, points=[pt for pt, _ in active])
+    print(f"Stored {len(active)} active points in Qdrant (collection: {COLLECTION_NAME})"
+          f"{f', quarantined {len(quarantined)}' if quarantined else ''}")
 
     info = client.get_collection(COLLECTION_NAME)
     print(f"Total vectors in collection: {info.points_count}")

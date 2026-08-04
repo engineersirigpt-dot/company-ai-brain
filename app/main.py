@@ -23,7 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchAny
+from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
+
+import policy  # P1 policy compiler (pure) — auth/effective-ACL/filter contracts
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
@@ -40,10 +42,8 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))  # คำตอบส�
 AUTH_MODE = os.getenv("AUTH_MODE", "warn")
 API_KEYS_FILE = os.getenv("API_KEYS_FILE", "")
 
-VALID_ROLES = [
-    "admin", "management", "production", "prepress", "qc",
-    "engineering", "sales", "purchasing", "logistics", "hr", "it",
-]
+# canonical role set มาจาก policy.KNOWN_ROLES จุดเดียว (กัน drift ระหว่าง auth กับ compiler)
+VALID_ROLES = sorted(policy.KNOWN_ROLES)
 
 
 # ─── Startup / Shutdown ────────────────────────────────────────────────────────
@@ -128,46 +128,60 @@ def load_api_keys(path: str) -> dict:
     return raw
 
 
-def check_service_auth(request: Request, role: str, endpoint: str) -> str:
-    """ตรวจ X-API-Key → service identity + role scope แล้วเขียน audit log
-
-    - off:     ข้ามการตรวจ (log อย่างเดียว)
-    - warn:    key ผิด/เกิน scope → ปล่อยผ่านแต่ log [AUTH-WARN] (ช่วง migrate consumer เดิม)
-    - enforce: key ผิด → 401, role เกิน scope ของ service → 403
-    Client ห้ามเลือก role นอก scope ของ key ตนเอง (กัน role spoofing)
-    """
+def authenticate_service(request: Request) -> policy.ServicePrincipal:
+    """X-API-Key -> ServicePrincipal (trusted identity) — ไม่ตัดสิน enforce ที่นี่ (แยก identity/decision §1)"""
     keys = request.app.state.api_keys
     raw = request.headers.get("X-API-Key", "")
     entry = keys.get(hashlib.sha256(raw.encode()).hexdigest()) if raw else None
+    return policy.authenticate_service(entry, service_hint="unknown", auth_mode=AUTH_MODE)
 
-    service, problem = "unknown", None
-    if entry is None:
-        problem = "missing_or_invalid_key"
-    else:
-        service = entry.get("service", "unnamed")
-        if role not in entry.get("allowed_roles", []):
-            problem = f"role_out_of_scope:{role}"
 
-    # enforce: registry ถูกการันตีว่าไม่ว่างตั้งแต่ startup (fail-closed) จึงบังคับได้เสมอ
-    # ไม่พึ่ง `and keys` แบบเดิม (บั๊ก fail-open เมื่อ registry ว่าง)
-    if problem and AUTH_MODE == "enforce":
-        code = 401 if problem == "missing_or_invalid_key" else 403
-        raise HTTPException(status_code=code, detail=f"Auth failed: {problem}")
-    if problem and AUTH_MODE == "warn":
-        print(f"[AUTH-WARN] service={service} endpoint={endpoint} problem={problem}",
+def authorize(request: Request, role: str, endpoint: str) -> policy.EffectiveAccess:
+    """
+    auth + resolve effective role (fail-closed §6) + audit — ทุก retrieval endpoint ผ่านตรงนี้
+    caller เลือก role นอก scope ไม่ได้; role ว่าง/ไม่รู้จัก -> deny ก่อน retrieval
+    """
+    principal = authenticate_service(request)
+    try:
+        access = policy.resolve_effective_access(principal, role)
+    except policy.AuthError as e:
+        print(f"[AUDIT] ts={time.strftime('%Y-%m-%dT%H:%M:%S%z')} service={principal.service_id} "
+              f"endpoint={endpoint} role={role} decision=DENY code={e.code} reason={e.reason}",
               flush=True)
+        raise HTTPException(status_code=e.code, detail=f"Auth failed: {e.reason}")
+    # warn/off: ผ่านได้แต่ principal ยัง unverified — log ให้เห็นระหว่าง migrate consumer เดิม
+    if not principal.verified:
+        problem = ("missing_or_invalid_key" if not principal.authenticated
+                   else (f"role_out_of_scope:{role}" if role not in principal.allowed_roles else None))
+        if problem and AUTH_MODE == "warn":
+            print(f"[AUTH-WARN] service={principal.service_id} endpoint={endpoint} problem={problem}",
+                  flush=True)
+    print(f"[AUDIT] ts={time.strftime('%Y-%m-%dT%H:%M:%S%z')} service={principal.service_id} "
+          f"endpoint={endpoint} role={access.effective_role} verified={principal.verified}", flush=True)
+    return access
 
-    print(f"[AUDIT] ts={time.strftime('%Y-%m-%dT%H:%M:%S%z')} service={service} "
-          f"endpoint={endpoint} role={role}", flush=True)
-    return service
+
+def to_qdrant_filter(spec: list) -> Filter:
+    """spec (pure, จาก policy.compile_retrieval_filter) -> Qdrant Filter — explicit เสมอ ห้ามคืน None (§5)"""
+    must = []
+    for c in spec:
+        if "value" in c:
+            must.append(FieldCondition(key=c["key"], match=MatchValue(value=c["value"])))
+        else:
+            must.append(FieldCondition(key=c["key"], match=MatchAny(any=c["any"])))
+    return Filter(must=must)
 
 
-def make_rbac_filter(role: str) -> Filter | None:
-    if role == "admin":
-        return None
-    return Filter(
-        must=[FieldCondition(key="allowed_roles", match=MatchAny(any=[role]))]
-    )
+def authorized_points(request: Request, access: policy.EffectiveAccess, vector, top_k: int):
+    """shared authorized retrieval path — /search และ /ask เรียกตัวเดียวกัน; filter อยู่ใน query ก่อน retrieval"""
+    spec = policy.compile_retrieval_filter(access)
+    return request.app.state.qdrant.query_points(
+        collection_name=COLLECTION_NAME,
+        query=vector,
+        query_filter=to_qdrant_filter(spec),
+        limit=top_k,
+        with_payload=True,
+    ).points
 
 
 ANSWER_SYSTEM_PROMPT = """คุณคือผู้ช่วยตอบคำถามจากคลังความรู้ภายในบริษัท (Company AI Brain)
@@ -274,26 +288,14 @@ def health(request: Request):
 
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest, request: Request):
-    check_service_auth(request, req.role, "/search")
-    if req.role not in VALID_ROLES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid role '{req.role}'. Valid roles: {VALID_ROLES}",
-        )
+    access = authorize(request, req.role, "/search")   # auth + effective role (role นอก scope -> 403 ที่นี่)
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     if not 1 <= req.top_k <= 10:
         raise HTTPException(status_code=400, detail="top_k must be 1-10")
 
     vec = embed(request.app.state.tokenizer, request.app.state.model, req.query)
-
-    points = request.app.state.qdrant.query_points(
-        collection_name=COLLECTION_NAME,
-        query=vec,
-        query_filter=make_rbac_filter(req.role),
-        limit=req.top_k,
-        with_payload=True,
-    ).points
+    points = authorized_points(request, access, vec, req.top_k)
 
     return SearchResponse(
         query=req.query,
@@ -317,30 +319,19 @@ def search(req: SearchRequest, request: Request):
 
 @app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest, request: Request):
-    check_service_auth(request, req.role, "/ask")
+    access = authorize(request, req.role, "/ask")   # auth + effective role (fail-closed)
     llm = request.app.state.llm
     if llm is None:
         raise HTTPException(status_code=503,
                             detail="LLM not configured — set ANTHROPIC_API_KEY")
-    if req.role not in VALID_ROLES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid role '{req.role}'. Valid roles: {VALID_ROLES}",
-        )
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     if not 1 <= req.top_k <= 10:
         raise HTTPException(status_code=400, detail="top_k must be 1-10")
 
-    # 1) Retrieval — RBAC filter เหมือน /search ทุกประการ
+    # 1) Retrieval — ใช้ shared authorized path เดียวกับ /search (compiler/filter เดียวกัน §5)
     vec = embed(request.app.state.tokenizer, request.app.state.model, req.question)
-    points = request.app.state.qdrant.query_points(
-        collection_name=COLLECTION_NAME,
-        query=vec,
-        query_filter=make_rbac_filter(req.role),
-        limit=req.top_k,
-        with_payload=True,
-    ).points
+    points = authorized_points(request, access, vec, req.top_k)
 
     if not points:
         return AskResponse(
@@ -394,8 +385,8 @@ def ask(req: AskRequest, request: Request):
 
 @app.get("/collections")
 def list_collections(role: str, request: Request):
-    check_service_auth(request, role, "/collections")
-    if role != "admin":
+    access = authorize(request, role, "/collections")
+    if access.effective_role != "admin":
         raise HTTPException(status_code=403, detail="admin only")
     qdrant = request.app.state.qdrant
 

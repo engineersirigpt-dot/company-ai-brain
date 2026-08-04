@@ -1,63 +1,66 @@
 """
-Unit tests สำหรับ service auth — ไม่ต้อง start model/Qdrant/LLM (รันเร็ว, $0)
+Unit tests สำหรับ service auth contract — P1 (ผ่าน policy.py, ไม่ต้อง start model/Qdrant/LLM)
     python test_auth.py
-ครอบ regression ของบั๊ก fail-open ที่ GPT ชี้ (enforce + registry ว่าง)
+ครอบ enforce/warn/off table + regression บั๊ก fail-open (enforce + registry ว่าง -> 401)
+auth logic ย้ายจาก check_service_auth() มาเป็น authenticate_service()+resolve_effective_access() ใน policy.py
 """
-import hashlib
+import io
 import os
 import sys
-from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(__file__))
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+import policy as P
+
+REG_ENTRY = {"service": "voicebot", "allowed_roles": ["production", "qc"]}
+res = []
+def check(name, cond):
+    res.append(bool(cond))
+    print(f"  {'PASS' if cond else 'FAIL'} — {name}")
 
 
-def _req(keys, header_key=None):
-    r = MagicMock()
-    r.app.state.api_keys = keys
-    r.headers = {"X-API-Key": header_key} if header_key else {}
-    return r
+def call(mode, role, has_key):
+    """จำลอง endpoint auth: authenticate -> resolve ; คืน None ถ้าผ่าน, หรือ HTTP code ถ้า deny"""
+    principal = P.authenticate_service(REG_ENTRY if has_key else None, "hint", mode)
+    try:
+        P.resolve_effective_access(principal, role)
+        return None
+    except P.AuthError as e:
+        return e.code
 
 
-def run():
+print("== enforce ==")
+check("no key -> 401", call("enforce", "qc", False) == 401)
+check("valid key+role -> pass", call("enforce", "qc", True) is None)
+check("role out of scope -> 403", call("enforce", "admin", True) == 403)
+check("unknown role -> 403", call("enforce", "wizard", True) == 403)
+# regression: บั๊กเดิม registry ว่าง + enforce เคยปล่อยผ่าน — ตอนนี้ resolve คืน 401
+# (และ startup lifespan ยัง refuse-to-start เมื่อ enforce + ไม่มี key เลย — fail-closed สองชั้น)
+check("REGRESSION empty registry+enforce -> 401", call("enforce", "qc", False) == 401)
+
+print("== warn ==")
+check("no key -> pass (unverified)", call("warn", "qc", False) is None)
+check("bad role -> pass (unverified)", call("warn", "admin", True) is None)
+check("warn principal.verified == False",
+      P.authenticate_service(REG_ENTRY, "h", "warn").verified is False)
+
+print("== off ==")
+check("no key -> pass", call("off", "qc", False) is None)
+
+# unknown/empty role ถูก deny ทุก mode (malformed input, fail-closed)
+print("== role validation (ทุก mode) ==")
+check("empty role -> 403 แม้ off", call("off", "", True) == 403)
+check("unknown role -> 403 แม้ warn", call("warn", "wizard", True) == 403)
+
+# ── load_api_keys validation — อยู่ใน app.main (ต้อง import heavy deps) ──────────
+print("== load_api_keys validation ==")
+try:
+    import hashlib, json, tempfile
     import app.main as m
+    KH = hashlib.sha256(b"k").hexdigest()
 
-    KEY = "s3cret-voicebot"
-    KH = hashlib.sha256(KEY.encode()).hexdigest()
-    REG = {KH: {"service": "voicebot", "allowed_roles": ["production", "qc"]}}
-    passed = failed = 0
-
-    def check(name, cond):
-        nonlocal passed, failed
-        print(f"  {'PASS' if cond else 'FAIL'} — {name}")
-        passed += cond
-        failed += not cond
-
-    def call(keys, mode, role, header):
-        m.AUTH_MODE = mode
-        from fastapi import HTTPException
-        try:
-            m.check_service_auth(_req(keys, header), role, "/search")
-            return None
-        except HTTPException as e:
-            return e.status_code
-
-    print("== enforce ==")
-    check("no key -> 401",              call(REG, "enforce", "qc", None) == 401)
-    check("valid key+role -> pass",     call(REG, "enforce", "qc", KEY) is None)
-    check("role out of scope -> 403",   call(REG, "enforce", "admin", KEY) == 403)
-    # regression: บั๊กเดิม registry ว่าง + enforce เคยปล่อยผ่าน — ต้อง 401 แล้ว
-    check("REGRESSION empty registry+enforce -> 401",
-          call({}, "enforce", "qc", None) == 401)
-
-    print("== warn ==")
-    check("no key -> pass (log)",       call(REG, "warn", "qc", None) is None)
-    check("bad role -> pass (log)",     call(REG, "warn", "admin", KEY) is None)
-
-    print("== off ==")
-    check("no key -> pass",             call(REG, "off", "qc", None) is None)
-
-    print("== load_api_keys validation ==")
-    import json, tempfile
     def load_tmp(obj):
         p = tempfile.mktemp(suffix=".json")
         json.dump(obj, open(p, "w"))
@@ -67,15 +70,12 @@ def run():
             return False
         finally:
             os.remove(p)
-    check("valid registry loads",       load_tmp(REG) is True)
-    check("short key rejected",         load_tmp({"abc": {"service": "x"}}) is False)
-    check("unknown role rejected",
-          load_tmp({KH: {"service": "x", "allowed_roles": ["wizard"]}}) is False)
-    check("missing service rejected",   load_tmp({KH: {"allowed_roles": []}}) is False)
+    check("valid registry loads", load_tmp({KH: {"service": "voicebot", "allowed_roles": ["qc"]}}) is True)
+    check("short key rejected", load_tmp({"abc": {"service": "x"}}) is False)
+    check("unknown role rejected", load_tmp({KH: {"service": "x", "allowed_roles": ["wizard"]}}) is False)
+    check("missing service rejected", load_tmp({KH: {"allowed_roles": []}}) is False)
+except ImportError as e:
+    print(f"  SKIP — app.main import ไม่ได้ในสภาพแวดล้อมนี้ (heavy deps): {type(e).__name__}: {e}")
 
-    print(f"\n{passed} passed, {failed} failed")
-    sys.exit(1 if failed else 0)
-
-
-if __name__ == "__main__":
-    run()
+print(f"\n{sum(res)}/{len(res)} passed")
+sys.exit(0 if all(res) else 1)
