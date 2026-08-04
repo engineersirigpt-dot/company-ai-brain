@@ -1,5 +1,0 @@
-fastapi>=0.141
-uvicorn[standard]>=0.30
-pydantic>=2.10
-psycopg2-binary>=2.9
-httpx>=0.27          # test only — fastapi.testclient (run_api_tests.sh)
