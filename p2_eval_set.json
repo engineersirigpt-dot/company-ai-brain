@@ -1,0 +1,1224 @@
+[
+ {
+  "query_id": "q-000",
+  "query": "ขั้นตอนการเสนอราคางานพิมพ์ทำอย่างไร",
+  "role": "sales",
+  "lang": "th",
+  "category": "direct",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-001",
+  "query": "quote งานพิมพ์ มีขั้นตอนอะไรบ้าง",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-002",
+  "query": "ใบเสนอราคาต้องขออนุมัติเมื่อไร",
+  "role": "sales",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-003",
+  "query": "quotation ต้อง approve ตอนไหน",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-004",
+  "query": "ลูกค้าขอแก้สเปกต้องทำใบเสนอราคาอย่างไร",
+  "role": "sales",
+  "lang": "th",
+  "category": "current-superseded",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "f7f906ff-eb29-5be3-9832-523dc7b26b87": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-005",
+  "query": "revise quotation ทำยังไง",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "f7f906ff-eb29-5be3-9832-523dc7b26b87": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-006",
+  "query": "ขั้นตอนการเรียกคืนผลิตภัณฑ์จากลูกค้า",
+  "role": "qc",
+  "lang": "th",
+  "category": "direct",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "881011b0-8745-5400-857b-ddae45515590": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-007",
+  "query": "product recall procedure คืออะไร",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "881011b0-8745-5400-857b-ddae45515590": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-008",
+  "query": "การซ้อม mock recall ต้องทำบ่อยแค่ไหน",
+  "role": "qc",
+  "lang": "th",
+  "category": "table-row",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "8865c83d-8cc9-5f12-b0fa-e7f8feb364fb": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-009",
+  "query": "mock recall ปีละกี่ครั้ง",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "8865c83d-8cc9-5f12-b0fa-e7f8feb364fb": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-010",
+  "query": "ต้องรายงานผลการเรียกคืนภายในกี่วัน",
+  "role": "qc",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "71876cf1-7234-5851-9a99-61461bfffbdc": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-011",
+  "query": "recall report ส่งเมื่อไร",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "71876cf1-7234-5851-9a99-61461bfffbdc": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-012",
+  "query": "การอบรมพนักงานใหม่มีหัวข้ออะไรบ้าง",
+  "role": "hr",
+  "lang": "th",
+  "category": "direct",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-013",
+  "query": "new employee training หัวข้ออะไร",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-014",
+  "query": "โครงสร้างเงินเดือนและโบนัสเป็นอย่างไร",
+  "role": "hr",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "e2d19a82-a7d1-58ce-a364-18486d9aae08": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-015",
+  "query": "salary structure บริษัทเป็นยังไง",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "e2d19a82-a7d1-58ce-a364-18486d9aae08": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-016",
+  "query": "ลาป่วยเกินกี่วันต้องมีใบรับรองแพทย์",
+  "role": "hr",
+  "lang": "th",
+  "category": "table-row",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "b6e07cbc-e21c-5a41-af9b-9768531cfea8": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-017",
+  "query": "sick leave เกินกี่วันต้องมีใบแพทย์",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "b6e07cbc-e21c-5a41-af9b-9768531cfea8": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-018",
+  "query": "ขั้นตอนการจัดซื้อวัตถุดิบและการขออนุมัติ",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "direct",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-019",
+  "query": "purchasing วัตถุดิบ ขั้นตอนอะไร",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-020",
+  "query": "ต้องประเมิน vendor บ่อยแค่ไหน",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "table-row",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-021",
+  "query": "vendor evaluation ทุกกี่เดือน",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-022",
+  "query": "การจัดซื้อเร่งด่วนทำได้ไหม",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-023",
+  "query": "urgent purchase ทำยังไง",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-024",
+  "query": "การควบคุมสัญลักษณ์ FSC บนงานพิมพ์",
+  "role": "qc",
+  "lang": "th",
+  "category": "direct",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "5da3b02e-99fa-52b3-b53b-8ec27f87fce1": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-025",
+  "query": "FSC logo control ทำยังไง",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "5da3b02e-99fa-52b3-b53b-8ec27f87fce1": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-026",
+  "query": "ค่า Delta-E ที่ยอมรับได้เท่าไร",
+  "role": "qc",
+  "lang": "th",
+  "category": "table-row",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-027",
+  "query": "Delta-E ยอมรับได้เท่าไหร่",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-028",
+  "query": "เกณฑ์ของเสียงานพิมพ์มีอะไรบ้าง",
+  "role": "qc",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-029",
+  "query": "print defect criteria คืออะไร",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-030",
+  "query": "การตั้งค่าเครื่องพิมพ์ก่อนผลิต",
+  "role": "production",
+  "lang": "th",
+  "category": "direct",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "7b92adec-ba89-5625-aef8-4cbe33f634e8": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-031",
+  "query": "press setup ก่อนผลิตทำยังไง",
+  "role": "production",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7b92adec-ba89-5625-aef8-4cbe33f634e8": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-032",
+  "query": "ขั้นตอน make-ready ลดเวลา setup อย่างไร",
+  "role": "production",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "d0af54c8-a118-5a71-b50f-615673455468": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-033",
+  "query": "make-ready ลด setup time ยังไง",
+  "role": "production",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "d0af54c8-a118-5a71-b50f-615673455468": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-034",
+  "query": "เป้าหมายของเสียในการผลิตไม่เกินเท่าไร",
+  "role": "production",
+  "lang": "th",
+  "category": "table-row",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-035",
+  "query": "production waste เป้าไม่เกินกี่ %",
+  "role": "production",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-036",
+  "query": "ขั้นตอนการจัดส่งและ export",
+  "role": "logistics",
+  "lang": "th",
+  "category": "direct",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "2e8b072e-98b4-5992-88e2-87cae2f89c88": 3
+  },
+  "relevant_sources": [
+   "SOP-LOG-755"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-037",
+  "query": "shipping export procedure คืออะไร",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "2e8b072e-98b4-5992-88e2-87cae2f89c88": 3
+  },
+  "relevant_sources": [
+   "SOP-LOG-755"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-038",
+  "query": "การวางแผนขนส่งลดค่าใช้จ่ายอย่างไร",
+  "role": "logistics",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7d6e32d8-7bf8-5f87-bc24-561275b42175": 3
+  },
+  "relevant_sources": [
+   "SOP-LOG-755"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-039",
+  "query": "transport planning ลดต้นทุนยังไง",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7d6e32d8-7bf8-5f87-bc24-561275b42175": 3
+  },
+  "relevant_sources": [
+   "SOP-LOG-755"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-040",
+  "query": "การบำรุงรักษาเครื่องจักร dobot ทำอย่างไร",
+  "role": "engineering",
+  "lang": "th",
+  "category": "direct",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "90bbefcd-6d5f-581b-b7e1-27301c57dadd": 3
+  },
+  "relevant_sources": [
+   "SOP-ENG-DOBOT"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-041",
+  "query": "dobot maintenance ทำยังไง",
+  "role": "engineering",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "90bbefcd-6d5f-581b-b7e1-27301c57dadd": 3
+  },
+  "relevant_sources": [
+   "SOP-ENG-DOBOT"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-042",
+  "query": "spec แรงบิดของแขนกลอยู่ที่เท่าไร",
+  "role": "engineering",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "e75d00bb-0205-58c4-93c4-bd24984e7aa4": 3
+  },
+  "relevant_sources": [
+   "SOP-ENG-DOBOT"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-043",
+  "query": "torque spec แขนกล dobot",
+  "role": "engineering",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "e75d00bb-0205-58c4-93c4-bd24984e7aa4": 3
+  },
+  "relevant_sources": [
+   "SOP-ENG-DOBOT"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-044",
+  "query": "การผลิตกล่องลูกฟูกตรวจอะไรบ้าง",
+  "role": "production",
+  "lang": "th",
+  "category": "direct",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "df212dde-c22f-5a33-a2a5-dbdd43cf7fe8": 3
+  },
+  "relevant_sources": [
+   "SOP-PKG-755-06"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-045",
+  "query": "corrugated box production ตรวจอะไร",
+  "role": "production",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "df212dde-c22f-5a33-a2a5-dbdd43cf7fe8": 3
+  },
+  "relevant_sources": [
+   "SOP-PKG-755-06"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-046",
+  "query": "การรัดฟิล์มพาเลทกันสินค้าล้มทำอย่างไร",
+  "role": "production",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "51c571c6-5542-5e75-bc4d-1081b5ee079d": 3
+  },
+  "relevant_sources": [
+   "SOP-PKG-755-06"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-047",
+  "query": "pallet wrap กันล้มยังไง",
+  "role": "production",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "51c571c6-5542-5e75-bc4d-1081b5ee079d": 3
+  },
+  "relevant_sources": [
+   "SOP-PKG-755-06"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-048",
+  "query": "การเข้าใช้ระบบ Manager AE ต้องทำอย่างไร",
+  "role": "it",
+  "lang": "th",
+  "category": "direct",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "64d04951-d287-5002-bc21-8427c71d2e81": 3
+  },
+  "relevant_sources": [
+   "SOP-IT-MGR"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-049",
+  "query": "Manager AE login policy",
+  "role": "it",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "64d04951-d287-5002-bc21-8427c71d2e81": 3
+  },
+  "relevant_sources": [
+   "SOP-IT-MGR"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-050",
+  "query": "การสำรองข้อมูลระบบทำบ่อยแค่ไหน",
+  "role": "it",
+  "lang": "th",
+  "category": "table-row",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "bcfb222d-80e3-5e4d-888d-1bb4419da3a0": 3
+  },
+  "relevant_sources": [
+   "SOP-IT-MGR"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-051",
+  "query": "system backup ทุกกี่วัน",
+  "role": "it",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "bcfb222d-80e3-5e4d-888d-1bb4419da3a0": 3
+  },
+  "relevant_sources": [
+   "SOP-IT-MGR"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-052",
+  "query": "ต้องติดตามลูกค้าหลังส่งใบเสนอราคาภายในกี่วัน",
+  "role": "sales",
+  "lang": "th",
+  "category": "table-row",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4bc5701c-6504-5969-878f-605d71b3feb3": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-053",
+  "query": "quotation follow-up ภายในกี่วัน",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4bc5701c-6504-5969-878f-605d71b3feb3": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-054",
+  "query": "PR และ PO ต่างกันอย่างไรในการจัดซื้อ",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "acronym-transliteration",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-055",
+  "query": "PR vs PO ในการ purchase",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-056",
+  "query": "พนักงานใหม่ต้องอบรม ISO และ KPI ไหม",
+  "role": "hr",
+  "lang": "th",
+  "category": "acronym-transliteration",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-057",
+  "query": "new emp ISO KPI training",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
+  },
+  "relevant_sources": [
+   "SOP-HR-TRAIN"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-058",
+  "query": "การวัดค่า Delta-E เทียบ proof ทำอย่างไร",
+  "role": "qc",
+  "lang": "th",
+  "category": "acronym-transliteration",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-059",
+  "query": "measure Delta-E vs proof",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-060",
+  "query": "งานที่ waste เกิน 5% ถือว่าไม่ผ่านใช่ไหม",
+  "role": "production",
+  "lang": "th",
+  "category": "negation",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-061",
+  "query": "waste เกิน 5% ไม่ผ่านใช่ไหม",
+  "role": "production",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
+  },
+  "relevant_sources": [
+   "SOP-PROD-710"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-062",
+  "query": "งานที่ไม่มีจุดสกปรกถือว่าผ่านเกณฑ์ใช่ไหม",
+  "role": "qc",
+  "lang": "th",
+  "category": "negation",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-063",
+  "query": "งานไม่มี defect ผ่านไหม",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
+  },
+  "relevant_sources": [
+   "SOP-QC-423"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-064",
+  "query": "ถ้าสินค้ายังไม่ถึงลูกค้าต้องเปิด recall ไหม",
+  "role": "qc",
+  "lang": "th",
+  "category": "negation",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "881011b0-8745-5400-857b-ddae45515590": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-065",
+  "query": "ยังไม่ส่งลูกค้า ต้อง recall ไหม",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "881011b0-8745-5400-857b-ddae45515590": 3
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-066",
+  "query": "การจัดซื้อปกติใช้ vendor สำรองได้ไหม",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "negation",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-067",
+  "query": "งานปกติใช้ backup vendor ได้ไหม",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-068",
+  "query": "การจัดทำ JOB Packaging WI-722 ทำอย่างไร",
+  "role": "sales",
+  "lang": "th",
+  "category": "lexical-overlap-wrong-code",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7dace0b4-9e0a-5425-94b7-ab196d7a825c": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-722"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-069",
+  "query": "WI-722 job packaging ทำยังไง",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "thai-eng-mix",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7dace0b4-9e0a-5425-94b7-ab196d7a825c": 3
+  },
+  "relevant_sources": [
+   "SOP-SALES-722"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-070",
+  "query": "การเสนอราคาและการอนุมัติใบเสนอราคาทำอย่างไร",
+  "role": "sales",
+  "lang": "th",
+  "category": "graded-multi",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3,
+   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 2
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-071",
+  "query": "quotation และ approval flow",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "graded-multi",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3,
+   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 2
+  },
+  "relevant_sources": [
+   "SOP-SALES-721"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-072",
+  "query": "ขั้นตอนการเรียกคืนและการรายงานผล",
+  "role": "qc",
+  "lang": "th",
+  "category": "graded-multi",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "881011b0-8745-5400-857b-ddae45515590": 3,
+   "71876cf1-7234-5851-9a99-61461bfffbdc": 2
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-073",
+  "query": "recall steps และ report",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "graded-multi",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "881011b0-8745-5400-857b-ddae45515590": 3,
+   "71876cf1-7234-5851-9a99-61461bfffbdc": 2
+  },
+  "relevant_sources": [
+   "SOP-RECALL-852"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-074",
+  "query": "การจัดซื้อและการประเมิน vendor",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "graded-multi",
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1533ae03-951c-521d-87ab-0f51f428d29a": 3,
+   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 2
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ },
+ {
+  "query_id": "q-075",
+  "query": "purchasing และ vendor evaluation",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "graded-multi",
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "1533ae03-951c-521d-87ab-0f51f428d29a": 3,
+   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 2
+  },
+  "relevant_sources": [
+   "SOP-PUR-741"
+  ],
+  "label_status": "draft"
+ }
+]

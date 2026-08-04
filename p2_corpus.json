@@ -1,0 +1,507 @@
+{
+ "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": {
+  "source": "SOP-SALES-721",
+  "rerank_text": "ขั้นตอนการเสนอราคางานพิมพ์ (WI-721) รับ enquiry จากลูกค้า ตรวจสเปกงานพิมพ์ จำนวน ขนาด กระดาษ แล้วคำนวณราคาตาม cost sheet ก่อนออกใบเสนอราคา",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "6d942a50-ec0e-52b7-bc8a-2814f536b38b": {
+  "source": "SOP-SALES-721",
+  "rerank_text": "การอนุมัติใบเสนอราคา ใบเสนอราคาเกิน 500,000 บาท ต้องผ่านการอนุมัติจากผู้จัดการฝ่ายขาย",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "f7f906ff-eb29-5be3-9832-523dc7b26b87": {
+  "source": "SOP-SALES-721",
+  "rerank_text": "การแก้ไขใบเสนอราคา ลูกค้าขอแก้สเปกให้ออกใบเสนอราคาฉบับใหม่ ยกเลิกฉบับเดิม ห้ามแก้ทับ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "4bc5701c-6504-5969-878f-605d71b3feb3": {
+  "source": "SOP-SALES-721",
+  "rerank_text": "การติดตามใบเสนอราคา ติดตามลูกค้าภายใน 7 วันหลังส่งใบเสนอราคา บันทึกผลใน CRM",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "881011b0-8745-5400-857b-ddae45515590": {
+  "source": "SOP-RECALL-852",
+  "rerank_text": "ขั้นตอนการเรียกคืนผลิตภัณฑ์ (QP-852) เมื่อพบสินค้าไม่ได้มาตรฐานที่ส่งถึงลูกค้าแล้ว ให้แจ้ง QMR เปิด recall notice ระบุ lot ที่กระทบและติดตามคืน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "8865c83d-8cc9-5f12-b0fa-e7f8feb364fb": {
+  "source": "SOP-RECALL-852",
+  "rerank_text": "การซ้อม Mock Recall ซ้อม mock recall อย่างน้อยปีละ 1 ครั้ง วัดเวลาติดตามสินค้าคืนไม่เกิน 4 ชั่วโมง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "71876cf1-7234-5851-9a99-61461bfffbdc": {
+  "source": "SOP-RECALL-852",
+  "rerank_text": "รายงานผลการเรียกคืน สรุปจำนวนที่เรียกคืนได้เทียบยอดที่กระจาย รายงานต่อผู้บริหารภายใน 3 วัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": {
+  "source": "SOP-HR-TRAIN",
+  "rerank_text": "หัวข้อการอบรมพนักงานใหม่ (iso_jd) พนักงานใหม่ต้องอบรม safety, คุณภาพ ISO, และ JD ของตำแหน่งภายใน 30 วันแรก",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "e2d19a82-a7d1-58ce-a364-18486d9aae08": {
+  "source": "SOP-HR-TRAIN",
+  "rerank_text": "โครงสร้างเงินเดือนและสวัสดิการ เงินเดือน ค่ากะ และโบนัสประจำปีตามผลประเมิน KPI",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "b6e07cbc-e21c-5a41-af9b-9768531cfea8": {
+  "source": "SOP-HR-TRAIN",
+  "rerank_text": "ระเบียบการลา ลาป่วยต้องมีใบรับรองแพทย์เมื่อลาเกิน 3 วัน ลากิจล่วงหน้า 1 วัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "1533ae03-951c-521d-87ab-0f51f428d29a": {
+  "source": "SOP-PUR-741",
+  "rerank_text": "ขั้นตอนการจัดซื้อวัตถุดิบ (QP-741) เปิด PR เมื่อ stock ต่ำกว่า reorder point จัดซื้อขออนุมัติผู้จัดการก่อนออก PO ให้ vendor ที่อนุมัติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": {
+  "source": "SOP-PUR-741",
+  "rerank_text": "การประเมิน vendor ประเมิน vendor ทุก 6 เดือนด้านคุณภาพ ราคา และการส่งมอบตรงเวลา",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "3bcf8c92-352e-5b8f-a184-176839b82a16": {
+  "source": "SOP-PUR-741",
+  "rerank_text": "การจัดซื้อเร่งด่วน กรณีเร่งด่วนใช้ vendor สำรองได้ แต่ต้องแจ้งเหตุผลและขออนุมัติย้อนหลังภายใน 24 ชม.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "5da3b02e-99fa-52b3-b53b-8ec27f87fce1": {
+  "source": "SOP-QC-423",
+  "rerank_text": "การควบคุมสัญลักษณ์ FSC (WI-423) ตรวจสัญลักษณ์ FSC บนงานพิมพ์ให้ตรงใบอนุญาต ห้ามใช้กับงานที่ไม่ได้ certified",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "92839a3e-93bc-57a9-95ef-8e1f802d05d1": {
+  "source": "SOP-QC-423",
+  "rerank_text": "การตรวจสีงานพิมพ์ วัดค่า Delta-E เทียบ proof ที่ลูกค้าอนุมัติ ยอมรับได้ไม่เกิน 3.0",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": {
+  "source": "SOP-QC-423",
+  "rerank_text": "เกณฑ์ของเสียงานพิมพ์ งานที่มีจุดสกปรก เหลื่อมสี หรือหมึกเลอะเกินเกณฑ์ AQL ถือเป็นของเสีย",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "7b92adec-ba89-5625-aef8-4cbe33f634e8": {
+  "source": "SOP-PROD-710",
+  "rerank_text": "การตั้งค่าเครื่องพิมพ์ (QP-710) ตั้งค่า register หมึก และแรงกดตามใบสั่งงาน ทดพิมพ์ก่อนผลิตจริงและให้ QC อนุมัติ first article",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "d0af54c8-a118-5a71-b50f-615673455468": {
+  "source": "SOP-PROD-710",
+  "rerank_text": "ขั้นตอน make-ready เตรียมเพลท หมึก และกระดาษให้ตรง job ลดเวลา setup ด้วย checklist",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": {
+  "source": "SOP-PROD-710",
+  "rerank_text": "การควบคุมของเสียในการผลิต บันทึกยอด waste ต่อ job เทียบเป้าหมายไม่เกิน 5%",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "2e8b072e-98b4-5992-88e2-87cae2f89c88": {
+  "source": "SOP-LOG-755",
+  "rerank_text": "ขั้นตอนการจัดส่งและ export (WI-755-05) จัดเตรียมเอกสาร packing list และ invoice ตรวจจำนวนก่อนขึ้นรถ ยืนยันกับลูกค้าปลายทาง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "7d6e32d8-7bf8-5f87-bc24-561275b42175": {
+  "source": "SOP-LOG-755",
+  "rerank_text": "การวางแผนขนส่ง รวม order ปลายทางเดียวกันเพื่อลดเที่ยว ประหยัดค่าขนส่ง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "90bbefcd-6d5f-581b-b7e1-27301c57dadd": {
+  "source": "SOP-ENG-DOBOT",
+  "rerank_text": "การบำรุงรักษาเครื่องจักร dobot บำรุงรักษาเชิงป้องกันตามรอบ ตรวจ sensor และหล่อลื่นข้อต่อทุกสัปดาห์ บันทึกใน log",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "e75d00bb-0205-58c4-93c4-bd24984e7aa4": {
+  "source": "SOP-ENG-DOBOT",
+  "rerank_text": "แบบวิศวกรรมและ spec เครื่อง spec แรงบิดและระยะการเคลื่อนที่ของแขนกลตามคู่มือผู้ผลิต",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "df212dde-c22f-5a33-a2a5-dbdd43cf7fe8": {
+  "source": "SOP-PKG-755-06",
+  "rerank_text": "การผลิตกล่องลูกฟูก (WI-755-06) ขึ้นรูปกล่องลูกฟูกตามแบบ ตรวจความแข็งแรงขอบและรอยพับก่อนบรรจุ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PACKAGING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "logistics",
+    "qc",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "51c571c6-5542-5e75-bc4d-1081b5ee079d": {
+  "source": "SOP-PKG-755-06",
+  "rerank_text": "การห่อและรัดพาเลท รัดฟิล์มพาเลทให้แน่นกันสินค้าล้มระหว่างขนส่ง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PACKAGING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "logistics",
+    "qc",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "64d04951-d287-5002-bc21-8427c71d2e81": {
+  "source": "SOP-IT-MGR",
+  "rerank_text": "การเข้าใช้ระบบ Manager AE ผู้ใช้ต้อง login ด้วยบัญชีบริษัท เปลี่ยนรหัสผ่านทุก 90 วัน ห้ามแชร์บัญชี",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "bcfb222d-80e3-5e4d-888d-1bb4419da3a0": {
+  "source": "SOP-IT-MGR",
+  "rerank_text": "การสำรองข้อมูลระบบ สำรองฐานข้อมูลทุกคืน เก็บ 30 วัน ทดสอบ restore ทุกไตรมาส",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "7dace0b4-9e0a-5425-94b7-ab196d7a825c": {
+  "source": "SOP-SALES-722",
+  "rerank_text": "การจัดทำ JOB Packaging (WI-722) จัดทำใบ JOB สำหรับงานบรรจุภัณฑ์ ระบุสเปกกล่องและจำนวน ไม่ใช่ขั้นตอนเสนอราคา",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ]
+  }
+ },
+ "706dc63c-2144-5f80-85ee-ebb8696a6e18": {
+  "source": "SOP-QC-760",
+  "rerank_text": "การสอบเทียบเครื่องมือวัด (QP-760) สอบเทียบเครื่องวัดสีและตาชั่งตามรอบ ไม่เกี่ยวกับเกณฑ์ของเสีย",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ]
+  }
+ }
+}
