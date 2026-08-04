@@ -1,45 +1,69 @@
 {
-  "_doc": "Independent permission oracle (Codex B3). ตั้งใจไม่ generate จาก rbac_config.py — นี่คือสิทธิ์ที่ 'ธุรกิจอนุมัติ' ให้รีวิวด้วยตาแยกจาก config. ถ้า config ถูกแก้ผิด (เช่นเปิด SALES ให้ qc) test นี้ต้องจับได้เพราะ manifest ไม่ขยับตาม. แต่ละ canary เป็น synthetic point ที่จะ ingest เข้า collection ทดสอบใน P5b (ยังไม่รันจริงตอนนี้). point_id/canary_token เป็น synthetic ล้วน ไม่ใช่ข้อมูลจริง.",
+  "_doc": "Independent permission oracle (Codex B3). ตั้งใจไม่ generate จาก rbac_config.py — เป็นสิทธิ์ที่ 'ธุรกิจอนุมัติ' ให้รีวิวด้วยตาแยก. runner จะ: (1) validate_manifest ก่อนยิง API, (2) ต่อ canary ทดสอบ positive ให้ทุก role ใน authorized_roles และ negative ให้ทุก role ใน (known_roles - authorized_roles). point_id เป็น uuid5(NAMESPACE_DNS,'kb-canary.'+canary_name) → deterministic + Qdrant-compatible. P5b ingest ต้อง map authorized_roles -> payload 'allowed_roles' (ชื่อ field ของ Qdrant filter) อย่าง explicit. synthetic ล้วน ไม่ใช่ข้อมูลจริง.",
+  "known_roles": ["admin", "management", "hr", "sales", "purchasing", "qc", "production", "prepress", "engineering", "logistics", "it"],
   "canaries": [
     {
-      "point_id": "CANARY-RECALL-001",
+      "canary_name": "CANARY-RECALL-001",
+      "point_id": "ed8e586a-602e-5eca-8873-f4fc345867d5",
       "canary_token": "ZZCAN-RECALL-7Q3",
       "collection": "RECALL",
       "authorized_roles": ["qc", "management", "admin"],
-      "positive_role": "qc",
-      "forbidden_roles": ["logistics", "production", "sales", "prepress"],
       "probe_query": "ขั้นตอนการเรียกคืนผลิตภัณฑ์และการซ้อม mock recall",
       "banned_tokens": ["ZZCAN-RECALL-7Q3"]
     },
     {
-      "point_id": "CANARY-SALES-001",
+      "canary_name": "CANARY-SALES-001",
+      "point_id": "90184f24-7a3c-5f19-a2ed-f3252279bf84",
       "canary_token": "ZZCAN-SALES-4M8",
       "collection": "SALES",
       "authorized_roles": ["sales", "management", "admin"],
-      "positive_role": "sales",
-      "forbidden_roles": ["qc", "production", "prepress", "logistics"],
       "probe_query": "ขั้นตอนการขายและการเสนอราคางานให้ลูกค้า",
       "banned_tokens": ["ZZCAN-SALES-4M8"]
     },
     {
-      "point_id": "CANARY-HR-001",
+      "canary_name": "CANARY-HR-001",
+      "point_id": "a7b8dc60-ca54-5857-bdf9-191e2680b4b7",
       "canary_token": "ZZCAN-HR-9F2",
       "collection": "HR",
       "authorized_roles": ["hr", "management", "admin"],
-      "positive_role": "hr",
-      "forbidden_roles": ["production", "qc", "sales", "logistics", "prepress"],
       "probe_query": "หัวข้อการอบรมพนักงานใหม่และรายละเอียดเงินเดือน",
       "banned_tokens": ["ZZCAN-HR-9F2"]
     },
     {
-      "point_id": "CANARY-PURCHASING-001",
+      "canary_name": "CANARY-PURCHASING-001",
+      "point_id": "f63e997e-f710-5128-b9d8-49ca0ee1312a",
       "canary_token": "ZZCAN-PUR-1K5",
       "collection": "PURCHASING",
       "authorized_roles": ["purchasing", "management", "admin"],
-      "positive_role": "purchasing",
-      "forbidden_roles": ["prepress", "production", "qc", "logistics"],
       "probe_query": "ขั้นตอนการจัดซื้อวัตถุดิบและการขออนุมัติ",
       "banned_tokens": ["ZZCAN-PUR-1K5"]
+    },
+    {
+      "canary_name": "CANARY-LOGISTICS-001",
+      "point_id": "27214d58-67f1-592b-9a90-d227ae177fca",
+      "canary_token": "ZZCAN-LOG-3H9",
+      "collection": "LOGISTICS",
+      "authorized_roles": ["logistics", "management", "admin"],
+      "probe_query": "ขั้นตอนการจัดส่งและการวางแผนขนส่งสินค้า",
+      "banned_tokens": ["ZZCAN-LOG-3H9"]
+    },
+    {
+      "canary_name": "CANARY-ENGINEERING-001",
+      "point_id": "c31e09e7-b58c-5627-bfe6-dde27550e8c7",
+      "canary_token": "ZZCAN-ENG-6D2",
+      "collection": "ENGINEERING",
+      "authorized_roles": ["engineering", "production", "management", "admin"],
+      "probe_query": "ข้อกำหนดการบำรุงรักษาเครื่องจักรและแบบวิศวกรรม",
+      "banned_tokens": ["ZZCAN-ENG-6D2"]
+    },
+    {
+      "canary_name": "CANARY-PRODUCTION-001",
+      "point_id": "43570599-02f2-5aca-8b4a-0b174b379f6c",
+      "canary_token": "ZZCAN-PRD-8W4",
+      "collection": "PRODUCTION",
+      "authorized_roles": ["production", "qc", "prepress", "engineering", "management", "admin"],
+      "probe_query": "ขั้นตอนการผลิตและการตั้งค่าเครื่องพิมพ์",
+      "banned_tokens": ["ZZCAN-PRD-8W4"]
     }
   ]
 }

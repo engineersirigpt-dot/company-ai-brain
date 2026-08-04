@@ -1,15 +1,17 @@
 """
-Permission-leakage + ask-quality harness — P5a rev2 (ปิด Codex FIX-THEN-GO B1-B4/M1-M4)
+Permission-leakage (security) + ask-quality harness — P5a rev2.1 (ปิด Codex FIX-THEN-GO รอบสอง)
 
-หลัก permission test = **/search + synthetic canary manifest** ($0, deterministic, ไม่ผ่าน LLM):
-  ต่อ canary หนึ่งตัว ทำ 'คู่' เสมอ (M1):
-    positive = role ที่มีสิทธิ์ → ต้องเจอ point_id/canary
-    negative = role ที่ไม่มีสิทธิ์ → ต้องไม่เจอ
-  suite เขียวได้เฉพาะเมื่อทุก pair == PASS (deny/empty ทั้งชุด = INCONCLUSIVE = fail — ปิด B1)
-/ask ใช้วัด citation-integrity / no-answer แยกแกน (ไม่ปนกับ permission verdict — B2)
+สองแทร็คแยกกันชัด (Codex M2):
+  SECURITY gate = /search + synthetic canary manifest + point-id oracle ($0, deterministic)
+      ต่อ canary: positive ให้ **ทุก** authorized role (ต้องเจอ) + negative ให้ **ทุก** denied role (ต้องไม่เจอ)
+      + auth preflight: spoof role ต้องได้ **exact 403** จึงถือ role-scope VERIFIED
+      exit code ของ security = permission_ok และ (auth VERIFIED เมื่อ auth-gated)
+  QUALITY track = /ask citation/no-answer/hit — รายงาน metric ครบ แต่ **ไม่ปน** security exit code
+      (มี quality_gate แยกสำหรับ P5b)
 
-รันจริง (บน server ที่ stack พร้อม + synthetic canary corpus ingest แล้ว = P5b):
-    KB_EVAL_KEYS='{"qc":"k1","logistics":"k2",...}' python ask_eval.py --api http://localhost:8002
+รันจริง (บน stack + synthetic canary corpus = P5b):
+    KB_EVAL_KEYS='{"qc":"k1","sales":"k2",...}' python ask_eval.py --api http://localhost:8002
+    (ต้องมี role-scoped key ครบทุก role ใน manifest.known_roles ที่จะทดสอบ; retrieval-only ใช้ --retrieval-only)
 ทุก decision ที่ตัด exit code อยู่ใน eval_contract.py (pure) — harness-test ขับผ่าน call_fn ได้โดยไม่ต้องมี stack
 """
 import argparse
@@ -26,13 +28,26 @@ TOP_K = 5
 
 
 # ── transport layer ────────────────────────────────────────────────────────────
+def normalize_response(path: str, status, exc, resp, malformed: bool = False) -> dict:
+    """
+    raw (status/exc/body) → normalized record {transport, status, points, answer, error}
+    แยกจาก network เพื่อ test seam (200 `{}` / `[{}]` → MALFORMED) ได้ offline (B1/M3)
+    """
+    transport = ec.classify_transport(status, exc, malformed)
+    points, answer = [], ""
+    if transport == ec.SUCCESS:
+        try:
+            points = ec.validate_search_response(resp) if path == "/search" \
+                else ec.validate_ask_response(resp)
+            answer = resp.get("answer", "") if isinstance(resp, dict) else ""
+        except ValueError as e:
+            transport, exc = ec.MALFORMED, e
+    return {"transport": transport, "status": status, "points": points,
+            "answer": answer, "error": (str(exc) if exc else None)}
+
+
 def http_call(api: str, path: str, body: dict, key: str, timeout: int = 180) -> dict:
-    """
-    เรียก API จริง → normalized record {transport, status, points, answer, error}
-    - malformed/partial JSON / ผิด shape → MALFORMED (M3) โดยไม่เก็บ raw body (กันข้อมูลลับ)
-    - ไม่กลืน error เป็น points ว่าง (B3 เดิม)
-    """
-    key_of = "results" if path == "/search" else "citations"
+    """เรียก API จริง → normalize_response — ไม่กลืน error เป็น points ว่าง"""
     headers = {"Content-Type": "application/json"}
     if key:
         headers["X-API-Key"] = key
@@ -49,88 +64,75 @@ def http_call(api: str, path: str, body: dict, key: str, timeout: int = 180) -> 
         exc = e
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         malformed, exc = True, e
-
-    transport = ec.classify_transport(status, exc, malformed)
-    points, answer = [], ""
-    if transport == ec.SUCCESS:
-        try:
-            points = ec.extract_points(resp, key_of)
-            answer = resp.get("answer", "") if isinstance(resp, dict) else ""
-        except ValueError as e:
-            transport, exc = ec.MALFORMED, e
-    return {"transport": transport, "status": status, "points": points,
-            "answer": answer, "error": (str(exc) if exc else None)}
+    return normalize_response(path, status, exc, resp, malformed)
 
 
-def _texts(points: list[dict]) -> list[str]:
+def _texts(points: list) -> list:
     return [f"{p.get('content', '')} {p.get('preview', '')}" for p in points]
 
 
-# ── permission suite (manifest-driven /search pairs) ───────────────────────────
-def run_permission_suite(call_fn, manifest: dict) -> list[dict]:
-    """
-    call_fn(path, body, role) -> record (inject ได้เพื่อ test offline)
-    คืน list ของ pair result: {canary, positive_role, forbidden_role, verdict, ...}
-    """
+def _probe(rec: dict, cid: str, tok: str, banned: list) -> dict:
+    txt = _texts(rec["points"])
+    return {
+        "transport": rec["transport"],
+        "found": ec.canary_found(rec["points"], cid, tok, txt),
+        "banned_hit": [b for b in banned if any(b.lower() in t.lower() for t in txt)],
+        "status": rec["status"],
+        "point_ids": ec.point_ids(rec["points"]),
+    }
+
+
+# ── SECURITY: manifest-driven /search, exhaustive roles (B2) ───────────────────
+def run_permission_suite(call_fn, manifest: dict) -> list:
+    known = set(manifest["known_roles"])
     out = []
     for c in manifest["canaries"]:
-        cid, tok = c["point_id"], c.get("canary_token", "")
-        q = c["probe_query"]
+        cid, tok, q = c["point_id"], c.get("canary_token", ""), c["probe_query"]
         banned = c.get("banned_tokens", [])
+        authorized = list(c["authorized_roles"])
+        denied = sorted(known - set(authorized))
 
-        prec = call_fn("/search", {"query": q, "role": c["positive_role"], "top_k": TOP_K},
-                       c["positive_role"])
-        pos = {"transport": prec["transport"],
-               "found": ec.canary_found(prec["points"], cid, tok, _texts(prec["points"])),
-               "banned_hit": []}
+        positives, negatives = [], []
+        for role in authorized:
+            rec = call_fn("/search", {"query": q, "role": role, "top_k": TOP_K}, role)
+            positives.append({"role": role, **_probe(rec, cid, tok, banned)})
+        for role in denied:
+            rec = call_fn("/search", {"query": q, "role": role, "top_k": TOP_K}, role)
+            negatives.append({"role": role, **_probe(rec, cid, tok, banned)})
 
-        for frole in c["forbidden_roles"]:
-            nrec = call_fn("/search", {"query": q, "role": frole, "top_k": TOP_K}, frole)
-            ntexts = _texts(nrec["points"])
-            neg = {"transport": nrec["transport"],
-                   "found": ec.canary_found(nrec["points"], cid, tok, ntexts),
-                   "banned_hit": [b for b in banned
-                                  if any(b.lower() in t.lower() for t in ntexts)]}
-            out.append({
-                "canary": cid, "positive_role": c["positive_role"], "forbidden_role": frole,
-                "verdict": ec.pair_verdict(pos, neg),
-                "pos_transport": pos["transport"], "pos_found": pos["found"],
-                "neg_transport": neg["transport"], "neg_found": neg["found"],
-                "neg_banned_hit": neg["banned_hit"],
-                "neg_point_ids": ec.point_ids(nrec["points"]),
-            })
+        verdict = ec.canary_verdict(positives, negatives)
+        out.append({
+            "canary": c["canary_name"], "point_id": cid, "verdict": verdict,
+            "pos_fail": [p["role"] for p in positives if p["transport"] != ec.SUCCESS or not p["found"]],
+            "neg_leak": [n["role"] for n in negatives if n.get("found") or n.get("banned_hit")],
+            "neg_bad_transport": [n["role"] for n in negatives if n["transport"] != ec.SUCCESS],
+            "n_pos": len(positives), "n_neg": len(negatives),
+        })
     return out
 
 
-# ── auth preflight (M2: key ต้อง scope role — spoof ต้องโดน 403) ────────────────
-def run_auth_preflight(call_fn, spoof_pairs: list) -> dict:
-    """
-    spoof_pairs = [(key_role, spoof_role), ...] — ใช้ key ของ key_role ขอ spoof_role (นอก scope)
-    ต้องได้ DENIED (403). ถ้าไม่มี key แยก role (spoof_pairs ว่าง) → unverified (ผ่านแบบมี warning)
-    """
-    if not spoof_pairs:
-        return {"ok": True, "verified": False, "detail": "ไม่มี role->key แยก — ข้าม spoof check (M2 unverified)"}
-    fails = []
+# ── SECURITY: auth preflight — spoof ต้องได้ exact 403 (M1 auth) ────────────────
+def run_auth_preflight(call_fn, spoof_pairs: list) -> list:
+    """spoof_pairs = [(key_role, spoof_role)] ; คืน raw results (auth_gate_status ตัดสินทีหลัง)"""
+    out = []
     for key_role, spoof_role in spoof_pairs:
         rec = call_fn("/search", {"query": "preflight", "role": spoof_role, "top_k": 1}, key_role)
-        if rec["transport"] != ec.DENIED:
-            fails.append(f"key[{key_role}] ขอ role={spoof_role} -> {rec['transport']} (คาด DENIED/403)")
-    return {"ok": not fails, "verified": True, "fails": fails}
+        out.append({"key_role": key_role, "spoof_role": spoof_role,
+                    "status": rec["status"], "transport": rec["transport"]})
+    return out
 
 
-# ── ask-quality suite (/ask — citation/no-answer, แยกจาก permission) ────────────
+# ── QUALITY: /ask (แยกจาก security) ────────────────────────────────────────────
 def run_ask_quality(call_fn, items: list, role: str) -> list:
     recs = []
     for item in items:
         rec = call_fn("/ask", {"question": item["question"], "role": role, "top_k": 4}, role)
         pts = rec["points"]
-        sources = [p.get("source", "") for p in pts]
         ci = ec.citation_integrity(rec["answer"], len(pts))
         recs.append({
-            "category": item["category"],
-            "transport": rec["transport"],
+            "category": item["category"], "transport": rec["transport"],
             "retrieval": ec.retrieval_outcome(len(pts)) if rec["transport"] == ec.SUCCESS else None,
-            "hit": ec.source_hit(item.get("expected_source", ""), sources),
+            "hit": ec.source_hit(item.get("expected_source", ""), [p.get("source", "") for p in pts]),
             "citation_valid": ci["valid"], "cited_any": ci["cited_any"],
             "said_no_answer": any(k in rec["answer"] for k in ("ไม่พบข้อมูล", "ไม่มีข้อมูล", "ไม่สามารถตอบ")),
         })
@@ -138,39 +140,63 @@ def run_ask_quality(call_fn, items: list, role: str) -> list:
 
 
 # ── orchestration (รับ call_fn — inject ได้เพื่อ test offline) ──────────────────
-def run_suite(call_fn, manifest: dict, items: list, ask_role: str, spoof_pairs: list) -> dict:
+def run_suite(call_fn, manifest: dict, items: list, ask_role: str,
+              spoof_pairs: list, require_auth: bool = True) -> dict:
+    manifest_errs = ec.validate_manifest(manifest)
+    if manifest_errs:
+        return {"manifest_errs": manifest_errs, "exit_code": 1, "pairs": [], "verdicts": [],
+                "auth_status": ec.UNVERIFIED, "spoof": [], "quality": None, "require_auth": require_auth}
+
     pairs = run_permission_suite(call_fn, manifest)
-    preflight = run_auth_preflight(call_fn, spoof_pairs)
-    ask = run_ask_quality(call_fn, items, ask_role) if items else []
+    spoof = run_auth_preflight(call_fn, spoof_pairs)
+    auth_status = ec.auth_gate_status(spoof)
     verdicts = [p["verdict"] for p in pairs]
-    code = ec.suite_exit_code(verdicts, ask, preflight["ok"])
-    return {"pairs": pairs, "preflight": preflight, "ask": ask,
-            "exit_code": code, "verdicts": verdicts}
+    quality = ec.quality_gate(run_ask_quality(call_fn, items, ask_role)) if items else None
+    return {
+        "manifest_errs": [], "pairs": pairs, "verdicts": verdicts,
+        "auth_status": auth_status, "spoof": spoof, "quality": quality,
+        "require_auth": require_auth,
+        "exit_code": ec.security_exit_code(verdicts, auth_status, require_auth),
+    }
 
 
 def print_report(res: dict) -> None:
     from collections import Counter
+    if res["manifest_errs"]:
+        print("MANIFEST INVALID (fail ก่อนยิง API):")
+        for e in res["manifest_errs"]:
+            print(f"  - {e}")
+        print(f"\n>>> exit_code = {res['exit_code']}")
+        return
     pv = Counter(res["verdicts"])
-    print("\n========== PERMISSION SUITE ==========")
+    print("\n========== SECURITY: PERMISSION SUITE ==========")
     for p in res["pairs"]:
-        mark = {"PASS": "ok ", "LEAK": "LEAK", "INCONCLUSIVE": "?? "}[p["verdict"]]
-        print(f"  [{mark}] {p['canary']:22s} +{p['positive_role']:10s} -{p['forbidden_role']:10s}"
-              f" (pos {p['pos_transport']}/{p['pos_found']}  neg {p['neg_transport']}/{p['neg_found']})")
+        mark = {"PASS": "ok  ", "LEAK": "LEAK", "INCONCLUSIVE": "??  "}[p["verdict"]]
+        extra = ""
+        if p["neg_leak"]:
+            extra += f" LEAK->{p['neg_leak']}"
+        if p["pos_fail"]:
+            extra += f" pos-fail->{p['pos_fail']}"
+        if p["neg_bad_transport"]:
+            extra += f" neg-bad->{p['neg_bad_transport']}"
+        print(f"  [{mark}] {p['canary']:26s} (+{p['n_pos']}/-{p['n_neg']} roles){extra}")
     print(f"  totals: PASS={pv['PASS']} LEAK={pv['LEAK']} INCONCLUSIVE={pv['INCONCLUSIVE']}")
-    pf = res["preflight"]
-    print(f"  auth-preflight: ok={pf['ok']} verified={pf['verified']} "
-          f"{pf.get('detail', pf.get('fails', ''))}")
-    if res["ask"]:
-        af = ec.ask_quality_failures(res["ask"])
-        has = [r for r in res["ask"] if r["category"] == "has_answer"]
-        hit = sum(1 for r in has if r["hit"])
-        print("\n========== ASK QUALITY ==========")
-        print(f"  has_answer retrieval-hit {hit}/{len(has)} | ask hard-fails: {len(af)}")
-        for f in af:
-            print(f"    FAIL {f}")
-    print(f"\n>>> exit_code = {res['exit_code']} "
-          f"({'GREEN' if res['exit_code'] == 0 else 'FAIL — ยังไม่พร้อมใช้ gate P1'})")
-    print("======================================")
+    print(f"  auth-gate: {res['auth_status']} (require_auth={res['require_auth']}) "
+          f"spoof={[(s['key_role'], s['spoof_role'], s['status']) for s in res['spoof']]}")
+    if res["quality"] is not None:
+        q = res["quality"]
+        rep = q["report"]
+        print("\n========== QUALITY (/ask) — รายงานเท่านั้น ไม่ปน security exit ==========")
+        print(f"  has_answer: hit {rep['has_answer_hit']}/{rep['has_answer_n']} | "
+              f"empty {rep['has_answer_empty']} | dangling-cite {rep['dangling_citation']} | "
+              f"cited_any {rep['cited_any']}")
+        print(f"  no_answer: honest {rep['no_answer_honest']}/{rep['no_answer_n']} | "
+              f"transport-bad {len(rep['transport_bad'])}")
+        print(f"  quality_gate: ok={q['ok']} {q['reasons']}")
+    green = res["exit_code"] == 0
+    print(f"\n>>> SECURITY exit_code = {res['exit_code']} "
+          f"({'GREEN' if green else 'FAIL — ยังไม่พร้อมใช้ gate P1'})")
+    print("================================================")
 
 
 def _key_map() -> dict:
@@ -189,15 +215,14 @@ def main() -> None:
     ap.add_argument("--manifest", default="permission_manifest.json")
     ap.add_argument("--eval-set", default="")
     ap.add_argument("--ask-role", default="admin")
+    ap.add_argument("--retrieval-only", action="store_true",
+                    help="permission gate อย่างเดียว ไม่บังคับ auth VERIFIED (auth = UNVERIFIED ชัด ๆ)")
     args = ap.parse_args()
 
     keys = _key_map()
     single = os.getenv("KB_EVAL_API_KEY", "")
     if not keys and not single:
-        print("WARNING: ไม่มี KB_EVAL_KEYS/KB_EVAL_API_KEY — enforce mode จะได้ DENIED ทุกข้อ -> suite FAIL "
-              "(ตามสัญญาใหม่ ไม่ใช่เขียวลวง)", flush=True)
-    elif single and not keys:
-        print("WARNING: มี key เดียว — พิสูจน์ retrieval filter ได้ แต่ไม่พิสูจน์ role-scope (M2 unverified)", flush=True)
+        print("WARNING: ไม่มี KB_EVAL_KEYS/KB_EVAL_API_KEY — enforce mode จะได้ DENIED ทุกข้อ -> FAIL", flush=True)
 
     def call_fn(path, body, role):
         return http_call(args.api, path, body, keys.get(role, single))
@@ -209,13 +234,14 @@ def main() -> None:
         with open(args.eval_set, encoding="utf-8") as f:
             items = json.load(f)
 
-    # spoof pairs สำหรับ preflight: ใช้ key ของ role หนึ่งขอ role อื่น (เฉพาะเมื่อมี key แยก >=2)
+    # spoof pairs: ใช้ key ของ role หนึ่งขอ role อื่น (ต้องมี key แยก ≥2 role)
     spoof_pairs = []
     if len(keys) >= 2:
-        roles = list(keys)
-        spoof_pairs = [(roles[0], roles[1]), (roles[1], roles[0])]
+        rs = list(keys)
+        spoof_pairs = [(rs[0], rs[1]), (rs[1], rs[0])]
 
-    res = run_suite(call_fn, manifest, items, args.ask_role, spoof_pairs)
+    res = run_suite(call_fn, manifest, items, args.ask_role, spoof_pairs,
+                    require_auth=not args.retrieval_only)
     with open("permission_eval_raw.json", "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
     print_report(res)
