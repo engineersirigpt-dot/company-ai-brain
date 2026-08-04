@@ -12,9 +12,8 @@ import time
 import hashlib
 from pathlib import Path
 
-import torch
-import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModel
+# torch/transformers = lazy import (ในฟังก์ชัน embed) — ให้ store_in_qdrant / policy path
+# import ได้โดยไม่ต้องมี torch (P5b lifecycle test เรียก store_in_qdrant ตรง ๆ)
 from qdrant_client import QdrantClient
 from qdrant_client.models import (Distance, VectorParams, PointStruct,
                                   Filter, FieldCondition, MatchValue, FilterSelector)
@@ -168,6 +167,8 @@ def split_long_section(content: str, heading: str, source_name: str) -> list[dic
 
 def embed_chunks(tokenizer, model, chunks: list[dict], batch_size: int = 8) -> list[dict]:
     """Embed ด้วย BGE-M3 dense vector (CLS token + L2 normalize)"""
+    import torch
+    import torch.nn.functional as F
     texts = [c["text"] for c in chunks]
     print(f"Embedding {len(texts)} chunks...")
     all_vecs = []
@@ -194,35 +195,38 @@ def embed_chunks(tokenizer, model, chunks: list[dict], batch_size: int = 8) -> l
     return chunks
 
 
-def store_in_qdrant(chunks: list[dict], client=None) -> dict:
+def store_in_qdrant(chunks: list[dict], client=None, collection_name: str = COLLECTION_NAME,
+                    rbac_lookup=get_rbac, manifest_path: str = INGEST_MANIFEST) -> dict:
     """
     เก็บ chunks + vectors ลง Qdrant — **allowlisted policy-v1 writer เดียว** (ผ่าน policy resolver ทุกจุด)
+
+    explicit DI (Codex P5b acceptance B): collection_name/rbac_lookup/manifest_path ส่งเข้าตรง ๆ ได้
+    เพื่อให้ lifecycle test ยิง test collection แยก (default = production-like — P5b ต้องส่ง explicit)
 
     P1 lifecycle:
       - resolve document policy → payload v1 (schema/policy/status + collection/level/allowed_roles)
       - **replace-by-source (B1):** delete ทุก point เก่าของ source ที่ ingest รอบนี้ ก่อน upsert
         generation ใหม่ → เอกสารที่กลายเป็น QUARANTINED หรือ ACL แคบลง จะไม่ทิ้ง point เก่าให้ค้นเจอ
       - QUARANTINED = contract ผิด → ไม่เข้า active + บันทึก durable manifest (M3)
-    client inject ได้เพื่อ test/allowlist (default = local QdrantClient)
     """
     client = client or QdrantClient(path=QDRANT_PATH)
 
     existing = [c.name for c in client.get_collections().collections]
-    if COLLECTION_NAME not in existing:
+    if collection_name not in existing:
         client.create_collection(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
         )
-        print(f"Created collection: {COLLECTION_NAME}")
+        print(f"Created collection: {collection_name}")
 
     run_id = time.strftime("%Y%m%dT%H%M%S")
     ts = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    plan = policy.plan_source_replacement(chunks, get_rbac)
+    plan = policy.plan_source_replacement(chunks, rbac_lookup)
 
     # B1: revoke generation เก่าของทุก source ที่ ingest รอบนี้ ก่อน upsert (fail-closed replacement)
     for src in plan["delete_sources"]:
         client.delete(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             points_selector=FilterSelector(filter=Filter(must=[
                 FieldCondition(key="source", match=MatchValue(value=src))])),
         )
@@ -245,22 +249,22 @@ def store_in_qdrant(chunks: list[dict], client=None) -> dict:
             },
         ))
     if points:
-        client.upsert(collection_name=COLLECTION_NAME, points=points)
+        client.upsert(collection_name=collection_name, points=points)
 
     # M3: durable manifest — terminal outcome ต่อ source (ห้ามรายงาน success กำกวม)
-    with open(INGEST_MANIFEST, "a", encoding="utf-8") as f:
+    with open(manifest_path, "a", encoding="utf-8") as f:
         for e in policy.ingest_manifest_entries(plan, run_id=run_id, ts=ts):
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
     nq = len(plan["quarantined"])
     if nq:
-        print(f"[QUARANTINE] {nq} chunks ไม่เข้า active (บันทึกใน {INGEST_MANIFEST} เพื่อ admin review):")
+        print(f"[QUARANTINE] {nq} chunks ไม่เข้า active (บันทึกใน {manifest_path} เพื่อ admin review):")
         for r in plan["quarantined"][:10]:
             print(f"  - source={r['source']!r} reason={r['reason']}")
-    print(f"[STORE] active={len(points)} upserted, quarantined={nq}, "
+    print(f"[STORE] collection={collection_name} active={len(points)} upserted, quarantined={nq}, "
           f"replaced_sources={len(plan['delete_sources'])} run_id={run_id}")
 
-    info = client.get_collection(COLLECTION_NAME)
+    info = client.get_collection(collection_name)
     print(f"Total vectors in collection: {info.points_count}")
     return {"active": len(points), "quarantined": nq}
 
@@ -284,6 +288,7 @@ def ingest(md_path: str):
 
     # 2. Embed
     print("\nLoading BGE-M3 model (first run will download ~570MB)...")
+    from transformers import AutoTokenizer, AutoModel
     tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3")
     model = AutoModel.from_pretrained("BAAI/bge-m3")
     model.eval()

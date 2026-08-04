@@ -111,6 +111,20 @@ def run_permission_suite(call_fn, manifest: dict) -> list:
     return out
 
 
+def build_spoof_pairs(key_roles: list, known_roles) -> list:
+    """
+    ≥1 forbidden-role spoof ต่อ **ทุก** role-scoped key (Codex acceptance) — ไม่ใช่แค่ 2 ตัวแรก
+    key ของ role r ขอ role อื่นที่ r ไม่มีสิทธิ์ → ต้องได้ 403 ทุก key จึงถือ registry ทั้งชุด VERIFIED
+    """
+    roles = sorted(known_roles)
+    pairs = []
+    for kr in key_roles:
+        spoof = next((r for r in roles if r != kr), None)  # role นอก scope ของ key นี้
+        if spoof:
+            pairs.append((kr, spoof))
+    return pairs
+
+
 # ── SECURITY: auth preflight — spoof ต้องได้ exact 403 (M1 auth) ────────────────
 def run_auth_preflight(call_fn, spoof_pairs: list) -> list:
     """spoof_pairs = [(key_role, spoof_role)] ; คืน raw results (auth_gate_status ตัดสินทีหลัง)"""
@@ -234,11 +248,8 @@ def main() -> None:
         with open(args.eval_set, encoding="utf-8") as f:
             items = json.load(f)
 
-    # spoof pairs: ใช้ key ของ role หนึ่งขอ role อื่น (ต้องมี key แยก ≥2 role)
-    spoof_pairs = []
-    if len(keys) >= 2:
-        rs = list(keys)
-        spoof_pairs = [(rs[0], rs[1]), (rs[1], rs[0])]
+    # spoof pairs: ≥1 forbidden spoof ต่อ **ทุก** role-scoped key (ไม่ใช่แค่ 2 ตัวแรก)
+    spoof_pairs = build_spoof_pairs(list(keys), manifest.get("known_roles", list(keys)))
 
     res = run_suite(call_fn, manifest, items, args.ask_role, spoof_pairs,
                     require_auth=not args.retrieval_only)

@@ -14,6 +14,9 @@ api.txt
 *.key
 api_keys.json
 api_keys_ISSUED.txt
+api_keys.p5b.json
+ingest_manifest.jsonl
+permission_eval_raw.json
 
 # Raw documents (ไม่ commit เอกสารบริษัท)
 info/

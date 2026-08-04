@@ -142,5 +142,10 @@ r_q = ask_eval.run_suite(fake_ask_bad, MANIFEST, ASK_HAS, "admin", SPOOF_OK)
 check("two-track: /ask malformed ไม่กระทบ security exit (ยัง 0) แต่ quality_gate fail",
       r_q["exit_code"] == 0 and r_q["quality"]["ok"] is False, (r_q["exit_code"], r_q["quality"]["ok"]))
 
+# 11) spoof matrix: ≥1 forbidden spoof ต่อ **ทุก** key (ไม่ใช่แค่ 2 ตัวแรก)
+sp = ask_eval.build_spoof_pairs(["qc", "sales", "admin"], ["admin", "qc", "sales", "hr", "it"])
+check("spoof matrix: ครบทุก key + spoof role != key role",
+      len(sp) == 3 and {p[0] for p in sp} == {"qc", "sales", "admin"} and all(a != b for a, b in sp), sp)
+
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

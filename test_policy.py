@@ -244,8 +244,24 @@ _good_v1 = {"acl_schema_version": 1, "policy_version": "poc-v1", "policy_status"
 check("validate_stored_payload: v1 ถูก -> ok", P.validate_stored_payload(_good_v1)[0] is True)
 check("validate_stored_payload: v1 allowed_roles scalar -> invalid",
       P.validate_stored_payload(dict(_good_v1, allowed_roles="sales"))[0] is False)
+check("validate_stored_payload: acl_schema_version=true (bool) -> invalid (M4 type hole)",
+      P.validate_stored_payload(dict(_good_v1, acl_schema_version=True))[0] is False)
 check("validate_stored_payload: legacy (ไม่มี marker) -> ผ่าน (migrate ปกติได้)",
       P.validate_stored_payload({"source": "x", "collection_group": "SALES"})[0] is True)
+
+# ── P5B-B1: target interlock ──────────────────────────────────────────────────
+def _tc_raises(name, cnt, marker):
+    try:
+        P.assert_test_collection(name, cnt, marker); return False
+    except RuntimeError:
+        return True
+check("P5B-guard: ปฏิเสธ company_docs (production)", _tc_raises("company_docs", 0, True))
+check("P5B-guard: ปฏิเสธ ชื่อไม่มี p5b", _tc_raises("company_docs_test", 0, True))
+check("P5B-guard: ปฏิเสธ target ไม่ว่าง + ไม่มี marker", _tc_raises("company_docs_p5b_r1", 5, False))
+check("P5B-guard: ยอม p5b collection ว่าง",
+      P.assert_test_collection("company_docs_p5b_r1", 0, False) is None)
+check("P5B-guard: ยอม p5b ไม่ว่าง + marker ตรง",
+      P.assert_test_collection("company_docs_p5b_r1", 5, True) is None)
 
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

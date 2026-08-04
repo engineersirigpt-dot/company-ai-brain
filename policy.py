@@ -215,7 +215,8 @@ def resolve_document_policy(source_metadata: dict, rbac_lookup) -> DocumentPolic
 
 def validate_document_policy(policy: DocumentPolicy) -> tuple:
     """คืน (ok, reason) — payload v1 ที่ contract ถูกต้อง (strict type) จึงเข้า active generation ได้"""
-    if policy.acl_schema_version != ACL_SCHEMA_VERSION:
+    # type-strict (Codex M4 hole): Python True == 1 → ต้องเช็ค type is int ให้ตรงกับ Qdrant (M1)
+    if type(policy.acl_schema_version) is not int or policy.acl_schema_version != ACL_SCHEMA_VERSION:
         return False, f"bad_acl_schema_version:{policy.acl_schema_version!r}"
     if policy.policy_version != POLICY_VERSION:
         return False, f"bad_policy_version:{policy.policy_version!r}"
@@ -266,6 +267,26 @@ def assert_legacy_writer_allowed(sample_payloads: list, tool_name: str) -> None:
             f"[POLICY-GUARD] {tool_name}: พบ policy-v1 payload ใน collection — tool นี้ bypass "
             f"policy resolver จึงห้ามใช้กับ P1 collection. ใช้ ingest.py (allowlisted writer) "
             f"หรือรันบน collection แยก")
+
+
+# ── P5B-B1 target interlock (fail-closed ต่อ production ก่อนยิง infra) ──────────
+PRODUCTION_COLLECTIONS = frozenset({"company_docs"})
+
+
+def assert_test_collection(collection_name: str, existing_count: int, run_marker_ok: bool) -> None:
+    """
+    seeder/lifecycle ต้องเรียกก่อนเขียน — ปฏิเสธ target ที่ไม่ใช่ isolated test (Codex P5B-B1):
+      - ชื่อ production (company_docs) → ปฏิเสธ
+      - ชื่อไม่มี 'p5b' (ไม่ชัดว่าเป็น test collection) → ปฏิเสธ
+      - target ไม่ว่าง และไม่มี run-marker ที่ตรง → ปฏิเสธ (กันเขียนทับ collection อื่น)
+    """
+    if collection_name in PRODUCTION_COLLECTIONS:
+        raise RuntimeError(f"[P5B-GUARD] ปฏิเสธ collection ชื่อ production: {collection_name!r}")
+    if "p5b" not in collection_name:
+        raise RuntimeError(f"[P5B-GUARD] collection ต้องมี 'p5b' ในชื่อ (isolated test only): {collection_name!r}")
+    if existing_count > 0 and not run_marker_ok:
+        raise RuntimeError(
+            f"[P5B-GUARD] target ไม่ว่าง ({existing_count} points) และไม่มี run-marker ตรง — ปฏิเสธเขียนทับ")
 
 
 def validate_stored_payload(payload) -> tuple:

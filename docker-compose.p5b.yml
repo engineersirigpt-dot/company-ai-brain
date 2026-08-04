@@ -1,0 +1,45 @@
+# P5b isolated test stack (Codex P5B-B1 interlock) — แยกจาก production ทุกอย่าง
+#   volume ใหม่ (qdrant_data_p5b, ไม่ mount corpus เดิม) · port แยก · AUTH_MODE=enforce ·
+#   COLLECTION ต้องเป็นชื่อ p5b เฉพาะ run · synthetic api_keys.p5b.json เท่านั้น
+#
+# ใช้:  P5B_COLLECTION=company_docs_p5b_<run_id> docker compose -f docker-compose.p5b.yml -p brain_p5b up -d
+# ห้าม:  docker compose (ตัวหลัก) ตรง ๆ — จะชน company_docs/volume เดิม
+name: brain_p5b
+
+services:
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: brain_qdrant_p5b
+    ports:
+      - "6401:6333"            # แยกจาก prod 6333
+    volumes:
+      - qdrant_data_p5b:/qdrant/storage   # volume ใหม่ล้วน — ไม่แตะ qdrant_data เดิม
+    restart: "no"
+
+  api:
+    build: .
+    container_name: brain_api_p5b
+    ports:
+      - "8402:8000"            # แยกจาก prod 8002
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - COLLECTION_NAME=${P5B_COLLECTION:?ต้องตั้ง P5B_COLLECTION=company_docs_p5b_<run_id>}
+      - MODEL_NAME=BAAI/bge-m3
+      - AUTH_MODE=enforce       # P5b บังคับ enforce เสมอ (ไม่รับ override)
+      - API_KEYS_FILE=/app/api_keys.p5b.json
+      # ไม่ตั้ง ANTHROPIC_API_KEY — /ask จะ 503; security gate ใช้ /search ($0, ไม่ egress cloud)
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - ./app:/app/app:ro
+      - ./api_keys.p5b.json:/app/api_keys.p5b.json:ro   # synthetic registry เท่านั้น (gitignored)
+    depends_on:
+      - qdrant
+    restart: "no"
+
+volumes:
+  qdrant_data_p5b:            # ประกาศใหม่ — ไม่ใช้ qdrant_data ของ production
+  hf_cache:
+    external: true
+    name: company-ai-brain_hf_cache   # reuse model cache เท่านั้น (read-heavy, ไม่มีข้อมูลลับ)

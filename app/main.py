@@ -23,9 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
 
 import policy  # P1 policy compiler (pure) — auth/effective-ACL/filter contracts
+from qdrant_filter import to_qdrant_filter  # spec -> Qdrant Filter (adapter เดียวกับ P5b harness)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
@@ -159,17 +159,6 @@ def authorize(request: Request, role: str, endpoint: str) -> policy.EffectiveAcc
     print(f"[AUDIT] ts={time.strftime('%Y-%m-%dT%H:%M:%S%z')} service={principal.service_id} "
           f"endpoint={endpoint} role={access.effective_role} verified={principal.verified}", flush=True)
     return access
-
-
-def to_qdrant_filter(spec: list) -> Filter:
-    """spec (pure, จาก policy.compile_retrieval_filter) -> Qdrant Filter — explicit เสมอ ห้ามคืน None (§5)"""
-    must = []
-    for c in spec:
-        if "value" in c:
-            must.append(FieldCondition(key=c["key"], match=MatchValue(value=c["value"])))
-        else:
-            must.append(FieldCondition(key=c["key"], match=MatchAny(any=c["any"])))
-    return Filter(must=must)
 
 
 def authorized_points(request: Request, access: policy.EffectiveAccess, vector, top_k: int):
