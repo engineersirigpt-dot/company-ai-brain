@@ -1,45 +1,66 @@
-# P2 — Reranker offline/shadow + hybrid arm (plan → Codex review)
+# P2 — Reranker ordering experiment (rev 2, ปิด Codex B1/B2)
 
-> **สืบเนื่อง:** Codex GO P2 (`KB_P5B_FINAL_CLOSURE_CODEX_REVIEW_D120935.md` §Decision) หลังปิด P1 PoC track (`68d4d08`)
-> **บทบาท Codex:** review plan/จัดลำดับ/ชี้ความเสี่ยง ก่อนลงมือ (เหมือนทุกเฟส)
-> **ขอบเขต:** local + synthetic · offline/shadow เท่านั้น · **ไม่แตะ production/collection จริง · ไม่ส่ง context ไป cloud**
+> **สืบเนื่อง:** `KB_P2_PLAN_CODEX_REVIEW_261F116.md` verdict **REVISE CONTRACT, THEN GO SLICE 1**
+> **ขอบเขต:** local + synthetic · offline เท่านั้น · ไม่แตะ production/collection จริง · ไม่ egress cloud
+> **สถานะหลักฐาน:** synthetic = **mechanics evidence เท่านั้น** — ยังใช้ตัดสิน business quality / hardware ไม่ได้
 
-## เป้าหมาย
-วัดว่า reranker (`bge-reranker-v2-m3`) และ hybrid ทำ **retrieval quality** ดีกว่า dense-only จริงไหม — เพื่อ *ตัดสินใจ* (ยังไม่ deploy) ว่าจะ wire reranker เข้า stack ตาม PoC goal "วัดผลก่อนตัดสินใจ hardware"
+## แยกเป็นสองการทดลองอิสระ (Codex intent)
+- **P2a — Ordering experiment (ทำก่อน):** candidate pool เดิม (dense retrieval + ACL filter) แล้วถาม
+  *cross-encoder / rank fusion จัดลำดับดีกว่า dense score ไหม* — arm = `dense`, `rerank`, `fused_rrf` บน **candidate-ID universe เดียวกัน**
+- **P2b — Candidate-generation experiment (ภายหลัง):** dense+sparse **hybrid retrieval** — *sparse ช่วยนำ relevant point ที่ dense หาไม่เจอเข้า pool ไหม* — เปลี่ยน candidate recall จึง**ไม่**บังคับ candidate set เดียว ; ต้องมี sparse vector/index ก่อน (`ingest.py` ตอนนี้มี dense `VectorParams` ชุดเดียว) ; ทั้ง dense+sparse branch ต้องใส่ compiled ACL filter **ก่อน** retrieval → union/dedupe → RRF/rerank
 
-## สถาปัตยกรรม (ผูก guardrail Codex 5 ข้อ)
+> **B1 ปิด:** เดิม "hybrid" คือ rank-fusion ของ pool เดียว = ensemble ordering ไม่ใช่ dense+sparse hybrid → เปลี่ยนชื่อเป็น `fused_rrf` และแยก P2b ออก (ไม่งั้นสรุปผิดว่า "hybrid ดีขึ้น" ทั้งที่ไม่เคยมี sparse)
+
+## Guardrail (Codex 5 ข้อ — คงเดิม)
+filter ก่อน candidates เสมอ (reranker เห็นเฉพาะ authorized point แม้ shadow) · candidate set เดียวใน P2a ordering · retrieval-quality metric แยกจาก permission suite (`TOP_K=10` ของ P5b ไม่นับเป็น quality) · p5b canary leak=0 = permission regression **เท่านั้น** · offline ไม่ egress
+
+## Metrics (Codex Q1) — retrieval-only, ถอด citation accuracy
+- **`CandidateRecall@N`** (บังคับ — reranker ช่วย point นอก pool ไม่ได้)
+- `Hit@1/3/5` · `MRR@5` · `Recall@5` · **`nDCG@5`** (graded/multi-relevance)
+- **แยก point/chunk-level ออกจาก document/source-level** Hit + nDCG (กันหลาย chunk ของเอกสารเดียวทำคะแนนหลอก)
+- latency แยก `candidate_retrieval_ms` / `rerank_ms` / `total_ms` — p50/p95 หลัง warm-up
+- Slice 2: paired **win/tie/loss** ต่อ query + paired **bootstrap CI** ของ primary-metric delta
+- `citation_accuracy` ตัดออก (offline retrieval ไม่มี citation) → ใช้ `source_hit`/`document_hit` ; no-answer แยก suite (abstention ต้องมี threshold contract ก่อน)
+- **primary metric ประกาศล่วงหน้า = `nDCG@5` + `MRR@5`** ; รายงาน k ∈ {1,3,5}
+
+## Fusion (Codex Q2) — RRF only ใน Slice 1
 ```
-query → auth → effective role → compiled Qdrant filter → candidates top-N (N=30)   ← [G1] filter ก่อน candidates เสมอ
-   ├─ ARM dense  : top-k จาก vector score เดิม
-   ├─ ARM rerank : bge-reranker-v2-m3(query, candidate.text) → re-order → top-k
-   └─ ARM hybrid : fuse(dense_rank, rerank_rank) → top-k                              ← [G2] candidate set เดียวกันทุก arm
-วัดแต่ละ arm เทียบ ground-truth relevance: Hit@k · MRR · citation-accuracy · latency  ← [G3] แยกจาก permission suite
-permission canaries (p5b) leak=0 คงเดิมทุก arm                                        ← [G4] regression gate
-offline harness เท่านั้น — reranker ไม่เห็น point นอกสิทธิ์แม้ shadow log             ← [G1/G5]
+rrf_score(id) = Σ_i  1 / (rrf_k + rank_i(id))       # rank 1-based ; default rrf_k = 60
+tie-break = dense_rank แล้ว point_id
 ```
-- **[G1]** reranker รับเฉพาะ candidates ที่ผ่าน `authorized_points()`/filter แล้ว — ไม่มีทางเห็น point นอกสิทธิ์
-- **[G2]** ทั้ง 3 arm rerank/fuse บน candidate set ก้อนเดียว (top-N หลัง filter) → permission behavior เหมือนกันเป๊ะ
-- **[G3]** retrieval-quality metric อยู่คนละ suite กับ permission ; **`TOP_K=10` ของ P5b ไม่ถูกนับเป็น quality result**
-- **[G4]** รัน p5b permission canary (leak=0) เป็น gate ของทุก arm ก่อนรับผล quality
-- **[G5]** offline/shadow: ไม่มี live /search change, ไม่มี cloud egress (rerank เป็น local cross-encoder)
+ผลลัพธ์ต้องเป็น **exact permutation** ของ input IDs ; reject ranking ที่ ID ซ้ำ/หาย/เกิน candidate universe.
+**weighted-normalized-score = follow-up** (dense cosine vs cross-encoder logits คนละ scale, min-max ไวต่อ outlier/overfit) — ต้องมี dev split calibrate + frozen test split ตัดสิน ; ห้าม tune บน test set
 
-## Slice (เสนอทำทีละก้อน — offline ก่อน)
-**Slice 1 (offline, ทำได้ทันที ไม่ต้อง model):**
-- `retrieval_metrics.py` (pure): `hit_at_k`, `mrr`, `citation_accuracy`, `latency_percentiles` — unit-test
-- `rerank.py` (pure ordering): candidate contract `{point_id, dense_score, text}`; `rerank_order(cands, scores)`; `hybrid_fuse(cands, rerank_scores, method)` รองรับ **RRF** + **weighted-normalized**; cross-encoder อยู่หลัง interface `score_fn(query, texts)->list[float]` (inject mock ตอน test / โมเดลจริงตอน Slice 2)
-- test: metric ถูก, fusion ordering ถูก, และ **ทุก arm ใช้ candidate set เดียว** (encode G2 เป็น test)
+## Relevance label (Codex B2) — ล็อกก่อนเขียน metrics
+`eval_set.json` เดิม (100 cases) ไม่มี `role`/`relevant_point_ids` ใช้แค่ `expected_source` → ไม่พอ. **p5b canary ห้ามเป็น relevance anchor** (distribution คนละแบบ). `p2_eval_set.json` ขั้นต่ำ:
+```json
+{ "query_id": "q-001", "query": "...", "role": "qc", "lang": "th",
+  "category": "sibling-hard-negative", "split": "test",
+  "relevance": { "<point-id-a>": 2, "<point-id-b>": 1 },
+  "relevant_sources": ["<stable-document-id>"], "label_status": "human-reviewed" }
+```
+Validation **fail ก่อน eval** เมื่อ: query_id ซ้ำ · role ไม่รู้จัก · point_id/grade ผิด · relevant point ไม่อยู่ใน frozen corpus · **relevant point ไม่ authorized สำหรับ role นั้น**. label โดยไม่ดูผล arm ก่อน + **freeze dataset hash** ก่อน benchmark. hard negatives: sibling docs, Thai/Eng, table rows, dup-like titles, parent-child, no-answer.
 
-**Slice 2 (ต้องมี model/container):**
-- reranker adapter (cross-encoder, torch) รันใน P2 container
-- offline eval harness: รัน 3 arm บน synthetic labeled eval set → metric ต่อ arm + ตารางเทียบ + รัน p5b canary leak=0 gate → durable evidence (เหมือน `evidence/run2`)
-- `p2_eval_set.json`: synthetic corpus + relevance label (point_id ที่ relevant ต่อ query)
+## Candidate contract (Slice 1 — Codex approved)
+```
+Candidate { point_id: non-empty unique str · document_id/source: stable str ·
+            dense_score: finite float · dense_rank: unique positive int · rerank_text: non-empty str }
+```
+`rerank_text` v1 deterministic = `heading + child text` + token-truncate ใน adapter ; **ห้ามสลับ text/parent_text ตามความยาวระหว่าง arm** (attribution ไม่ชัด)
 
-## อยากให้ Codex ช่วยตัดสิน/ชี้
-1. **metric set** — Hit@k + MRR + citation-accuracy + latency พอไหม / เพิ่ม nDCG@k ไหม
-2. **hybrid fusion** — RRF (reciprocal rank fusion) หรือ weighted-normalized-score สำหรับ PoC (หรือทำทั้งคู่แล้วเทียบ)
-3. **reranker execution** — เสนอ **pure offline harness ก่อน** (ไม่มี live risk) แล้วค่อย shadow-in-API ทีหลัง ; รับได้ไหม
-4. **eval-set labeling** — synthetic corpus + hand-label relevance หรือใช้ p5b canary เป็น relevance anchor ; top-N candidate ควรเท่าไร (เสนอ N=30, k=5)
-5. **candidate top-N** — filter คืน top-N ก่อน rerank ; N ใหญ่ไป = latency, เล็กไป = reranker ช่วยน้อย — ค่าเริ่มที่เหมาะกับ corpus PoC
+## Slice
+- **Slice 1 (offline, ทำทันที — GO):** `retrieval_metrics.py` + `rerank.py` (Candidate validate, `rerank_order`, `fused_rrf`) + `p2_eval.py` (eval-set validate) + `test_p2.py` ด้วย **mock `score_fn`**
+  - required tests: input ไม่ mutate · score count == candidate count, NaN/Inf/dup/missing → fail · output = exact permutation · tie-break deterministic · empty→empty, one→same · **instrumented score_fn: unauthorized sentinel ต้องไม่เคยถึง score_fn** · permission fail/ERROR/INCONCLUSIVE → quality report invalid (ไม่รายงาน metric เหมือนผ่าน)
+- **Slice 2 (container):** local cross-encoder adapter + internal candidate provider (เรียก Qdrant ด้วย compiled filter เดียวกัน, N=30, **ไม่แตะ API cap `top_k<=10` / ไม่เรียก prod endpoint**) + sweep `N∈{10,20,30,50}` เลือก N ต่ำสุดที่ `CandidateRecall@N` ถึงเกณฑ์ประกาศล่วงหน้า (ดู rerank p95 + memory) + durable evidence + p5b canary leak=0 gate
+- **P2b (later):** dense+sparse hybrid — งานแยก
+- **held-out real/redacted/approved eval:** ก่อนสรุป business/hardware — synthetic ประกาศได้แค่ "P2 mechanics PASS on synthetic"
 
-## Out of scope P2 (คง deploy gate)
-wire reranker เข้า live /search · production collection/cutover · cloud egress · shadow logging บน production · hardware sizing decision (P2 แค่ *วัด* เพื่อ *เสนอ*)
+## Acceptance ก่อนเลือก arm (ประกาศล่วงหน้า)
+1. permission leak=0 + auth gate ผ่านทุก arm (**hard gate**)
+2. candidate label coverage / ACL validation = 100%
+3. rerank/fusion ต้องไม่ลด primary metric เทียบ dense เกิน tolerance + รายงาน CI/win-tie-loss
+4. `fused_rrf` ต้องชนะ `rerank`-only อย่างมีสาระจึงคุ้ม complexity ; ไม่งั้นเลือก rerank-only
+5. latency p95 ใน budget ที่บันทึกพร้อม hardware/model revision
+
+## Out of scope (คง deploy gate)
+wire reranker เข้า live /search · shadow-in-API (เฉพาะหลัง prod auth/audit/packaging gate + ไม่ log unauthorized text) · production collection/cutover · cloud egress · P2b hybrid · hardware sizing verdict
