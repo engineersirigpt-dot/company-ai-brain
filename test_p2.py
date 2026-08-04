@@ -311,6 +311,18 @@ check("B2: canary expected != actual query count -> error", E.validate_canary_ev
 # B2 cross-run binding: m4/canary คนละ run -> decision manifest ปฏิเสธ (ผ่าน probe ไม่ได้เพราะ arm_eligibility ก่อน — ตรวจ validator ตรง)
 check("B2: cross-run — run_id ต่างกันตรวจได้ (unit)", _m4["run_id"] == _can["run_id"])
 
+# ── B4: root run_manifest binding (evidence ต้องอ้าง run_manifest_sha256 เดียวกัน) ──
+_m4b = {**_m4, "run_manifest_sha256": _H}
+_canb = {**_can, "run_manifest_sha256": _H, "model_revision": "a" * 40, "image_digest": "sha256:" + "e" * 64}
+check("B4: m4 bound run_manifest ตรง -> valid", E.validate_m4_evidence(_m4b, _eh, _ch, _H) == [], E.validate_m4_evidence(_m4b, _eh, _ch, _H))
+check("B4: m4 run_manifest ไม่ตรง root -> error", any("run_manifest" in e for e in E.validate_m4_evidence(_m4b, _eh, _ch, "b" * 64)))
+check("B4: m4 ไม่มี run_manifest field (bound) -> error", any("run_manifest" in e for e in E.validate_m4_evidence(_m4, _eh, _ch, _H)))
+check("B4: m4 unbound (run_manifest=None) -> ข้าม binding (backward-compat)", E.validate_m4_evidence(_m4, _eh, _ch) == [])
+check("B4: canary bound (มี model/image + run_manifest) -> valid", E.validate_canary_evidence(_canb, _eh, _ch, _H) == [], E.validate_canary_evidence(_canb, _eh, _ch, _H))
+check("B4: canary bound ขาด model_revision -> error", any("model_revision" in e for e in E.validate_canary_evidence({**_canb, "model_revision": None}, _eh, _ch, _H)))
+check("B4: canary bound ขาด image_digest -> error", any("image_digest" in e for e in E.validate_canary_evidence({**_canb, "image_digest": "x"}, _eh, _ch, _H)))
+check("B4: canary run_manifest ไม่ตรง root -> error", any("run_manifest" in e for e in E.validate_canary_evidence(_canb, _eh, _ch, "b" * 64)))
+
 # ── B3.2: smoke manifest ใช้กับ ai-reviewed ได้ ; decision path ปฏิเสธ ──────────
 _ai = case(label_status="ai-reviewed")
 check("B3.2: smoke manifest กับ ai-reviewed -> approved=False + decision_eligible=False",

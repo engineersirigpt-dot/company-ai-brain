@@ -12,19 +12,22 @@ import re
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 ALLOWED_MODELS = frozenset({RERANKER_MODEL})
-_COMMIT = re.compile(r"^[0-9a-f]{7,64}$")
+# M1: pin ต้องเป็น FULL immutable commit — abbreviated SHA (7 hex) ไม่ unique พอสำหรับ reproducibility
+# (HF git snapshot = sha1 40-hex ; เผื่อ repo sha256 = 64-hex)
+_COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 def validate_pin(model_name: str, revision: str, max_length: int, batch_size: int) -> list:
     """
-    B1: pin ต้อง reproducible — model allowlist + revision เป็น immutable commit SHA (ห้าม main/branch/tag)
-    + max_length/batch_size positive int. คืน list ของ error (ว่าง = ผ่าน)
+    B1/M1: pin ต้อง reproducible — model allowlist + revision เป็น **full** immutable commit SHA
+    (40 หรือ 64 hex ; ห้าม main/branch/tag/abbreviated) + max_length/batch_size positive int.
+    คืน list ของ error (ว่าง = ผ่าน)
     """
     errs = []
     if model_name not in ALLOWED_MODELS:
         errs.append(f"model_name ไม่อยู่ใน allowlist {sorted(ALLOWED_MODELS)}: {model_name!r}")
     if not isinstance(revision, str) or revision.lower() in ("main", "master", "head") or not _COMMIT.match(revision or ""):
-        errs.append(f"revision ต้องเป็น immutable commit SHA (7-64 hex) ห้าม main/branch/tag: {revision!r}")
+        errs.append(f"revision ต้องเป็น full immutable commit SHA (40/64 hex) ห้าม main/branch/tag/abbreviated: {revision!r}")
     if type(max_length) is not int or max_length < 1:
         errs.append(f"max_length ต้อง positive int: {max_length!r}")
     if type(batch_size) is not int or batch_size < 1:
@@ -83,6 +86,14 @@ class PinnedCrossEncoder:
                 "max_length": self.max_length, "batch_size": self.batch_size}
 
 
+def _resolved_commit(snapshot_path: str) -> str:
+    """
+    M1: HF snapshot layout = <cache>/models--<org>--<name>/snapshots/<commit_sha>/
+    → basename ของ snapshot path คือ commit ที่ resolve จริง (ใช้ verify ตรงกับ pin ที่ขอ)
+    """
+    return os.path.basename(os.path.normpath(snapshot_path))
+
+
 def _snapshot_manifest_sha256(path: str) -> str:
     """sha256 ของ file-manifest (ชื่อ+sha256 ของทุกไฟล์ใน snapshot) — reproducibility digest"""
     import hashlib
@@ -118,11 +129,17 @@ def load_pinned_cross_encoder(model_name: str = RERANKER_MODEL, *, revision: str
     except ImportError as e:
         raise RuntimeError(f"load_pinned_cross_encoder ต้องมี torch/transformers/huggingface_hub (container): {e}")
     snap = snapshot_download(model_name, revision=revision, local_files_only=True)
+    # M1: assert snapshot ที่โหลดจริง resolve ตรงกับ full commit ที่ pin (กัน tag/branch/สลับ snapshot)
+    resolved = _resolved_commit(snap)
+    if resolved != revision:
+        raise RuntimeError(
+            f"resolved snapshot commit {resolved!r} != requested pin {revision!r} "
+            f"(pin ต้องเป็น full immutable commit ที่ตรงกับ snapshot ที่ bake จริง)")
     tok = AutoTokenizer.from_pretrained(snap, local_files_only=True)
     model = AutoModelForSequenceClassification.from_pretrained(snap, local_files_only=True)
     model.eval().to(device)
     return PinnedCrossEncoder(
-        model, tok, model_name=model_name, model_commit=revision, tokenizer_commit=revision,
+        model, tok, model_name=model_name, model_commit=resolved, tokenizer_commit=resolved,
         file_manifest_sha256=_snapshot_manifest_sha256(snap), dtype=str(model.dtype),
         torch_version=torch.__version__, transformers_version=transformers.__version__,
         device=device, max_length=max_length, batch_size=batch_size)

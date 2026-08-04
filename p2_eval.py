@@ -372,8 +372,18 @@ def _evidence_hash_binding(ev, eval_hash, corpus_hash, prefix) -> list:
     return errs
 
 
-def validate_m4_evidence(m4, eval_hash, corpus_hash) -> list:
-    """B3.1/B2: real M4 evidence — exact PASS/int/hash + sentinel id hashes disjoint จาก model inputs"""
+def _bind_run_manifest(ev, run_manifest_sha256, prefix) -> list:
+    """B4: evidence ต้องอ้าง root run_manifest_sha256 เดียวกัน (bind เมื่อ decision path ส่ง root มา)"""
+    if run_manifest_sha256 is None:
+        return []
+    if ev.get("run_manifest_sha256") != run_manifest_sha256:
+        return [f"{prefix} run_manifest_sha256 ไม่ตรง root run manifest"]
+    return []
+
+
+def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None) -> list:
+    """B3.1/B2/B4: real M4 evidence — exact PASS/int/hash + sentinel id hashes disjoint จาก model inputs
+    + (เมื่อ decision path) ผูกกับ root run_manifest_sha256 เดียวกัน"""
     if not isinstance(m4, dict):
         return ["m4_evidence ต้องเป็น validated dict summary"]
     errs = []
@@ -398,11 +408,13 @@ def validate_m4_evidence(m4, eval_hash, corpus_hash) -> list:
     if not _is_image_digest(m4.get("image_digest")):
         errs.append("m4 image_digest ต้องเป็น sha256:<64hex>")
     errs += _evidence_hash_binding(m4, eval_hash, corpus_hash, "m4")
+    errs += _bind_run_manifest(m4, run_manifest_sha256, "m4")
     return errs
 
 
-def validate_canary_evidence(canary, eval_hash, corpus_hash) -> list:
-    """B3.1/B2: P5b canary — leak=0/VERIFIED/ทุก arm PASS + per-arm ERROR/INCONCLUSIVE=0 + count ตรง"""
+def validate_canary_evidence(canary, eval_hash, corpus_hash, run_manifest_sha256=None) -> list:
+    """B3.1/B2/B4: P5b canary — leak=0/VERIFIED/ทุก arm PASS + per-arm ERROR/INCONCLUSIVE=0 + count ตรง
+    + (เมื่อ decision path) ผูก root run_manifest_sha256 และ bind model/image ให้มาจาก run เดียวกัน"""
     if not isinstance(canary, dict):
         return ["canary_evidence ต้องเป็น validated dict summary"]
     errs = []
@@ -423,32 +435,46 @@ def validate_canary_evidence(canary, eval_hash, corpus_hash) -> list:
     if type(exp) is not int or type(act) is not int or exp != act or exp < 1:
         errs.append("canary expected_query_count == actual_query_count (positive int)")
     errs += _evidence_hash_binding(canary, eval_hash, corpus_hash, "canary")
+    errs += _bind_run_manifest(canary, run_manifest_sha256, "canary")
+    # B4: canary ต้อง bind model/image (มาจาก image เดียวกับ M4) เมื่ออยู่ใน decision path
+    if run_manifest_sha256 is not None:
+        if not _is_hex_commit(canary.get("model_revision")):
+            errs.append("canary model_revision ต้องเป็น immutable commit (hex)")
+        if not _is_image_digest(canary.get("image_digest")):
+            errs.append("canary image_digest ต้องเป็น sha256:<64hex>")
     return errs
 
 
 def decision_benchmark_manifest(cases, corpus, known_roles, evaluated_roles,
-                                gate_tags, signoff, m4_evidence, canary_evidence) -> dict:
+                                gate_tags, signoff, m4_evidence, canary_evidence,
+                                run_manifest_sha256=None) -> dict:
     """
-    B3/B3.1: **entry point เดียวสำหรับ decision/freeze** — bypass combined gate ไม่ได้.
+    B3/B3.1/B4: **entry point เดียวสำหรับ decision/freeze** — bypass combined gate ไม่ได้.
     approved=True ได้ก็ต่อเมื่อ combined gate ผ่าน **และ** validated real M4 + P5b canary PASS (ไม่ใช่ truthiness)
+    **และ** (เมื่อ decision path) M4/canary ผูก root run_manifest_sha256 + model/image เดียวกัน
     """
     errs = decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff)
     if not errs:                                        # artifacts valid → hash ได้ปลอดภัย
         eh, ch = eval_set_sha256(cases), corpus_manifest_sha256(corpus)
-        errs += validate_m4_evidence(m4_evidence, eh, ch)
-        errs += validate_canary_evidence(canary_evidence, eh, ch)
+        errs += validate_m4_evidence(m4_evidence, eh, ch, run_manifest_sha256)
+        errs += validate_canary_evidence(canary_evidence, eh, ch, run_manifest_sha256)
         # B2: M4 กับ canary ต้องมาจาก run/index เดียวกัน (กันประกอบข้าม run)
         if isinstance(m4_evidence, dict) and isinstance(canary_evidence, dict):
             if m4_evidence.get("run_id") != canary_evidence.get("run_id"):
                 errs.append("m4/canary run_id ไม่ตรงกัน (คนละ run)")
             if m4_evidence.get("retrieval_index_manifest_sha256") != canary_evidence.get("retrieval_index_manifest_sha256"):
                 errs.append("m4/canary retrieval_index_manifest_sha256 ไม่ตรงกัน (คนละ index)")
+            # B4: model/image ต้องมาจาก image เดียวกัน (ไม่ประกอบ M4 image A กับ canary image B)
+            if m4_evidence.get("model_revision") != canary_evidence.get("model_revision"):
+                errs.append("m4/canary model_revision ไม่ตรงกัน (คนละ model)")
+            if m4_evidence.get("image_digest") != canary_evidence.get("image_digest"):
+                errs.append("m4/canary image_digest ไม่ตรงกัน (คนละ image)")
     if errs:
         raise ValueError(f"decision benchmark ยังไม่ผ่าน gate ({len(errs)} ข้อ): {errs[:3]}")
     return {
         "kind": "decision-benchmark", "approved": True, "decision_eligible": True,
         "benchmark_contract_version": BENCHMARK_CONTRACT_VERSION,
-        "eval_set_sha256": eh, "corpus_manifest_sha256": ch,
+        "eval_set_sha256": eh, "corpus_manifest_sha256": ch, "run_manifest_sha256": run_manifest_sha256,
         "signoff": signoff, "m4_evidence": m4_evidence, "canary_evidence": canary_evidence,
     }
 
