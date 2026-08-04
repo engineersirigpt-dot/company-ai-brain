@@ -279,26 +279,55 @@ def validate_signoff(signoff, cases, corpus) -> list:
     errs = [f"signoff field '{f}' หาย" for f in SIGNOFF_FIELDS if not signoff.get(f)]
     if signoff.get("decision") != "approved":
         errs.append(f"signoff decision != approved ({signoff.get('decision')!r})")
-    if signoff.get("eval_set_sha256") != eval_set_sha256(cases):
-        errs.append("signoff eval_set_sha256 ไม่ตรง artifacts ปัจจุบัน")
-    if signoff.get("corpus_manifest_sha256") != corpus_manifest_sha256(corpus):
-        errs.append("signoff corpus_manifest_sha256 ไม่ตรง artifacts ปัจจุบัน")
     if signoff.get("benchmark_contract_version") != BENCHMARK_CONTRACT_VERSION:
         errs.append("signoff benchmark_contract_version ไม่ตรง")
+    # M1: hashing อาจ crash เมื่อ artifacts malformed (NaN/surrogate/None) → คืน controlled error
+    try:
+        if signoff.get("eval_set_sha256") != eval_set_sha256(cases):
+            errs.append("signoff eval_set_sha256 ไม่ตรง artifacts ปัจจุบัน")
+        if signoff.get("corpus_manifest_sha256") != corpus_manifest_sha256(corpus):
+            errs.append("signoff corpus_manifest_sha256 ไม่ตรง artifacts ปัจจุบัน")
+    except (ValueError, TypeError, AttributeError) as e:
+        errs.append(f"artifacts hash ไม่ได้ (malformed): {type(e).__name__}")
     return errs
 
 
 def decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles,
                               gate_tags, signoff) -> list:
     """
-    B6.1: **decision gate เดียว** ที่รวมทุกด่าน — publish arm verdict / freeze ได้เมื่อคืน []:
-      structural + human-reviewed labels (validate_benchmark) + sample coverage (arm_eligibility)
-      + dev role coverage + Data Owner sign-off ที่ hash ตรง. AI ห้ามสร้าง sign-off เอง
+    B6.1: **decision gate เดียว** ที่รวมทุกด่าน — คืน [] ก็ต่อเมื่อผ่านหมด:
+      structural + human-reviewed labels + sample coverage + dev role coverage + Data Owner sign-off hash ตรง
+    M1: short-circuit เมื่อ structural ไม่ผ่าน — ไม่ไป hash artifacts ที่ผิดรูป (กัน crash)
     """
-    return (validate_benchmark(cases, corpus, known_roles)
-            + arm_eligibility_errors(cases, gate_tags)
+    structural = validate_benchmark(cases, corpus, known_roles)
+    if structural:
+        return structural
+    return (arm_eligibility_errors(cases, gate_tags)
             + dev_role_coverage_errors(cases, evaluated_roles)
             + validate_signoff(signoff, cases, corpus))
+
+
+def decision_benchmark_manifest(cases, corpus, known_roles, evaluated_roles,
+                                gate_tags, signoff, m4_evidence, canary_evidence) -> dict:
+    """
+    B3: **entry point เดียวสำหรับ decision/freeze** — bypass combined gate ไม่ได้.
+    สร้าง manifest ได้ก็ต่อเมื่อ decision gate ผ่าน + มี real M4 evidence + P5b canary PASS evidence.
+    (mechanics smoke ใช้ artifact_manifest_unapproved ที่ติดป้าย approved=False)
+    """
+    errs = decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff)
+    if not m4_evidence:
+        errs.append("ขาด real M4 evidence (unauthorized sentinel ไม่ถึง cross-encoder)")
+    if not canary_evidence:
+        errs.append("ขาด P5b canary evidence (leak=0, auth VERIFIED ทุก arm)")
+    if errs:
+        raise ValueError(f"decision benchmark ยังไม่ผ่าน gate ({len(errs)} ข้อ): {errs[:3]}")
+    return {
+        "kind": "decision-benchmark", "approved": True,
+        "benchmark_contract_version": BENCHMARK_CONTRACT_VERSION,
+        "eval_set_sha256": eval_set_sha256(cases),
+        "corpus_manifest_sha256": corpus_manifest_sha256(corpus),
+        "signoff": signoff, "m4_evidence": m4_evidence, "canary_evidence": canary_evidence,
+    }
 
 
 # ── freeze (M1) — ต้องมี corpus hash ไม่ใช่แค่ cases ─────────────────────────────
@@ -324,15 +353,16 @@ def corpus_manifest_sha256(corpus: dict, rerank_text_version: str = RERANK_TEXT_
     return hashlib.sha256(_canonical_json(rows)).hexdigest()
 
 
-def benchmark_manifest(cases, corpus: dict, known_roles) -> dict:
+def artifact_manifest_unapproved(cases, corpus: dict, known_roles) -> dict:
     """
-    สร้างได้เฉพาะเมื่อ validate_benchmark ผ่าน (M1.1) — ผูกกับ git/model/tokenizer/image + Slice 2
-    ต้องเพิ่ม retrieval_index_manifest_sha256 (actual vectors/index digest) ใน run metadata
+    B3: manifest สำหรับ **mechanics smoke เท่านั้น** (structural valid) — ติดป้าย approved=False
+    **ห้าม**ใช้ตัดสิน/freeze arm ; decision/freeze ต้องใช้ decision_benchmark_manifest() เท่านั้น
     """
     errs = validate_benchmark(cases, corpus, known_roles)
     if errs:
-        raise ValueError(f"benchmark ยังไม่ valid ({len(errs)} errors) — สร้าง manifest ไม่ได้: {errs[:3]}")
+        raise ValueError(f"artifacts ยังไม่ valid ({len(errs)} errors): {errs[:3]}")
     return {
+        "kind": "mechanics-smoke-unapproved", "approved": False,
         "benchmark_contract_version": BENCHMARK_CONTRACT_VERSION,
         "eval_set_sha256": eval_set_sha256(cases),
         "corpus_manifest_sha256": corpus_manifest_sha256(corpus),

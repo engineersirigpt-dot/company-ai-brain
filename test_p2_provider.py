@@ -89,5 +89,36 @@ check("rerank_text truncate ตาม max_chars", len(PROV.build_rerank_text({"h
 c3 = PROV.build_candidates(fake, "c", access("qc"), [0.0] * 4, 1, filter_adapter=IDENTITY)
 check("top_n=1 -> คืน 1 candidate (dense rank สูงสุด)", [c["point_id"] for c in c3] == ["A"])
 
+# ── B1: forged / unverified / role-mismatch EffectiveAccess ต้องถูกปฏิเสธ ──────
+_forged = P.EffectiveAccess(P.ServicePrincipal("t", ("sales",), False, "enforce"), "sales")   # authenticated=False
+check("B1: forged unverified access (authenticated=False) -> PermissionError",
+      raises(lambda: PROV.build_candidates(fake, "c", _forged, [0.0] * 4, 10, IDENTITY), PermissionError))
+_warn = P.EffectiveAccess(P.ServicePrincipal("t", ("qc",), True, "warn"), "qc")                # verified=False (warn)
+check("B1: warn-mode access (unverified) -> PermissionError",
+      raises(lambda: PROV.build_candidates(fake, "c", _warn, [0.0] * 4, 10, IDENTITY), PermissionError))
+_mismatch = P.EffectiveAccess(P.ServicePrincipal("t", ("qc",), True, "enforce"), "sales")       # role นอก scope
+check("B1: effective_role นอก principal scope -> PermissionError",
+      raises(lambda: PROV.build_candidates(fake, "c", _mismatch, [0.0] * 4, 10, IDENTITY), PermissionError))
+
+# ── B2: backend คืน point ผิดสิทธิ์ (bypass filter) -> fail ทั้ง batch ─────────
+class BuggyQdrant:
+    def __init__(self, points): self.points = points
+    def query_points(self, collection_name, query, query_filter, limit, with_payload):
+        return _Res(self.points[:limit])   # จงใจ ignore filter (จำลอง backend drift/บั๊ก)
+_buggy = BuggyQdrant([pt("S", ["sales"], 0.99, "H", "secret ห้ามเห็น")])
+check("B2: backend คืน sales-only point ให้ qc -> PermissionError (postcondition fail batch)",
+      raises(lambda: PROV.build_candidates(_buggy, "c", access("qc"), [0.0] * 4, 10, IDENTITY), PermissionError))
+_notv1 = _Pt("N", {"source": "D", "text": "x"}, 0.5)   # ไม่มี policy-v1 markers
+check("B2: backend คืน payload ไม่ใช่ policy-v1 -> PermissionError",
+      raises(lambda: PROV.build_candidates(BuggyQdrant([_notv1]), "c", access("qc"), [0.0] * 4, 10, IDENTITY), PermissionError))
+
+# ── M2: strict payload/param types ────────────────────────────────────────────
+check("M2: heading ไม่ใช่ str -> ValueError", raises(lambda: PROV.build_rerank_text({"heading": 123, "text": "x"}), ValueError))
+check("M2: max_chars ไม่ positive -> ValueError", raises(lambda: PROV.build_rerank_text({"heading": "H", "text": "C"}, max_chars=0), ValueError))
+check("M2: top_n > MAX_TOP_N -> ValueError", raises(lambda: PROV.build_candidates(fake, "c", access("qc"), [0.0] * 4, PROV.MAX_TOP_N + 1, IDENTITY), ValueError))
+_badsrc = pt("X", ["qc", "admin"], 0.5, "H", "T"); _badsrc.payload["source"] = None
+check("M2: source=None -> ValueError (ไม่ coerce เป็น 'None')",
+      raises(lambda: PROV.build_candidates(FakeQdrant([_badsrc]), "c", access("qc"), [0.0] * 4, 10, IDENTITY), ValueError))
+
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

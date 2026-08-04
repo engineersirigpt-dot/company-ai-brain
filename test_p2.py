@@ -187,7 +187,7 @@ check("M1: corpus_manifest_sha256 เปลี่ยนเมื่อ ACL เ�
       E.corpus_manifest_sha256(CORPUS) != E.corpus_manifest_sha256(
           {"pa": centry("D1", ["qc", "admin", "sales"]), "pb": CORPUS["pb"]}))
 check("M1: benchmark_manifest มี eval+corpus hash + contract version",
-      set(E.benchmark_manifest([case()], CORPUS, KNOWN)) >=
+      set(E.artifact_manifest_unapproved([case()], CORPUS, KNOWN)) >=
       {"eval_set_sha256", "corpus_manifest_sha256", "benchmark_contract_version", "rerank_text_version"})
 
 # ── B2.1: is_authorized reject scalar/malformed policy ────────────────────────
@@ -251,6 +251,25 @@ check("validate_signoff: decision != approved -> error", any("decision" in e for
 check("decision_benchmark: <50 test intents -> error แม้ signoff ตรง",
       len(E.decision_benchmark_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs)) > 0)
 
+# ── B3: single decision entry point ; mechanics-smoke แยกชัด ───────────────────
+check("B3: artifact_manifest_unapproved approved=False (smoke)",
+      E.artifact_manifest_unapproved([case()], CORPUS, KNOWN).get("approved") is False)
+check("B3: decision_benchmark_manifest ไม่มี signoff -> ValueError (bypass ไม่ได้)",
+      raises(lambda: E.decision_benchmark_manifest([case()], CORPUS, KNOWN, ["qc"], ["direct"], None, "m4", "canary")))
+check("B3: decision_benchmark_manifest ขาด m4 evidence -> ValueError",
+      raises(lambda: E.decision_benchmark_manifest([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs, None, "canary")))
+
+# ── M1: combined gate malformed artifacts -> controlled (ไม่ crash) ────────────
+def _no_crash(fn):
+    try:
+        return isinstance(fn(), list)
+    except (ValueError, TypeError, AttributeError):
+        return False
+check("M1: decision_benchmark cases=[] corpus=None -> controlled (ไม่ crash)",
+      _no_crash(lambda: E.decision_benchmark_errors([], None, KNOWN, ["qc"], ["direct"], {"decision": "approved"})))
+check("M1: validate_signoff corpus=None (hash fail) -> controlled list",
+      isinstance(E.validate_signoff(dict(_gs, corpus_manifest_sha256="x"), [case()], None), list))
+
 # ── M1.1: corpus/cases fail-closed ────────────────────────────────────────────
 check("M1.1: corpus ว่าง -> error", E.validate_corpus({}) != [])
 check("M1.1: corpus entry ไม่ใช่ dict -> error (ไม่ crash)", any("ไม่ใช่ object" in e for e in E.validate_corpus({"px": "bad"})))
@@ -260,7 +279,7 @@ check("M1.1: corpus payload scalar allowed_roles -> error", any("contract" in e 
 check("M1.1: corpus rerank_text ว่าง -> error", any("rerank_text" in e for e in E.validate_corpus({"px": centry("D1", ["qc"], text=" ")})))
 check("M1.1: corpus ดี -> ไม่มี error", E.validate_corpus(CORPUS) == [])
 check("M1.1: validate_benchmark cases ว่าง -> error", any("cases ว่าง" in e for e in E.validate_benchmark([], CORPUS, KNOWN)))
-check("M1.1: benchmark_manifest invalid -> ValueError", raises(lambda: E.benchmark_manifest([], CORPUS, KNOWN)))
+check("M1.1: benchmark_manifest invalid -> ValueError", raises(lambda: E.artifact_manifest_unapproved([], CORPUS, KNOWN)))
 check("M1.1: corpus_manifest_sha256 rerank_text ผิดชนิด -> ValueError",
       raises(lambda: E.corpus_manifest_sha256({"px": {"source": "D1", "rerank_text": 123, "payload": pl(["qc"])}})))
 
@@ -280,7 +299,7 @@ check("M1.2: validate_ranking_eval_set corpus=None -> controlled error",
 check("M1.2: validate_benchmark corpus=list -> error (ไม่ crash)", len(E.validate_benchmark(rc, [], KNOWN)) > 0)
 check("M1.2: validate_benchmark corpus=string -> error", len(E.validate_benchmark(rc, "bad", KNOWN)) > 0)
 check("M1.2: benchmark_manifest corpus=None -> ValueError (ไม่ AttributeError)",
-      raises(lambda: E.benchmark_manifest(rc, None, KNOWN)))
+      raises(lambda: E.artifact_manifest_unapproved(rc, None, KNOWN)))
 
 # ── M1.3: lone surrogate (Cs) reject + canonical hash (surrogate/NaN safe) ─────
 check("M1.3: _bad_str reject lone surrogate (Cs)", E._bad_str("\ud800") is True)
