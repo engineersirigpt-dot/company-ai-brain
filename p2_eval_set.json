@@ -1,1224 +1,3018 @@
 [
  {
-  "query_id": "q-000",
-  "query": "ขั้นตอนการเสนอราคางานพิมพ์ทำอย่างไร",
+  "query_id": "q-0000",
+  "intent_id": "INT-D-QUOTE",
+  "query": "ลูกค้าอยากได้ราคางานพิมพ์ ต้องเริ่มจากตรงไหน",
   "role": "sales",
   "lang": "th",
   "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
   "split": "dev",
   "case_type": "ranking",
   "relevance": {
-   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3
+   "f24e2285-0ffa-5565-bfb8-83ba36dfd0e8": 3
   },
+  "hard_negative_ids": [],
   "relevant_sources": [
-   "SOP-SALES-721"
+   "P2-SYNTH-D-QUOTE"
   ],
-  "label_status": "draft"
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
  },
  {
-  "query_id": "q-001",
-  "query": "quote งานพิมพ์ มีขั้นตอนอะไรบ้าง",
+  "query_id": "q-0001",
+  "intent_id": "INT-D-QUOTE",
+  "query": "quote งานพิมพ์เริ่มยังไง",
   "role": "sales",
   "lang": "th-en",
-  "category": "thai-eng-mix",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "f24e2285-0ffa-5565-bfb8-83ba36dfd0e8": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-QUOTE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0002",
+  "intent_id": "INT-D-RECALL",
+  "query": "สินค้าเสียหลุดไปถึงลูกค้าต้องทำไง",
+  "role": "qc",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3
+   "56bb34fb-580d-53ad-a34e-4cf02d145e4b": 3
   },
+  "hard_negative_ids": [],
   "relevant_sources": [
-   "SOP-SALES-721"
+   "P2-SYNTH-D-RECALL"
   ],
-  "label_status": "draft"
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
  },
  {
-  "query_id": "q-002",
-  "query": "ใบเสนอราคาต้องขออนุมัติเมื่อไร",
+  "query_id": "q-0003",
+  "intent_id": "INT-D-RECALL",
+  "query": "product recall procedure",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "56bb34fb-580d-53ad-a34e-4cf02d145e4b": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-RECALL"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0004",
+  "intent_id": "INT-D-TRAIN",
+  "query": "เข้าใหม่ต้องอบรมอะไรบ้าง",
+  "role": "hr",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "27531b7a-378d-5971-8ab2-5837862cbe82": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-TRAIN"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0005",
+  "intent_id": "INT-D-TRAIN",
+  "query": "new employee onboarding training",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "27531b7a-378d-5971-8ab2-5837862cbe82": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-TRAIN"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0006",
+  "intent_id": "INT-D-PO",
+  "query": "จะซื้อของเข้าคลังเริ่มยังไง",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "81cc123f-0099-5c0c-87b1-49f8f0cc642d": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-PO"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0007",
+  "intent_id": "INT-D-PO",
+  "query": "raw material purchasing flow",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "81cc123f-0099-5c0c-87b1-49f8f0cc642d": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-PO"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0008",
+  "intent_id": "INT-D-PRESS",
+  "query": "ก่อนเดินเครื่องพิมพ์ต้องเซ็ตอะไร",
+  "role": "production",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "49992f89-1568-5bad-8875-36ff22faa5b1": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-PRESS"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0009",
+  "intent_id": "INT-D-PRESS",
+  "query": "press setup ก่อนรันจริง",
+  "role": "production",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "49992f89-1568-5bad-8875-36ff22faa5b1": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-PRESS"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0010",
+  "intent_id": "INT-D-SHIP",
+  "query": "จะส่งของออกต้องเตรียมอะไร",
+  "role": "logistics",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "0aadd273-a27f-5ebf-b64a-7d47641ff7bc": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-SHIP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0011",
+  "intent_id": "INT-D-SHIP",
+  "query": "shipping preparation steps",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "0aadd273-a27f-5ebf-b64a-7d47641ff7bc": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-SHIP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0012",
+  "intent_id": "INT-D-MAINT",
+  "query": "ดูแลเครื่องจักรยังไงไม่ให้พัง",
+  "role": "engineering",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "c56a29a8-95dd-53a9-93cd-33e8c0cd4c3b": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-MAINT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0013",
+  "intent_id": "INT-D-MAINT",
+  "query": "preventive maintenance รอบไหน",
+  "role": "engineering",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "c56a29a8-95dd-53a9-93cd-33e8c0cd4c3b": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-MAINT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0014",
+  "intent_id": "INT-D-BACKUP",
+  "query": "ข้อมูลระบบ backup ยังไง",
+  "role": "it",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "f3f7f74d-eb93-5f27-a381-51ac2b7440c7": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-BACKUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0015",
+  "intent_id": "INT-D-BACKUP",
+  "query": "database backup policy",
+  "role": "it",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "f3f7f74d-eb93-5f27-a381-51ac2b7440c7": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-BACKUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0016",
+  "intent_id": "INT-D-COLOR2",
+  "query": "ก่อนส่งงานต้องเช็คสียังไง",
+  "role": "qc",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "99337564-68ff-5ac5-a635-80620ffa9221": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-COLOR2"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0017",
+  "intent_id": "INT-D-COLOR2",
+  "query": "color check ก่อน delivery",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "99337564-68ff-5ac5-a635-80620ffa9221": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-COLOR2"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0018",
+  "intent_id": "INT-D-WRAP",
+  "query": "รัดพาเลทไม่ให้ของล้มทำไง",
+  "role": "production",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1878f437-d56a-59b9-8afb-d1a6cf7d221f": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-WRAP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0019",
+  "intent_id": "INT-D-WRAP",
+  "query": "pallet wrapping กันล้ม",
+  "role": "production",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1878f437-d56a-59b9-8afb-d1a6cf7d221f": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-WRAP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0020",
+  "intent_id": "INT-D-FIRSTLOGIN",
+  "query": "พนักงานใหม่ล็อกอินระบบครั้งแรกยังไง",
+  "role": "it",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7f8c3098-9265-5bf3-bbe3-d7737c562a11": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-FIRSTLOGIN"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0021",
+  "intent_id": "INT-D-FIRSTLOGIN",
+  "query": "first time login ทำไง",
+  "role": "it",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7f8c3098-9265-5bf3-bbe3-d7737c562a11": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-FIRSTLOGIN"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0022",
+  "intent_id": "INT-D-PAYDAY",
+  "query": "เงินเดือนออกวันไหน",
+  "role": "hr",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "32db6fa7-600b-54ee-9cdd-13522560dac2": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-PAYDAY"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0023",
+  "intent_id": "INT-D-PAYDAY",
+  "query": "payday วันที่เท่าไร",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "32db6fa7-600b-54ee-9cdd-13522560dac2": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-PAYDAY"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0024",
+  "intent_id": "INT-D-SORT",
+  "query": "เจอของเสียแล้วต้องแยกยังไง",
+  "role": "qc",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7409b923-2733-5952-8f89-ea3921d83c2b": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-SORT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0025",
+  "intent_id": "INT-D-SORT",
+  "query": "defect sorting ทำไง",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7409b923-2733-5952-8f89-ea3921d83c2b": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-SORT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0026",
+  "intent_id": "INT-D-EXPORTDOC",
+  "query": "ส่งของออกนอกต้องใช้เอกสารอะไร",
+  "role": "logistics",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "98acd1f6-e80e-5193-9335-1f113304dc84": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-EXPORTDOC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0027",
+  "intent_id": "INT-D-EXPORTDOC",
+  "query": "export documents ต้องมีอะไร",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "98acd1f6-e80e-5193-9335-1f113304dc84": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-EXPORTDOC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0028",
+  "intent_id": "INT-D-READSPEC",
+  "query": "อ่านแบบเครื่องจักรดูตรงไหน",
+  "role": "engineering",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "3e01b89a-fdeb-5ae5-ad6f-cc57dcb4651c": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-READSPEC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0029",
+  "intent_id": "INT-D-READSPEC",
+  "query": "machine drawing อ่านยังไง",
+  "role": "engineering",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "3e01b89a-fdeb-5ae5-ad6f-cc57dcb4651c": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-READSPEC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0030",
+  "intent_id": "INT-D-MAKEREADY",
+  "query": "เตรียมงานก่อนพิมพ์ลดเวลายังไง",
+  "role": "production",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "853895cb-207a-54b5-88ee-958f09df4691": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-MAKEREADY"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0031",
+  "intent_id": "INT-D-MAKEREADY",
+  "query": "make-ready ลด setup time",
+  "role": "production",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "853895cb-207a-54b5-88ee-958f09df4691": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-MAKEREADY"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0032",
+  "intent_id": "INT-D-FOLLOWUP",
+  "query": "ส่งใบเสนอราคาไปแล้วตามลูกค้ายังไง",
+  "role": "sales",
+  "lang": "th",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1c17c310-ad58-5b03-8857-dcd4b0c9524a": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-FOLLOWUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "colloquial"
+ },
+ {
+  "query_id": "q-0033",
+  "intent_id": "INT-D-FOLLOWUP",
+  "query": "customer follow-up หลัง quote",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "direct",
+  "challenge_tags": [
+   "direct"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "1c17c310-ad58-5b03-8857-dcd4b0c9524a": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-D-FOLLOWUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0034",
+  "intent_id": "INT-S-APPROVE",
+  "query": "ใบเสนอราคาต้องให้ใครอนุมัติ",
   "role": "sales",
   "lang": "th",
   "category": "sibling-hard-negative",
-  "split": "test",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "dev",
   "case_type": "ranking",
   "relevance": {
-   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 3
+   "22fc7a99-9b35-5a78-8682-6e5478df4fd5": 3
   },
-  "relevant_sources": [
-   "SOP-SALES-721"
+  "hard_negative_ids": [
+   "9394879c-a1ea-53a5-939b-2f09ef644b2a"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-S-APPROVE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "direct"
  },
  {
-  "query_id": "q-003",
-  "query": "quotation ต้อง approve ตอนไหน",
+  "query_id": "q-0035",
+  "intent_id": "INT-S-APPROVE",
+  "query": "quotation approval limit เท่าไร",
   "role": "sales",
   "lang": "th-en",
-  "category": "thai-eng-mix",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "22fc7a99-9b35-5a78-8682-6e5478df4fd5": 3
+  },
+  "hard_negative_ids": [
+   "9394879c-a1ea-53a5-939b-2f09ef644b2a"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-APPROVE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0036",
+  "intent_id": "INT-S-MOCK",
+  "query": "ต้องซ้อมเรียกคืนบ่อยแค่ไหน",
+  "role": "qc",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 3
+   "357f2b12-9728-5015-9d5c-383285e42690": 3
   },
-  "relevant_sources": [
-   "SOP-SALES-721"
+  "hard_negative_ids": [
+   "40fdb987-b1b5-508b-8686-71e4c38cfc4d"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-S-MOCK"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "direct"
  },
  {
-  "query_id": "q-004",
-  "query": "ลูกค้าขอแก้สเปกต้องทำใบเสนอราคาอย่างไร",
+  "query_id": "q-0037",
+  "intent_id": "INT-S-MOCK",
+  "query": "mock recall frequency",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "357f2b12-9728-5015-9d5c-383285e42690": 3
+  },
+  "hard_negative_ids": [
+   "40fdb987-b1b5-508b-8686-71e4c38cfc4d"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-MOCK"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0038",
+  "intent_id": "INT-S-LEAVE",
+  "query": "ลาป่วยกี่วันต้องมีใบแพทย์",
+  "role": "hr",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4788d809-9f0b-5230-8ea6-0b10a55412e5": 3
+  },
+  "hard_negative_ids": [
+   "8f55acd8-6598-5abb-a4e9-372bfa195567"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-LEAVE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "direct"
+ },
+ {
+  "query_id": "q-0039",
+  "intent_id": "INT-S-LEAVE",
+  "query": "sick leave ต้องมี medical cert เมื่อไร",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4788d809-9f0b-5230-8ea6-0b10a55412e5": 3
+  },
+  "hard_negative_ids": [
+   "8f55acd8-6598-5abb-a4e9-372bfa195567"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-LEAVE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0040",
+  "intent_id": "INT-S-VENDOR",
+  "query": "ประเมินซัพพลายเออร์ทุกกี่เดือน",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "74a910d3-debf-5bb8-a0b8-8be439214433": 3
+  },
+  "hard_negative_ids": [
+   "44418bfc-b24c-5f1e-8261-6fe150feb836"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-VENDOR"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "direct"
+ },
+ {
+  "query_id": "q-0041",
+  "intent_id": "INT-S-VENDOR",
+  "query": "vendor evaluation cycle",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "74a910d3-debf-5bb8-a0b8-8be439214433": 3
+  },
+  "hard_negative_ids": [
+   "44418bfc-b24c-5f1e-8261-6fe150feb836"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-VENDOR"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0042",
+  "intent_id": "INT-S-WASTE",
+  "query": "เป้าของเสียการผลิตไม่เกินเท่าไร",
+  "role": "production",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "adeeb534-5a4c-5185-90c4-a95221a208f4": 3
+  },
+  "hard_negative_ids": [
+   "2c7c891b-f91a-5203-bde2-89d263cf18e6"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-WASTE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "direct"
+ },
+ {
+  "query_id": "q-0043",
+  "intent_id": "INT-S-WASTE",
+  "query": "production waste target %",
+  "role": "production",
+  "lang": "th-en",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "adeeb534-5a4c-5185-90c4-a95221a208f4": 3
+  },
+  "hard_negative_ids": [
+   "2c7c891b-f91a-5203-bde2-89d263cf18e6"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-WASTE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0044",
+  "intent_id": "INT-S-PLAN",
+  "query": "ลดค่าขนส่งด้วยการวางแผนยังไง",
+  "role": "logistics",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "5cd1573a-a593-5124-b3b5-bb8266fc16c1": 3
+  },
+  "hard_negative_ids": [
+   "8a3eefca-a672-50e8-b160-dc72dfce0265"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-PLAN"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "direct"
+ },
+ {
+  "query_id": "q-0045",
+  "intent_id": "INT-S-PLAN",
+  "query": "transport planning ลดเที่ยว",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "5cd1573a-a593-5124-b3b5-bb8266fc16c1": 3
+  },
+  "hard_negative_ids": [
+   "8a3eefca-a672-50e8-b160-dc72dfce0265"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-PLAN"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0046",
+  "intent_id": "INT-S-CAL",
+  "query": "ต้องหล่อลื่นข้อต่อบ่อยแค่ไหน",
+  "role": "engineering",
+  "lang": "th",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7f87fbab-698d-5778-bc27-fe2c52d45c30": 3
+  },
+  "hard_negative_ids": [
+   "6476e6ae-6459-54f9-9102-2623da2de496"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-CAL"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "direct"
+ },
+ {
+  "query_id": "q-0047",
+  "intent_id": "INT-S-CAL",
+  "query": "joint lubrication interval",
+  "role": "engineering",
+  "lang": "th-en",
+  "category": "sibling-hard-negative",
+  "challenge_tags": [
+   "sibling-hard-negative"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7f87fbab-698d-5778-bc27-fe2c52d45c30": 3
+  },
+  "hard_negative_ids": [
+   "6476e6ae-6459-54f9-9102-2623da2de496"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-S-CAL"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0048",
+  "intent_id": "INT-T-DE",
+  "query": "ค่า Delta-E สูงสุดที่ยอมรับได้เท่าไร",
+  "role": "qc",
+  "lang": "th",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "f42f8858-cc50-58ff-94fc-b9d73b46c698": 3
+  },
+  "hard_negative_ids": [
+   "2a8b6d72-28e2-59fa-a260-646bf7d9b9ae"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-DE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "row-lookup"
+ },
+ {
+  "query_id": "q-0049",
+  "intent_id": "INT-T-DE",
+  "query": "max Delta-E จากตารางเท่าไร",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "f42f8858-cc50-58ff-94fc-b9d73b46c698": 3
+  },
+  "hard_negative_ids": [
+   "2a8b6d72-28e2-59fa-a260-646bf7d9b9ae"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-DE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0050",
+  "intent_id": "INT-T-LEADTIME",
+  "query": "โบรชัวร์ lead time กี่วัน",
+  "role": "sales",
+  "lang": "th",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "bb7a0a81-b7ba-5173-949c-4e08d9b330cf": 3
+  },
+  "hard_negative_ids": [
+   "677a9cd8-5924-59c5-9212-5e7a005a7989"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-LEADTIME"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "row-lookup"
+ },
+ {
+  "query_id": "q-0051",
+  "intent_id": "INT-T-LEADTIME",
+  "query": "brochure lead time จากตาราง",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "bb7a0a81-b7ba-5173-949c-4e08d9b330cf": 3
+  },
+  "hard_negative_ids": [
+   "677a9cd8-5924-59c5-9212-5e7a005a7989"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-LEADTIME"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0052",
+  "intent_id": "INT-T-REORDER",
+  "query": "หมึกดำ reorder point เท่าไร",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "43ba35ed-1f52-522b-89f6-1d4218ed2b06": 3
+  },
+  "hard_negative_ids": [
+   "d061c058-67aa-5ddd-9fe4-430eb3d59c8f"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-REORDER"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "row-lookup"
+ },
+ {
+  "query_id": "q-0053",
+  "intent_id": "INT-T-REORDER",
+  "query": "black ink reorder จากตาราง",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "43ba35ed-1f52-522b-89f6-1d4218ed2b06": 3
+  },
+  "hard_negative_ids": [
+   "d061c058-67aa-5ddd-9fe4-430eb3d59c8f"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-REORDER"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0054",
+  "intent_id": "INT-T-SPEED",
+  "query": "กระดาษหนาเดินเครื่องได้กี่แผ่นต่อชั่วโมง",
+  "role": "production",
+  "lang": "th",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7758cdca-0577-5888-b523-49689245dffd": 3
+  },
+  "hard_negative_ids": [
+   "70c02960-d707-5579-9308-a9e25df68c83"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-SPEED"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "row-lookup"
+ },
+ {
+  "query_id": "q-0055",
+  "intent_id": "INT-T-SPEED",
+  "query": "thick paper speed จากตาราง",
+  "role": "production",
+  "lang": "th-en",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "7758cdca-0577-5888-b523-49689245dffd": 3
+  },
+  "hard_negative_ids": [
+   "70c02960-d707-5579-9308-a9e25df68c83"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-SPEED"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0056",
+  "intent_id": "INT-T-PALLET",
+  "query": "พาเลทพลาสติกหนักเท่าไร",
+  "role": "logistics",
+  "lang": "th",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "68922ae5-0290-50d7-bebb-ba0790e7c63e": 3
+  },
+  "hard_negative_ids": [
+   "1ff09b6e-c4e0-5d55-a1b0-a5814bb06979"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-PALLET"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "row-lookup"
+ },
+ {
+  "query_id": "q-0057",
+  "intent_id": "INT-T-PALLET",
+  "query": "plastic pallet weight จากตาราง",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "68922ae5-0290-50d7-bebb-ba0790e7c63e": 3
+  },
+  "hard_negative_ids": [
+   "1ff09b6e-c4e0-5d55-a1b0-a5814bb06979"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-PALLET"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0058",
+  "intent_id": "INT-T-TORQUE",
+  "query": "torque ข้อต่อกลางเท่าไร",
+  "role": "engineering",
+  "lang": "th",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "a8d8223a-3757-50d2-bcb7-3b880c2033d5": 3
+  },
+  "hard_negative_ids": [
+   "399241da-02a2-5af9-a339-f4b9dc850fbf"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-TORQUE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "row-lookup"
+ },
+ {
+  "query_id": "q-0059",
+  "intent_id": "INT-T-TORQUE",
+  "query": "middle joint torque จากตาราง",
+  "role": "engineering",
+  "lang": "th-en",
+  "category": "table-row",
+  "challenge_tags": [
+   "table-row"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "a8d8223a-3757-50d2-bcb7-3b880c2033d5": 3
+  },
+  "hard_negative_ids": [
+   "399241da-02a2-5af9-a339-f4b9dc850fbf"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-T-TORQUE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0060",
+  "intent_id": "INT-N-DEFECT",
+  "query": "งานไม่มีจุดสกปรกแต่สีเพี้ยน ถือว่าผ่านไหม",
+  "role": "qc",
+  "lang": "th",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "1e7801e0-834f-54d9-971f-13ab1060055c": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-DEFECT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "negation"
+ },
+ {
+  "query_id": "q-0061",
+  "intent_id": "INT-N-DEFECT",
+  "query": "clean but off-color ผ่านไหม",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "1e7801e0-834f-54d9-971f-13ab1060055c": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-DEFECT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0062",
+  "intent_id": "INT-N-RECALL",
+  "query": "สินค้ายังไม่ส่งลูกค้า ต้องเปิด recall ไหม",
+  "role": "qc",
+  "lang": "th",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "73b37d51-0003-52f6-bef3-bf1bed011354": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-RECALL"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "negation"
+ },
+ {
+  "query_id": "q-0063",
+  "intent_id": "INT-N-RECALL",
+  "query": "still in warehouse ใช้ recall ไหม",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "73b37d51-0003-52f6-bef3-bf1bed011354": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-RECALL"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0064",
+  "intent_id": "INT-N-VENDOR",
+  "query": "งานจัดซื้อปกติใช้ vendor สำรองได้ไหม",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "55bce94c-71d5-5292-b69e-1c965ce16c06": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-VENDOR"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "negation"
+ },
+ {
+  "query_id": "q-0065",
+  "intent_id": "INT-N-VENDOR",
+  "query": "normal order ใช้ backup vendor ได้ไหม",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "55bce94c-71d5-5292-b69e-1c965ce16c06": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-VENDOR"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0066",
+  "intent_id": "INT-N-OT",
+  "query": "ทำ OT โดยไม่ขออนุมัติก่อน เบิกได้ไหม",
+  "role": "hr",
+  "lang": "th",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "5376f791-30c0-5c6b-b3d8-9a622bd3f2f7": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-OT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "negation"
+ },
+ {
+  "query_id": "q-0067",
+  "intent_id": "INT-N-OT",
+  "query": "OT ไม่ได้ approve เบิกได้ไหม",
+  "role": "hr",
+  "lang": "th-en",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "5376f791-30c0-5c6b-b3d8-9a622bd3f2f7": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-OT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0068",
+  "intent_id": "INT-N-FSC",
+  "query": "ลูกค้าขอ FSC แต่งานไม่ certified พิมพ์ได้ไหม",
+  "role": "qc",
+  "lang": "th",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "04b3abe8-72e3-551d-991a-3190b5b14561": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-FSC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "negation"
+ },
+ {
+  "query_id": "q-0069",
+  "intent_id": "INT-N-FSC",
+  "query": "non-certified job ใส่ FSC ได้ไหม",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "04b3abe8-72e3-551d-991a-3190b5b14561": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-FSC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0070",
+  "intent_id": "INT-N-SHIP",
+  "query": "QC ยังไม่ผ่าน ขึ้นรถส่งก่อนได้ไหม",
+  "role": "logistics",
+  "lang": "th",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "69c546ec-2802-54db-9f31-817f5108dccd": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-SHIP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "negation"
+ },
+ {
+  "query_id": "q-0071",
+  "intent_id": "INT-N-SHIP",
+  "query": "QC not passed ส่งก่อนได้ไหม",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "negation",
+  "challenge_tags": [
+   "negation"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "69c546ec-2802-54db-9f31-817f5108dccd": 3
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-N-SHIP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0072",
+  "intent_id": "INT-C-DE",
+  "query": "เกณฑ์ Delta-E ที่ใช้อยู่ตอนนี้เท่าไร",
+  "role": "qc",
+  "lang": "th",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "9faf7cb1-2177-5484-bfe0-4626d3288912": 3
+  },
+  "hard_negative_ids": [
+   "9a874777-0158-5b12-823a-2ad152b569c6"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-C-DE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "current"
+ },
+ {
+  "query_id": "q-0073",
+  "intent_id": "INT-C-DE",
+  "query": "current Delta-E limit เท่าไร",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "9faf7cb1-2177-5484-bfe0-4626d3288912": 3
+  },
+  "hard_negative_ids": [
+   "9a874777-0158-5b12-823a-2ad152b569c6"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-C-DE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0074",
+  "intent_id": "INT-C-LEAD",
+  "query": "lead time นามบัตรที่ใช้ปัจจุบันกี่วัน",
   "role": "sales",
   "lang": "th",
   "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "f7f906ff-eb29-5be3-9832-523dc7b26b87": 3
+   "a866e353-f3c9-5be8-9923-062b11f928dc": 3
   },
-  "relevant_sources": [
-   "SOP-SALES-721"
+  "hard_negative_ids": [
+   "46528b80-df6d-5bb9-a78b-7c1d3fca72c5"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-LEAD"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "current"
  },
  {
-  "query_id": "q-005",
-  "query": "revise quotation ทำยังไง",
+  "query_id": "q-0075",
+  "intent_id": "INT-C-LEAD",
+  "query": "current business card lead time",
   "role": "sales",
   "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "f7f906ff-eb29-5be3-9832-523dc7b26b87": 3
-  },
-  "relevant_sources": [
-   "SOP-SALES-721"
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
   ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-006",
-  "query": "ขั้นตอนการเรียกคืนผลิตภัณฑ์จากลูกค้า",
-  "role": "qc",
-  "lang": "th",
-  "category": "direct",
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "881011b0-8745-5400-857b-ddae45515590": 3
+   "a866e353-f3c9-5be8-9923-062b11f928dc": 3
   },
-  "relevant_sources": [
-   "SOP-RECALL-852"
+  "hard_negative_ids": [
+   "46528b80-df6d-5bb9-a78b-7c1d3fca72c5"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-LEAD"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
  },
  {
-  "query_id": "q-007",
-  "query": "product recall procedure คืออะไร",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "881011b0-8745-5400-857b-ddae45515590": 3
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-008",
-  "query": "การซ้อม mock recall ต้องทำบ่อยแค่ไหน",
-  "role": "qc",
-  "lang": "th",
-  "category": "table-row",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "8865c83d-8cc9-5f12-b0fa-e7f8feb364fb": 3
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-009",
-  "query": "mock recall ปีละกี่ครั้ง",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "8865c83d-8cc9-5f12-b0fa-e7f8feb364fb": 3
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-010",
-  "query": "ต้องรายงานผลการเรียกคืนภายในกี่วัน",
-  "role": "qc",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "71876cf1-7234-5851-9a99-61461bfffbdc": 3
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-011",
-  "query": "recall report ส่งเมื่อไร",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "71876cf1-7234-5851-9a99-61461bfffbdc": 3
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-012",
-  "query": "การอบรมพนักงานใหม่มีหัวข้ออะไรบ้าง",
-  "role": "hr",
-  "lang": "th",
-  "category": "direct",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
-  },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-013",
-  "query": "new employee training หัวข้ออะไร",
-  "role": "hr",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
-  },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-014",
-  "query": "โครงสร้างเงินเดือนและโบนัสเป็นอย่างไร",
-  "role": "hr",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "e2d19a82-a7d1-58ce-a364-18486d9aae08": 3
-  },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-015",
-  "query": "salary structure บริษัทเป็นยังไง",
-  "role": "hr",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "e2d19a82-a7d1-58ce-a364-18486d9aae08": 3
-  },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-016",
-  "query": "ลาป่วยเกินกี่วันต้องมีใบรับรองแพทย์",
-  "role": "hr",
-  "lang": "th",
-  "category": "table-row",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "b6e07cbc-e21c-5a41-af9b-9768531cfea8": 3
-  },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-017",
-  "query": "sick leave เกินกี่วันต้องมีใบแพทย์",
-  "role": "hr",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "b6e07cbc-e21c-5a41-af9b-9768531cfea8": 3
-  },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-018",
-  "query": "ขั้นตอนการจัดซื้อวัตถุดิบและการขออนุมัติ",
+  "query_id": "q-0076",
+  "intent_id": "INT-C-REORDER",
+  "query": "reorder หมึกดำปัจจุบันเท่าไร",
   "role": "purchasing",
   "lang": "th",
-  "category": "direct",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
+   "a98743b7-fe09-5fa2-9c1e-26871e4c8022": 3
   },
-  "relevant_sources": [
-   "SOP-PUR-741"
+  "hard_negative_ids": [
+   "f5a1bbe5-4f4a-590f-8d68-5ff4a8612894"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-REORDER"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "current"
  },
  {
-  "query_id": "q-019",
-  "query": "purchasing วัตถุดิบ ขั้นตอนอะไร",
+  "query_id": "q-0077",
+  "intent_id": "INT-C-REORDER",
+  "query": "current black ink reorder",
   "role": "purchasing",
   "lang": "th-en",
-  "category": "thai-eng-mix",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
+   "a98743b7-fe09-5fa2-9c1e-26871e4c8022": 3
   },
-  "relevant_sources": [
-   "SOP-PUR-741"
+  "hard_negative_ids": [
+   "f5a1bbe5-4f4a-590f-8d68-5ff4a8612894"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-REORDER"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
  },
  {
-  "query_id": "q-020",
-  "query": "ต้องประเมิน vendor บ่อยแค่ไหน",
-  "role": "purchasing",
+  "query_id": "q-0078",
+  "intent_id": "INT-C-OT",
+  "query": "อัตรา OT ที่ใช้ตอนนี้กี่เท่า",
+  "role": "hr",
   "lang": "th",
-  "category": "table-row",
-  "split": "dev",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
+  "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 3
+   "e60f16aa-2d1d-5af9-8bd0-c105c2abda5f": 3
   },
-  "relevant_sources": [
-   "SOP-PUR-741"
+  "hard_negative_ids": [
+   "e739041d-7bd8-5479-a22d-18d81cb64f5e"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-OT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "current"
  },
  {
-  "query_id": "q-021",
-  "query": "vendor evaluation ทุกกี่เดือน",
-  "role": "purchasing",
+  "query_id": "q-0079",
+  "intent_id": "INT-C-OT",
+  "query": "current OT rate",
+  "role": "hr",
   "lang": "th-en",
-  "category": "thai-eng-mix",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 3
+   "e60f16aa-2d1d-5af9-8bd0-c105c2abda5f": 3
   },
-  "relevant_sources": [
-   "SOP-PUR-741"
+  "hard_negative_ids": [
+   "e739041d-7bd8-5479-a22d-18d81cb64f5e"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-OT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
  },
  {
-  "query_id": "q-022",
-  "query": "การจัดซื้อเร่งด่วนทำได้ไหม",
-  "role": "purchasing",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
-  },
-  "relevant_sources": [
-   "SOP-PUR-741"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-023",
-  "query": "urgent purchase ทำยังไง",
-  "role": "purchasing",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
-  },
-  "relevant_sources": [
-   "SOP-PUR-741"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-024",
-  "query": "การควบคุมสัญลักษณ์ FSC บนงานพิมพ์",
-  "role": "qc",
-  "lang": "th",
-  "category": "direct",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "5da3b02e-99fa-52b3-b53b-8ec27f87fce1": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-025",
-  "query": "FSC logo control ทำยังไง",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "5da3b02e-99fa-52b3-b53b-8ec27f87fce1": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-026",
-  "query": "ค่า Delta-E ที่ยอมรับได้เท่าไร",
-  "role": "qc",
-  "lang": "th",
-  "category": "table-row",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-027",
-  "query": "Delta-E ยอมรับได้เท่าไหร่",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-028",
-  "query": "เกณฑ์ของเสียงานพิมพ์มีอะไรบ้าง",
-  "role": "qc",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-029",
-  "query": "print defect criteria คืออะไร",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-030",
-  "query": "การตั้งค่าเครื่องพิมพ์ก่อนผลิต",
+  "query_id": "q-0080",
+  "intent_id": "INT-C-SPEED",
+  "query": "ความเร็วกระดาษหนาที่ใช้ปัจจุบันเท่าไร",
   "role": "production",
   "lang": "th",
-  "category": "direct",
-  "split": "dev",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
+  "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "7b92adec-ba89-5625-aef8-4cbe33f634e8": 3
+   "9473c0ac-d732-508b-9217-9813d5344bf1": 3
   },
-  "relevant_sources": [
-   "SOP-PROD-710"
+  "hard_negative_ids": [
+   "57a31c99-23db-5315-94ca-40c03e8d02e0"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-SPEED"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "current"
  },
  {
-  "query_id": "q-031",
-  "query": "press setup ก่อนผลิตทำยังไง",
+  "query_id": "q-0081",
+  "intent_id": "INT-C-SPEED",
+  "query": "current thick paper speed",
   "role": "production",
   "lang": "th-en",
-  "category": "thai-eng-mix",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "7b92adec-ba89-5625-aef8-4cbe33f634e8": 3
+   "9473c0ac-d732-508b-9217-9813d5344bf1": 3
   },
-  "relevant_sources": [
-   "SOP-PROD-710"
+  "hard_negative_ids": [
+   "57a31c99-23db-5315-94ca-40c03e8d02e0"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-SPEED"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
  },
  {
-  "query_id": "q-032",
-  "query": "ขั้นตอน make-ready ลดเวลา setup อย่างไร",
-  "role": "production",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "d0af54c8-a118-5a71-b50f-615673455468": 3
-  },
-  "relevant_sources": [
-   "SOP-PROD-710"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-033",
-  "query": "make-ready ลด setup time ยังไง",
-  "role": "production",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "d0af54c8-a118-5a71-b50f-615673455468": 3
-  },
-  "relevant_sources": [
-   "SOP-PROD-710"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-034",
-  "query": "เป้าหมายของเสียในการผลิตไม่เกินเท่าไร",
-  "role": "production",
-  "lang": "th",
-  "category": "table-row",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
-  },
-  "relevant_sources": [
-   "SOP-PROD-710"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-035",
-  "query": "production waste เป้าไม่เกินกี่ %",
-  "role": "production",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
-  },
-  "relevant_sources": [
-   "SOP-PROD-710"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-036",
-  "query": "ขั้นตอนการจัดส่งและ export",
-  "role": "logistics",
-  "lang": "th",
-  "category": "direct",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "2e8b072e-98b4-5992-88e2-87cae2f89c88": 3
-  },
-  "relevant_sources": [
-   "SOP-LOG-755"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-037",
-  "query": "shipping export procedure คืออะไร",
-  "role": "logistics",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "2e8b072e-98b4-5992-88e2-87cae2f89c88": 3
-  },
-  "relevant_sources": [
-   "SOP-LOG-755"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-038",
-  "query": "การวางแผนขนส่งลดค่าใช้จ่ายอย่างไร",
-  "role": "logistics",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "7d6e32d8-7bf8-5f87-bc24-561275b42175": 3
-  },
-  "relevant_sources": [
-   "SOP-LOG-755"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-039",
-  "query": "transport planning ลดต้นทุนยังไง",
-  "role": "logistics",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "7d6e32d8-7bf8-5f87-bc24-561275b42175": 3
-  },
-  "relevant_sources": [
-   "SOP-LOG-755"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-040",
-  "query": "การบำรุงรักษาเครื่องจักร dobot ทำอย่างไร",
+  "query_id": "q-0082",
+  "intent_id": "INT-C-MAINT",
+  "query": "รอบบำรุงรักษาที่ใช้ปัจจุบันเท่าไร",
   "role": "engineering",
   "lang": "th",
-  "category": "direct",
-  "split": "dev",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
+  "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "90bbefcd-6d5f-581b-b7e1-27301c57dadd": 3
+   "9a23afb8-e277-5d35-aac7-88a5b801d259": 3
   },
-  "relevant_sources": [
-   "SOP-ENG-DOBOT"
+  "hard_negative_ids": [
+   "2dea9e6d-868e-577f-9078-4c3271718e9d"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-MAINT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "current"
  },
  {
-  "query_id": "q-041",
-  "query": "dobot maintenance ทำยังไง",
+  "query_id": "q-0083",
+  "intent_id": "INT-C-MAINT",
+  "query": "current maintenance interval",
   "role": "engineering",
   "lang": "th-en",
-  "category": "thai-eng-mix",
+  "category": "current-superseded",
+  "challenge_tags": [
+   "current-superseded"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "90bbefcd-6d5f-581b-b7e1-27301c57dadd": 3
+   "9a23afb8-e277-5d35-aac7-88a5b801d259": 3
   },
-  "relevant_sources": [
-   "SOP-ENG-DOBOT"
+  "hard_negative_ids": [
+   "2dea9e6d-868e-577f-9078-4c3271718e9d"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-C-MAINT"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
  },
  {
-  "query_id": "q-042",
-  "query": "spec แรงบิดของแขนกลอยู่ที่เท่าไร",
-  "role": "engineering",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "e75d00bb-0205-58c4-93c4-bd24984e7aa4": 3
-  },
-  "relevant_sources": [
-   "SOP-ENG-DOBOT"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-043",
-  "query": "torque spec แขนกล dobot",
-  "role": "engineering",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "e75d00bb-0205-58c4-93c4-bd24984e7aa4": 3
-  },
-  "relevant_sources": [
-   "SOP-ENG-DOBOT"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-044",
-  "query": "การผลิตกล่องลูกฟูกตรวจอะไรบ้าง",
-  "role": "production",
-  "lang": "th",
-  "category": "direct",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "df212dde-c22f-5a33-a2a5-dbdd43cf7fe8": 3
-  },
-  "relevant_sources": [
-   "SOP-PKG-755-06"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-045",
-  "query": "corrugated box production ตรวจอะไร",
-  "role": "production",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "df212dde-c22f-5a33-a2a5-dbdd43cf7fe8": 3
-  },
-  "relevant_sources": [
-   "SOP-PKG-755-06"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-046",
-  "query": "การรัดฟิล์มพาเลทกันสินค้าล้มทำอย่างไร",
-  "role": "production",
-  "lang": "th",
-  "category": "sibling-hard-negative",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "51c571c6-5542-5e75-bc4d-1081b5ee079d": 3
-  },
-  "relevant_sources": [
-   "SOP-PKG-755-06"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-047",
-  "query": "pallet wrap กันล้มยังไง",
-  "role": "production",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "51c571c6-5542-5e75-bc4d-1081b5ee079d": 3
-  },
-  "relevant_sources": [
-   "SOP-PKG-755-06"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-048",
-  "query": "การเข้าใช้ระบบ Manager AE ต้องทำอย่างไร",
-  "role": "it",
-  "lang": "th",
-  "category": "direct",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "64d04951-d287-5002-bc21-8427c71d2e81": 3
-  },
-  "relevant_sources": [
-   "SOP-IT-MGR"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-049",
-  "query": "Manager AE login policy",
-  "role": "it",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "64d04951-d287-5002-bc21-8427c71d2e81": 3
-  },
-  "relevant_sources": [
-   "SOP-IT-MGR"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-050",
-  "query": "การสำรองข้อมูลระบบทำบ่อยแค่ไหน",
-  "role": "it",
-  "lang": "th",
-  "category": "table-row",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "bcfb222d-80e3-5e4d-888d-1bb4419da3a0": 3
-  },
-  "relevant_sources": [
-   "SOP-IT-MGR"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-051",
-  "query": "system backup ทุกกี่วัน",
-  "role": "it",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "bcfb222d-80e3-5e4d-888d-1bb4419da3a0": 3
-  },
-  "relevant_sources": [
-   "SOP-IT-MGR"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-052",
-  "query": "ต้องติดตามลูกค้าหลังส่งใบเสนอราคาภายในกี่วัน",
+  "query_id": "q-0084",
+  "intent_id": "INT-L-721",
+  "query": "ขั้นตอนเสนอราคาตาม P2-SYNTH-721",
   "role": "sales",
   "lang": "th",
-  "category": "table-row",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "4bc5701c-6504-5969-878f-605d71b3feb3": 3
-  },
-  "relevant_sources": [
-   "SOP-SALES-721"
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
   ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-053",
-  "query": "quotation follow-up ภายในกี่วัน",
-  "role": "sales",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "4bc5701c-6504-5969-878f-605d71b3feb3": 3
-  },
-  "relevant_sources": [
-   "SOP-SALES-721"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-054",
-  "query": "PR และ PO ต่างกันอย่างไรในการจัดซื้อ",
-  "role": "purchasing",
-  "lang": "th",
-  "category": "acronym-transliteration",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
-  },
-  "relevant_sources": [
-   "SOP-PUR-741"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-055",
-  "query": "PR vs PO ในการ purchase",
-  "role": "purchasing",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
   "split": "dev",
   "case_type": "ranking",
   "relevance": {
-   "1533ae03-951c-521d-87ab-0f51f428d29a": 3
+   "1508c0be-37f5-5669-886d-cf835f5e47be": 3
   },
-  "relevant_sources": [
-   "SOP-PUR-741"
+  "hard_negative_ids": [
+   "e1ec269c-b04f-5875-858d-eee23dddbe4c"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-L-721"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "code"
  },
  {
-  "query_id": "q-056",
-  "query": "พนักงานใหม่ต้องอบรม ISO และ KPI ไหม",
+  "query_id": "q-0085",
+  "intent_id": "INT-L-721",
+  "query": "P2-SYNTH-721 quotation steps",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "1508c0be-37f5-5669-886d-cf835f5e47be": 3
+  },
+  "hard_negative_ids": [
+   "e1ec269c-b04f-5875-858d-eee23dddbe4c"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-721"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0086",
+  "intent_id": "INT-L-QP741",
+  "query": "การจัดซื้อตาม P2-SYNTH-741 ทำยังไง",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "14f8b70a-3e54-5c6a-a4dd-a74d72cf79f8": 3
+  },
+  "hard_negative_ids": [
+   "b8a627dd-a002-5fe6-b9b4-1ae0415776ff"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-QP741"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "code"
+ },
+ {
+  "query_id": "q-0087",
+  "intent_id": "INT-L-QP741",
+  "query": "P2-SYNTH-741 purchasing flow",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "14f8b70a-3e54-5c6a-a4dd-a74d72cf79f8": 3
+  },
+  "hard_negative_ids": [
+   "b8a627dd-a002-5fe6-b9b4-1ae0415776ff"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-QP741"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0088",
+  "intent_id": "INT-L-WI423",
+  "query": "การควบคุม FSC ตาม P2-SYNTH-423",
+  "role": "qc",
+  "lang": "th",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "f81fba5b-a075-5ee3-b7f7-ecdb80ddb963": 3
+  },
+  "hard_negative_ids": [
+   "1a001f42-0092-5832-9a81-28645775ae47"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-WI423"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "code"
+ },
+ {
+  "query_id": "q-0089",
+  "intent_id": "INT-L-WI423",
+  "query": "P2-SYNTH-423 FSC control",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "f81fba5b-a075-5ee3-b7f7-ecdb80ddb963": 3
+  },
+  "hard_negative_ids": [
+   "1a001f42-0092-5832-9a81-28645775ae47"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-WI423"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0090",
+  "intent_id": "INT-L-QP710",
+  "query": "การตั้งเครื่องตาม P2-SYNTH-710",
+  "role": "production",
+  "lang": "th",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "b3907b48-ae0a-5236-8511-9ff00b1a32a6": 3
+  },
+  "hard_negative_ids": [
+   "fdcba92b-c597-53f1-ac7c-e7c60a5a3ff3"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-QP710"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "code"
+ },
+ {
+  "query_id": "q-0091",
+  "intent_id": "INT-L-QP710",
+  "query": "P2-SYNTH-710 press setup",
+  "role": "production",
+  "lang": "th-en",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "b3907b48-ae0a-5236-8511-9ff00b1a32a6": 3
+  },
+  "hard_negative_ids": [
+   "fdcba92b-c597-53f1-ac7c-e7c60a5a3ff3"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-QP710"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0092",
+  "intent_id": "INT-L-WI755",
+  "query": "การจัดส่งตาม P2-SYNTH-755",
+  "role": "logistics",
+  "lang": "th",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "81b57b08-fc95-5b46-bda4-47781f2790d7": 3
+  },
+  "hard_negative_ids": [
+   "c1ed170a-df82-57c6-8236-b50bc31e27c9"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-WI755"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "code"
+ },
+ {
+  "query_id": "q-0093",
+  "intent_id": "INT-L-WI755",
+  "query": "P2-SYNTH-755 shipping steps",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "81b57b08-fc95-5b46-bda4-47781f2790d7": 3
+  },
+  "hard_negative_ids": [
+   "c1ed170a-df82-57c6-8236-b50bc31e27c9"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-WI755"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0094",
+  "intent_id": "INT-L-QP852",
+  "query": "การเรียกคืนตาม P2-SYNTH-852",
+  "role": "qc",
+  "lang": "th",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4323c7df-870c-57dc-8b5d-680d50396bd7": 3
+  },
+  "hard_negative_ids": [
+   "06dbcd77-8919-5dfd-95a5-d51d265b340f"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-QP852"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "code"
+ },
+ {
+  "query_id": "q-0095",
+  "intent_id": "INT-L-QP852",
+  "query": "P2-SYNTH-852 recall steps",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "lexical-overlap",
+  "challenge_tags": [
+   "lexical-overlap"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "4323c7df-870c-57dc-8b5d-680d50396bd7": 3
+  },
+  "hard_negative_ids": [
+   "06dbcd77-8919-5dfd-95a5-d51d265b340f"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-L-QP852"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0096",
+  "intent_id": "INT-M-QUOTE",
+  "query": "งานเร่งด่วนและเกินห้าแสนคิดราคายังไง",
+  "role": "sales",
+  "lang": "th",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "54ff3481-ded5-5a1b-bc6f-61a2803e3fd6": 3
+  },
+  "hard_negative_ids": [
+   "ce195ef1-88a2-518d-9cb1-bbabce5bfd2c"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-QUOTE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "multi"
+ },
+ {
+  "query_id": "q-0097",
+  "intent_id": "INT-M-QUOTE",
+  "query": "urgent และ over 500k pricing",
+  "role": "sales",
+  "lang": "th-en",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "dev",
+  "case_type": "ranking",
+  "relevance": {
+   "54ff3481-ded5-5a1b-bc6f-61a2803e3fd6": 3
+  },
+  "hard_negative_ids": [
+   "ce195ef1-88a2-518d-9cb1-bbabce5bfd2c"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-QUOTE"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0098",
+  "intent_id": "INT-M-SHIP",
+  "query": "ส่งออกนอกแบบด่วนต้องมีอะไรบ้าง",
+  "role": "logistics",
+  "lang": "th",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "b67d87d4-6084-538f-a3af-350a96ebfc23": 3
+  },
+  "hard_negative_ids": [
+   "38672294-0460-5657-8266-87b0526ef3cc"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-SHIP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "multi"
+ },
+ {
+  "query_id": "q-0099",
+  "intent_id": "INT-M-SHIP",
+  "query": "urgent export requirement",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "b67d87d4-6084-538f-a3af-350a96ebfc23": 3
+  },
+  "hard_negative_ids": [
+   "38672294-0460-5657-8266-87b0526ef3cc"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-SHIP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0100",
+  "intent_id": "INT-M-PO",
+  "query": "ซื้อด่วนและมูลค่าสูงทำยังไง",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "ce92541e-b72d-5cca-bff6-a13a5ffd6c65": 3
+  },
+  "hard_negative_ids": [
+   "a835ef1d-decb-55b8-981c-b8f0c908c822"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-PO"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "multi"
+ },
+ {
+  "query_id": "q-0101",
+  "intent_id": "INT-M-PO",
+  "query": "urgent high-value purchase",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "ce92541e-b72d-5cca-bff6-a13a5ffd6c65": 3
+  },
+  "hard_negative_ids": [
+   "a835ef1d-decb-55b8-981c-b8f0c908c822"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-PO"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0102",
+  "intent_id": "INT-M-QC",
+  "query": "งานสีพิเศษจำนวนมากตรวจยังไง",
+  "role": "qc",
+  "lang": "th",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "f94c638f-6f1e-561c-b4c4-14066aca29e8": 3
+  },
+  "hard_negative_ids": [
+   "e4ccd760-0dc8-5b80-9c62-562c1c54941d"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-QC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "multi"
+ },
+ {
+  "query_id": "q-0103",
+  "intent_id": "INT-M-QC",
+  "query": "special color large batch inspection",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "f94c638f-6f1e-561c-b4c4-14066aca29e8": 3
+  },
+  "hard_negative_ids": [
+   "e4ccd760-0dc8-5b80-9c62-562c1c54941d"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-QC"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0104",
+  "intent_id": "INT-M-PROD",
+  "query": "งานด่วนกระดาษหนาต้องปรับอะไร",
+  "role": "production",
+  "lang": "th",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "10d34dc0-1a8d-53d5-95a0-50e5a0b8d3e0": 3
+  },
+  "hard_negative_ids": [
+   "322eda6d-0be6-514f-b0ce-39591bb7c1b9"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-PROD"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "multi"
+ },
+ {
+  "query_id": "q-0105",
+  "intent_id": "INT-M-PROD",
+  "query": "urgent thick paper production",
+  "role": "production",
+  "lang": "th-en",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "10d34dc0-1a8d-53d5-95a0-50e5a0b8d3e0": 3
+  },
+  "hard_negative_ids": [
+   "322eda6d-0be6-514f-b0ce-39591bb7c1b9"
+  ],
+  "relevant_sources": [
+   "P2-SYNTH-M-PROD"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
+ },
+ {
+  "query_id": "q-0106",
+  "intent_id": "INT-M-HR",
+  "query": "พนักงานใหม่ตำแหน่งคุมเครื่องอบรมต่างจากทั่วไปยังไง",
   "role": "hr",
   "lang": "th",
-  "category": "acronym-transliteration",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
+   "81242326-319a-59c0-934e-05bda791fe90": 3
   },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
+  "hard_negative_ids": [
+   "b2068c33-3660-5e05-85ad-c5476a82daef"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-M-HR"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "multi"
  },
  {
-  "query_id": "q-057",
-  "query": "new emp ISO KPI training",
+  "query_id": "q-0107",
+  "intent_id": "INT-M-HR",
+  "query": "new machine operator training",
   "role": "hr",
   "lang": "th-en",
-  "category": "thai-eng-mix",
+  "category": "multi-constraint",
+  "challenge_tags": [
+   "multi-constraint"
+  ],
   "split": "test",
   "case_type": "ranking",
   "relevance": {
-   "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": 3
+   "81242326-319a-59c0-934e-05bda791fe90": 3
   },
-  "relevant_sources": [
-   "SOP-HR-TRAIN"
+  "hard_negative_ids": [
+   "b2068c33-3660-5e05-85ad-c5476a82daef"
   ],
-  "label_status": "draft"
+  "relevant_sources": [
+   "P2-SYNTH-M-HR"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed"
  },
  {
-  "query_id": "q-058",
-  "query": "การวัดค่า Delta-E เทียบ proof ทำอย่างไร",
-  "role": "qc",
-  "lang": "th",
-  "category": "acronym-transliteration",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-059",
-  "query": "measure Delta-E vs proof",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "92839a3e-93bc-57a9-95ef-8e1f802d05d1": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-060",
-  "query": "งานที่ waste เกิน 5% ถือว่าไม่ผ่านใช่ไหม",
-  "role": "production",
-  "lang": "th",
-  "category": "negation",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
-  },
-  "relevant_sources": [
-   "SOP-PROD-710"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-061",
-  "query": "waste เกิน 5% ไม่ผ่านใช่ไหม",
-  "role": "production",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": 3
-  },
-  "relevant_sources": [
-   "SOP-PROD-710"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-062",
-  "query": "งานที่ไม่มีจุดสกปรกถือว่าผ่านเกณฑ์ใช่ไหม",
-  "role": "qc",
-  "lang": "th",
-  "category": "negation",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-063",
-  "query": "งานไม่มี defect ผ่านไหม",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": 3
-  },
-  "relevant_sources": [
-   "SOP-QC-423"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-064",
-  "query": "ถ้าสินค้ายังไม่ถึงลูกค้าต้องเปิด recall ไหม",
-  "role": "qc",
-  "lang": "th",
-  "category": "negation",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "881011b0-8745-5400-857b-ddae45515590": 3
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-065",
-  "query": "ยังไม่ส่งลูกค้า ต้อง recall ไหม",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "dev",
-  "case_type": "ranking",
-  "relevance": {
-   "881011b0-8745-5400-857b-ddae45515590": 3
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-066",
-  "query": "การจัดซื้อปกติใช้ vendor สำรองได้ไหม",
-  "role": "purchasing",
-  "lang": "th",
-  "category": "negation",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
-  },
-  "relevant_sources": [
-   "SOP-PUR-741"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-067",
-  "query": "งานปกติใช้ backup vendor ได้ไหม",
-  "role": "purchasing",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "3bcf8c92-352e-5b8f-a184-176839b82a16": 3
-  },
-  "relevant_sources": [
-   "SOP-PUR-741"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-068",
-  "query": "การจัดทำ JOB Packaging WI-722 ทำอย่างไร",
-  "role": "sales",
-  "lang": "th",
-  "category": "lexical-overlap-wrong-code",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "7dace0b4-9e0a-5425-94b7-ab196d7a825c": 3
-  },
-  "relevant_sources": [
-   "SOP-SALES-722"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-069",
-  "query": "WI-722 job packaging ทำยังไง",
-  "role": "sales",
-  "lang": "th-en",
-  "category": "thai-eng-mix",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "7dace0b4-9e0a-5425-94b7-ab196d7a825c": 3
-  },
-  "relevant_sources": [
-   "SOP-SALES-722"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-070",
-  "query": "การเสนอราคาและการอนุมัติใบเสนอราคาทำอย่างไร",
+  "query_id": "q-0108",
+  "intent_id": "INT-G-QUOTE",
+  "query": "อธิบายการเสนอราคาและการอนุมัติ",
   "role": "sales",
   "lang": "th",
   "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
   "split": "dev",
   "case_type": "ranking",
   "relevance": {
-   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3,
-   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 2
+   "ba2b12d6-53ff-5fd9-a348-abb8c1329138": 3,
+   "3174208d-297f-59da-9313-13088c9c6cc7": 2
   },
+  "hard_negative_ids": [],
   "relevant_sources": [
-   "SOP-SALES-721"
+   "P2-SYNTH-G-QUOTE",
+   "P2-SYNTH-G-QUOTE-SUP"
   ],
-  "label_status": "draft"
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "conjunction",
+  "grade_rationale": {
+   "ba2b12d6-53ff-5fd9-a348-abb8c1329138": "ตอบครบโดยลำพัง (fully answers alone)",
+   "3174208d-297f-59da-9313-13088c9c6cc7": "supporting/partial"
+  }
  },
  {
-  "query_id": "q-071",
-  "query": "quotation และ approval flow",
+  "query_id": "q-0109",
+  "intent_id": "INT-G-QUOTE",
+  "query": "quotation and approval overview",
   "role": "sales",
   "lang": "th-en",
   "category": "graded-multi",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": 3,
-   "6d942a50-ec0e-52b7-bc8a-2814f536b38b": 2
-  },
-  "relevant_sources": [
-   "SOP-SALES-721"
+  "challenge_tags": [
+   "graded-multi"
   ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-072",
-  "query": "ขั้นตอนการเรียกคืนและการรายงานผล",
-  "role": "qc",
-  "lang": "th",
-  "category": "graded-multi",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "881011b0-8745-5400-857b-ddae45515590": 3,
-   "71876cf1-7234-5851-9a99-61461bfffbdc": 2
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-073",
-  "query": "recall steps และ report",
-  "role": "qc",
-  "lang": "th-en",
-  "category": "graded-multi",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "881011b0-8745-5400-857b-ddae45515590": 3,
-   "71876cf1-7234-5851-9a99-61461bfffbdc": 2
-  },
-  "relevant_sources": [
-   "SOP-RECALL-852"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-074",
-  "query": "การจัดซื้อและการประเมิน vendor",
-  "role": "purchasing",
-  "lang": "th",
-  "category": "graded-multi",
-  "split": "test",
-  "case_type": "ranking",
-  "relevance": {
-   "1533ae03-951c-521d-87ab-0f51f428d29a": 3,
-   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 2
-  },
-  "relevant_sources": [
-   "SOP-PUR-741"
-  ],
-  "label_status": "draft"
- },
- {
-  "query_id": "q-075",
-  "query": "purchasing และ vendor evaluation",
-  "role": "purchasing",
-  "lang": "th-en",
-  "category": "graded-multi",
   "split": "dev",
   "case_type": "ranking",
   "relevance": {
-   "1533ae03-951c-521d-87ab-0f51f428d29a": 3,
-   "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": 2
+   "ba2b12d6-53ff-5fd9-a348-abb8c1329138": 3,
+   "3174208d-297f-59da-9313-13088c9c6cc7": 2
   },
+  "hard_negative_ids": [],
   "relevant_sources": [
-   "SOP-PUR-741"
+   "P2-SYNTH-G-QUOTE",
+   "P2-SYNTH-G-QUOTE-SUP"
   ],
-  "label_status": "draft"
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed",
+  "grade_rationale": {
+   "ba2b12d6-53ff-5fd9-a348-abb8c1329138": "ตอบครบโดยลำพัง (fully answers alone)",
+   "3174208d-297f-59da-9313-13088c9c6cc7": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0110",
+  "intent_id": "INT-G-RECALL",
+  "query": "อธิบายการเรียกคืนและการรายงานผล",
+  "role": "qc",
+  "lang": "th",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "bdd762c8-1f14-5814-883c-d137f0088e71": 3,
+   "5bb7b9f0-320e-5d09-a7df-2f3643ccffa5": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-RECALL",
+   "P2-SYNTH-G-RECALL-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "conjunction",
+  "grade_rationale": {
+   "bdd762c8-1f14-5814-883c-d137f0088e71": "ตอบครบโดยลำพัง (fully answers alone)",
+   "5bb7b9f0-320e-5d09-a7df-2f3643ccffa5": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0111",
+  "intent_id": "INT-G-RECALL",
+  "query": "recall and reporting overview",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "bdd762c8-1f14-5814-883c-d137f0088e71": 3,
+   "5bb7b9f0-320e-5d09-a7df-2f3643ccffa5": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-RECALL",
+   "P2-SYNTH-G-RECALL-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed",
+  "grade_rationale": {
+   "bdd762c8-1f14-5814-883c-d137f0088e71": "ตอบครบโดยลำพัง (fully answers alone)",
+   "5bb7b9f0-320e-5d09-a7df-2f3643ccffa5": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0112",
+  "intent_id": "INT-G-PO",
+  "query": "อธิบายการจัดซื้อและการประเมิน vendor",
+  "role": "purchasing",
+  "lang": "th",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "05cf0615-900b-5a45-b92b-340a30eac360": 3,
+   "4bc56a5e-7a91-5c29-a374-d64cc7b9f964": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-PO",
+   "P2-SYNTH-G-PO-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "conjunction",
+  "grade_rationale": {
+   "05cf0615-900b-5a45-b92b-340a30eac360": "ตอบครบโดยลำพัง (fully answers alone)",
+   "4bc56a5e-7a91-5c29-a374-d64cc7b9f964": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0113",
+  "intent_id": "INT-G-PO",
+  "query": "purchasing and vendor eval overview",
+  "role": "purchasing",
+  "lang": "th-en",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "05cf0615-900b-5a45-b92b-340a30eac360": 3,
+   "4bc56a5e-7a91-5c29-a374-d64cc7b9f964": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-PO",
+   "P2-SYNTH-G-PO-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed",
+  "grade_rationale": {
+   "05cf0615-900b-5a45-b92b-340a30eac360": "ตอบครบโดยลำพัง (fully answers alone)",
+   "4bc56a5e-7a91-5c29-a374-d64cc7b9f964": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0114",
+  "intent_id": "INT-G-QC",
+  "query": "อธิบายการตรวจสีและเกณฑ์ของเสีย",
+  "role": "qc",
+  "lang": "th",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "aefac1fe-7bf6-50e2-91f9-7995ac0273cd": 3,
+   "5c5e81a3-8df3-53d2-aa8d-53c54141d3d7": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-QC",
+   "P2-SYNTH-G-QC-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "conjunction",
+  "grade_rationale": {
+   "aefac1fe-7bf6-50e2-91f9-7995ac0273cd": "ตอบครบโดยลำพัง (fully answers alone)",
+   "5c5e81a3-8df3-53d2-aa8d-53c54141d3d7": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0115",
+  "intent_id": "INT-G-QC",
+  "query": "color check and defect criteria",
+  "role": "qc",
+  "lang": "th-en",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "aefac1fe-7bf6-50e2-91f9-7995ac0273cd": 3,
+   "5c5e81a3-8df3-53d2-aa8d-53c54141d3d7": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-QC",
+   "P2-SYNTH-G-QC-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed",
+  "grade_rationale": {
+   "aefac1fe-7bf6-50e2-91f9-7995ac0273cd": "ตอบครบโดยลำพัง (fully answers alone)",
+   "5c5e81a3-8df3-53d2-aa8d-53c54141d3d7": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0116",
+  "intent_id": "INT-G-SHIP",
+  "query": "อธิบายการจัดส่งและการวางแผนขนส่ง",
+  "role": "logistics",
+  "lang": "th",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "d2279e37-505c-5a8f-8ded-0941d09f6fc5": 3,
+   "94459329-82c3-5452-ad5b-cd98d6d3a0ac": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-SHIP",
+   "P2-SYNTH-G-SHIP-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "conjunction",
+  "grade_rationale": {
+   "d2279e37-505c-5a8f-8ded-0941d09f6fc5": "ตอบครบโดยลำพัง (fully answers alone)",
+   "94459329-82c3-5452-ad5b-cd98d6d3a0ac": "supporting/partial"
+  }
+ },
+ {
+  "query_id": "q-0117",
+  "intent_id": "INT-G-SHIP",
+  "query": "shipping and transport planning",
+  "role": "logistics",
+  "lang": "th-en",
+  "category": "graded-multi",
+  "challenge_tags": [
+   "graded-multi"
+  ],
+  "split": "test",
+  "case_type": "ranking",
+  "relevance": {
+   "d2279e37-505c-5a8f-8ded-0941d09f6fc5": 3,
+   "94459329-82c3-5452-ad5b-cd98d6d3a0ac": 2
+  },
+  "hard_negative_ids": [],
+  "relevant_sources": [
+   "P2-SYNTH-G-SHIP",
+   "P2-SYNTH-G-SHIP-SUP"
+  ],
+  "label_status": "ai-reviewed",
+  "reviewed_by": "claude-ai (generator draft)",
+  "review_revision": "rev2",
+  "variant": "mixed",
+  "grade_rationale": {
+   "d2279e37-505c-5a8f-8ded-0941d09f6fc5": "ตอบครบโดยลำพัง (fully answers alone)",
+   "94459329-82c3-5452-ad5b-cd98d6d3a0ac": "supporting/partial"
+  }
  }
 ]

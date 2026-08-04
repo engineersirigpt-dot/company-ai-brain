@@ -133,12 +133,17 @@ def pl(roles, status="ACTIVE", schema=1, ver="poc-v1", coll="RECALL", level=3):
             "collection_group": coll, "confidentiality_level": level, "allowed_roles": roles}
 def centry(source, roles, text="t", **kw):
     return {"source": source, "rerank_text": text, "payload": pl(roles, **kw)}
-def case(qid="q1", role="qc", rel=None, rsrc=None, **over):
-    c = {"query_id": qid, "query": "ถาม", "role": role, "lang": "th", "category": "sibling",
-         "split": "test", "case_type": "ranking",
-         "relevance": {"pa": 2} if rel is None else rel,
+def case(qid="q1", role="qc", rel=None, rsrc=None, iid="i1", tags=None, hn=None, **over):
+    rel_ = {"pa": 2} if rel is None else rel
+    c = {"query_id": qid, "intent_id": iid, "query": "ถาม", "role": role, "lang": "th",
+         "category": "sibling", "challenge_tags": (["sibling"] if tags is None else tags),
+         "split": "test", "case_type": "ranking", "relevance": rel_,
+         "hard_negative_ids": ([] if hn is None else hn),
          "relevant_sources": ["D1"] if rsrc is None else rsrc, "label_status": "human-reviewed"}
-    c.update(over); return c
+    if len(rel_) > 1:
+        c["grade_rationale"] = {pid: "rationale" for pid in rel_}
+    c.update(over)
+    return c
 CORPUS = {"pa": centry("D1", ["qc", "admin"]), "pb": centry("D2", ["sales", "admin"])}
 KNOWN = {"qc", "admin", "sales", "hr"}
 def V(cases):
@@ -200,6 +205,26 @@ check("M5.1: source ซ้ำ ใน relevant_sources -> error", any("ซ้ำ"
 check("M5.1: extra source -> error (exact set)", any("ไม่ตรง exact" in e for e in V2([case(rel={"pa": 2}, rsrc=["D1", "D999"])])))
 check("M5.1: missing source -> error", any("ไม่ตรง exact" in e for e in V2([case(rel={"pa": 2, "pc": 1}, rsrc=["D1"])])))
 check("M5.1: exact match (สองเอกสารครบ) -> ไม่มี error", V2([case(rel={"pa": 2, "pc": 1}, rsrc=["D1", "D2"])]) == [])
+
+# ── B2/B3/B5: intent_id / challenge_tags / hard_negative_ids / rubric / split ──
+check("field ใหม่ครบ -> valid", V([case()]) == [])
+check("intent_id หาย -> error", any("intent_id" in e for e in V([{k: v for k, v in case().items() if k != "intent_id"}])))
+check("challenge_tags ว่าง -> error", any("challenge_tags" in e for e in V([case(tags=[])])))
+check("hard_negative_ids ไม่ใช่ list -> error", any("hard_negative_ids" in e for e in V([case(hn="x")])))
+check("hard_negative อยู่ใน relevance -> error", any("ห้ามอยู่ใน relevance" in e for e in V([case(hn=["pa"])])))
+check("hard_negative ไม่อยู่ใน corpus -> error", any("ไม่อยู่ใน corpus" in e for e in V([case(hn=["pz"])])))
+check("hard_negative ไม่ authorized สำหรับ role -> error", any("ไม่ authorized" in e for e in V([case(hn=["pb"])])))
+check("hard_negative authorized (นอก relevance) -> ผ่าน", V([case(role="admin", hn=["pb"])]) == [])
+check("B5: multi-relevance ไม่มี grade_rationale -> error",
+      any("grade_rationale" in e for e in V2([{**case(rel={"pa": 2, "pc": 1}, rsrc=["D1", "D2"]), "grade_rationale": None}])))
+check("B5: multi-relevance มี grade_rationale -> ผ่าน", V2([case(rel={"pa": 2, "pc": 1}, rsrc=["D1", "D2"])]) == [])
+check("B2: paraphrase ข้าม split -> error",
+      any("ข้าม split" in e for e in V([case(qid="qa", iid="iX", split="dev"), case(qid="qb", iid="iX", split="test")])))
+_mini = [case(qid=f"q{i}", iid=f"i{i}", tags=["direct"]) for i in range(3)]
+check("count_test_intents", E.count_test_intents(_mini) == 3)
+check("arm_eligibility: <50 test intents -> error", any("intents" in e for e in E.arm_eligibility_errors(_mini, ["direct"])))
+check("arm_eligibility: gate tag < 5 intents -> error",
+      any("challenge" in e for e in E.arm_eligibility_errors(_mini, ["direct"], min_intents=1)))
 
 # ── M1.1: corpus/cases fail-closed ────────────────────────────────────────────
 check("M1.1: corpus ว่าง -> error", E.validate_corpus({}) != [])

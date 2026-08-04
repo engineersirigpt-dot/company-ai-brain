@@ -12,13 +12,19 @@ import unicodedata
 
 import policy as P
 
-BENCHMARK_CONTRACT_VERSION = "p2-bench-v1"
+BENCHMARK_CONTRACT_VERSION = "p2-bench-v2"      # v2: intent_id/challenge_tags/hard_negative_ids/rubric
 RERANK_TEXT_VERSION = "heading+child-v1"
 LOCKED_GRADES = (1, 2, 3)                       # graded relevance allowlist (exact int)
-REQUIRED_CASE_FIELDS = ("query_id", "query", "role", "lang", "category", "split",
-                        "case_type", "relevance", "relevant_sources", "label_status")
+# grade rubric (B5) — multi-relevance case ต้องมี rationale ต่อ pid
+GRADE_RUBRIC = {3: "ตอบครบโดยลำพัง (fully answers alone)",
+                2: "supporting/partial", 1: "contextual"}
+REQUIRED_CASE_FIELDS = ("query_id", "intent_id", "query", "role", "lang", "category",
+                        "challenge_tags", "split", "case_type", "relevance",
+                        "hard_negative_ids", "relevant_sources", "label_status")
 VALID_SPLITS = frozenset({"dev", "test"})
-VALID_LABEL_STATUS = frozenset({"human-reviewed"})
+VALID_LABEL_STATUS = frozenset({"human-reviewed"})     # benchmark gate (B6: AI review ไม่พอ)
+AI_LABEL_STATUS = frozenset({"draft", "ai-reviewed"})  # ระหว่าง AI review เท่านั้น
+MIN_TEST_INTENTS = 50                                  # arm-eligibility (B2): independent intent groups
 
 
 def _effective_access(role: str):
@@ -72,7 +78,7 @@ def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
     if not isinstance(corpus, dict):          # M1.2: กัน corpus.get() บน non-dict (AttributeError)
         return ["corpus ต้องเป็น dict"]
     known = set(known_roles)
-    errs, seen_qid = [], set()
+    errs, seen_qid, intent_splits = [], set(), []
     for i, c in enumerate(cases):
         tag = f"case[{i}]"
         if not isinstance(c, dict):
@@ -102,6 +108,14 @@ def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
             errs.append(f"{tag}: lang ว่าง")
         if _bad_str(c.get("category")):
             errs.append(f"{tag}: category ว่าง")
+        ctags = c.get("challenge_tags")           # B3: semantic challenge แยกจาก lang
+        if not isinstance(ctags, list) or not ctags or any(_bad_str(t) for t in ctags):
+            errs.append(f"{tag}: challenge_tags ว่าง/ผิดชนิด")
+        iid = c.get("intent_id")                  # B2: paraphrases share intent_id
+        if _bad_str(iid):
+            errs.append(f"{tag}: intent_id ว่าง/ผิดชนิด/control char")
+        elif c.get("split") in VALID_SPLITS:
+            intent_splits.append((iid, c.get("split")))
         role = c.get("role")
         if role not in known:
             errs.append(f"{tag}: role ไม่รู้จัก {role!r}")
@@ -136,7 +150,41 @@ def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
             if derived != want:
                 errs.append(f"{tag}: relevant_sources ไม่ตรง exact "
                             f"(missing={sorted(derived - want)} extra={sorted(want - derived)})")
+        # B3: hard_negative_ids — point ที่ role เห็นได้ (authorized) แต่ไม่ใช่คำตอบ
+        hn = c.get("hard_negative_ids")
+        if not isinstance(hn, list):
+            errs.append(f"{tag}: hard_negative_ids ต้องเป็น list")
+        else:
+            for hid in hn:
+                if _bad_str(hid):
+                    errs.append(f"{tag}: hard_negative id ว่าง")
+                    continue
+                he = corpus.get(hid)
+                if not isinstance(he, dict):
+                    errs.append(f"{tag}: hard_negative {hid} ไม่อยู่ใน corpus")
+                elif role in known and not is_authorized(he.get("payload", {}), role):
+                    errs.append(f"{tag}: hard_negative {hid} ไม่ authorized สำหรับ role {role}")
+                if hid in rel:
+                    errs.append(f"{tag}: hard_negative {hid} ห้ามอยู่ใน relevance")
+        # B5: multi-relevance ต้องมี grade_rationale (rubric) ต่อทุก relevant pid
+        if len(rel) > 1:
+            gr = c.get("grade_rationale")
+            if not isinstance(gr, dict) or any(_bad_str(gr.get(pid)) for pid in rel):
+                errs.append(f"{tag}: multi-relevance ต้องมี grade_rationale ต่อทุก relevant pid (B5)")
+    # B2: paraphrase ของ intent เดียวกันต้องอยู่ split เดียว
+    by_intent = {}
+    for iid, sp in intent_splits:
+        by_intent.setdefault(iid, set()).add(sp)
+    for iid, sps in sorted(by_intent.items()):
+        if len(sps) > 1:
+            errs.append(f"intent_id {iid}: paraphrase ข้าม split {sorted(sps)} (ต้อง split เดียว)")
     return errs
+
+
+def count_test_intents(cases) -> int:
+    """จำนวน independent intent group ใน split=test (B2: arm-eligibility ต้อง >= MIN_TEST_INTENTS)"""
+    return len({c.get("intent_id") for c in cases
+                if isinstance(c, dict) and c.get("split") == "test" and c.get("intent_id")})
 
 
 # ── frozen-corpus validation (M1.1) — fail-closed ก่อนคำนวณ/hash ────────────────
@@ -175,6 +223,28 @@ def validate_benchmark(cases, corpus, known_roles) -> list:
     if not isinstance(cases, list) or not cases:
         errs.append("ranking cases ว่าง")
     errs += validate_ranking_eval_set(cases, corpus, known_roles)
+    return errs
+
+
+def arm_eligibility_errors(cases, gate_tags, min_intents: int = MIN_TEST_INTENTS,
+                           min_per_tag: int = 5) -> list:
+    """
+    gate แยกสำหรับ **decision benchmark / เลือก arm** (B2/B3) — structural valid ไม่พอ:
+      - independent test intents >= min_intents
+      - แต่ละ gate challenge tag มี >= min_per_tag independent test intents
+    (smoke run ข้าม gate นี้ได้ แต่ห้ามอ้างเทียบ acceptance)
+    """
+    errs = []
+    test = [c for c in cases if isinstance(c, dict) and c.get("split") == "test"]
+    n = len({c.get("intent_id") for c in test if c.get("intent_id")})
+    if n < min_intents:
+        errs.append(f"test independent intents = {n} < {min_intents} (decision benchmark ไม่ได้)")
+    for tag in gate_tags:
+        cnt = len({c.get("intent_id") for c in test
+                   if c.get("intent_id") and isinstance(c.get("challenge_tags"), list)
+                   and tag in c["challenge_tags"]})
+        if cnt < min_per_tag:
+            errs.append(f"gate challenge '{tag}' มี {cnt} test intents < {min_per_tag}")
     return errs
 
 

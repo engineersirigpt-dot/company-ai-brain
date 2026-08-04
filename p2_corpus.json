@@ -1,430 +1,7 @@
 {
- "4fa2db6a-3101-5e63-a63e-d60ba9e17b86": {
-  "source": "SOP-SALES-721",
-  "rerank_text": "ขั้นตอนการเสนอราคางานพิมพ์ (WI-721) รับ enquiry จากลูกค้า ตรวจสเปกงานพิมพ์ จำนวน ขนาด กระดาษ แล้วคำนวณราคาตาม cost sheet ก่อนออกใบเสนอราคา",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "SALES",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "sales",
-    "management",
-    "admin"
-   ]
-  }
- },
- "6d942a50-ec0e-52b7-bc8a-2814f536b38b": {
-  "source": "SOP-SALES-721",
-  "rerank_text": "การอนุมัติใบเสนอราคา ใบเสนอราคาเกิน 500,000 บาท ต้องผ่านการอนุมัติจากผู้จัดการฝ่ายขาย",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "SALES",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "sales",
-    "management",
-    "admin"
-   ]
-  }
- },
- "f7f906ff-eb29-5be3-9832-523dc7b26b87": {
-  "source": "SOP-SALES-721",
-  "rerank_text": "การแก้ไขใบเสนอราคา ลูกค้าขอแก้สเปกให้ออกใบเสนอราคาฉบับใหม่ ยกเลิกฉบับเดิม ห้ามแก้ทับ",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "SALES",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "sales",
-    "management",
-    "admin"
-   ]
-  }
- },
- "4bc5701c-6504-5969-878f-605d71b3feb3": {
-  "source": "SOP-SALES-721",
-  "rerank_text": "การติดตามใบเสนอราคา ติดตามลูกค้าภายใน 7 วันหลังส่งใบเสนอราคา บันทึกผลใน CRM",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "SALES",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "sales",
-    "management",
-    "admin"
-   ]
-  }
- },
- "881011b0-8745-5400-857b-ddae45515590": {
-  "source": "SOP-RECALL-852",
-  "rerank_text": "ขั้นตอนการเรียกคืนผลิตภัณฑ์ (QP-852) เมื่อพบสินค้าไม่ได้มาตรฐานที่ส่งถึงลูกค้าแล้ว ให้แจ้ง QMR เปิด recall notice ระบุ lot ที่กระทบและติดตามคืน",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "RECALL",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "qc",
-    "management",
-    "admin"
-   ]
-  }
- },
- "8865c83d-8cc9-5f12-b0fa-e7f8feb364fb": {
-  "source": "SOP-RECALL-852",
-  "rerank_text": "การซ้อม Mock Recall ซ้อม mock recall อย่างน้อยปีละ 1 ครั้ง วัดเวลาติดตามสินค้าคืนไม่เกิน 4 ชั่วโมง",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "RECALL",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "qc",
-    "management",
-    "admin"
-   ]
-  }
- },
- "71876cf1-7234-5851-9a99-61461bfffbdc": {
-  "source": "SOP-RECALL-852",
-  "rerank_text": "รายงานผลการเรียกคืน สรุปจำนวนที่เรียกคืนได้เทียบยอดที่กระจาย รายงานต่อผู้บริหารภายใน 3 วัน",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "RECALL",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "qc",
-    "management",
-    "admin"
-   ]
-  }
- },
- "10a5157e-1e5c-5661-99d7-84e70f0fd6e1": {
-  "source": "SOP-HR-TRAIN",
-  "rerank_text": "หัวข้อการอบรมพนักงานใหม่ (iso_jd) พนักงานใหม่ต้องอบรม safety, คุณภาพ ISO, และ JD ของตำแหน่งภายใน 30 วันแรก",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "HR",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "hr",
-    "management",
-    "admin"
-   ]
-  }
- },
- "e2d19a82-a7d1-58ce-a364-18486d9aae08": {
-  "source": "SOP-HR-TRAIN",
-  "rerank_text": "โครงสร้างเงินเดือนและสวัสดิการ เงินเดือน ค่ากะ และโบนัสประจำปีตามผลประเมิน KPI",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "HR",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "hr",
-    "management",
-    "admin"
-   ]
-  }
- },
- "b6e07cbc-e21c-5a41-af9b-9768531cfea8": {
-  "source": "SOP-HR-TRAIN",
-  "rerank_text": "ระเบียบการลา ลาป่วยต้องมีใบรับรองแพทย์เมื่อลาเกิน 3 วัน ลากิจล่วงหน้า 1 วัน",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "HR",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "hr",
-    "management",
-    "admin"
-   ]
-  }
- },
- "1533ae03-951c-521d-87ab-0f51f428d29a": {
-  "source": "SOP-PUR-741",
-  "rerank_text": "ขั้นตอนการจัดซื้อวัตถุดิบ (QP-741) เปิด PR เมื่อ stock ต่ำกว่า reorder point จัดซื้อขออนุมัติผู้จัดการก่อนออก PO ให้ vendor ที่อนุมัติ",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PURCHASING",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "purchasing",
-    "management",
-    "admin"
-   ]
-  }
- },
- "630b2351-e0b5-53a7-914f-9bb82ac6ccfa": {
-  "source": "SOP-PUR-741",
-  "rerank_text": "การประเมิน vendor ประเมิน vendor ทุก 6 เดือนด้านคุณภาพ ราคา และการส่งมอบตรงเวลา",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PURCHASING",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "purchasing",
-    "management",
-    "admin"
-   ]
-  }
- },
- "3bcf8c92-352e-5b8f-a184-176839b82a16": {
-  "source": "SOP-PUR-741",
-  "rerank_text": "การจัดซื้อเร่งด่วน กรณีเร่งด่วนใช้ vendor สำรองได้ แต่ต้องแจ้งเหตุผลและขออนุมัติย้อนหลังภายใน 24 ชม.",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PURCHASING",
-   "confidentiality_level": 3,
-   "allowed_roles": [
-    "purchasing",
-    "management",
-    "admin"
-   ]
-  }
- },
- "5da3b02e-99fa-52b3-b53b-8ec27f87fce1": {
-  "source": "SOP-QC-423",
-  "rerank_text": "การควบคุมสัญลักษณ์ FSC (WI-423) ตรวจสัญลักษณ์ FSC บนงานพิมพ์ให้ตรงใบอนุญาต ห้ามใช้กับงานที่ไม่ได้ certified",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "QUALITY",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "qc",
-    "production",
-    "engineering",
-    "management",
-    "admin"
-   ]
-  }
- },
- "92839a3e-93bc-57a9-95ef-8e1f802d05d1": {
-  "source": "SOP-QC-423",
-  "rerank_text": "การตรวจสีงานพิมพ์ วัดค่า Delta-E เทียบ proof ที่ลูกค้าอนุมัติ ยอมรับได้ไม่เกิน 3.0",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "QUALITY",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "qc",
-    "production",
-    "engineering",
-    "management",
-    "admin"
-   ]
-  }
- },
- "cefdd0a7-fc3f-5f12-912e-2cb7502d035a": {
-  "source": "SOP-QC-423",
-  "rerank_text": "เกณฑ์ของเสียงานพิมพ์ งานที่มีจุดสกปรก เหลื่อมสี หรือหมึกเลอะเกินเกณฑ์ AQL ถือเป็นของเสีย",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "QUALITY",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "qc",
-    "production",
-    "engineering",
-    "management",
-    "admin"
-   ]
-  }
- },
- "7b92adec-ba89-5625-aef8-4cbe33f634e8": {
-  "source": "SOP-PROD-710",
-  "rerank_text": "การตั้งค่าเครื่องพิมพ์ (QP-710) ตั้งค่า register หมึก และแรงกดตามใบสั่งงาน ทดพิมพ์ก่อนผลิตจริงและให้ QC อนุมัติ first article",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PRODUCTION",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "production",
-    "prepress",
-    "qc",
-    "engineering",
-    "management",
-    "admin"
-   ]
-  }
- },
- "d0af54c8-a118-5a71-b50f-615673455468": {
-  "source": "SOP-PROD-710",
-  "rerank_text": "ขั้นตอน make-ready เตรียมเพลท หมึก และกระดาษให้ตรง job ลดเวลา setup ด้วย checklist",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PRODUCTION",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "production",
-    "prepress",
-    "qc",
-    "engineering",
-    "management",
-    "admin"
-   ]
-  }
- },
- "4ae7f9ba-5b22-584f-845d-2df87b4e44fd": {
-  "source": "SOP-PROD-710",
-  "rerank_text": "การควบคุมของเสียในการผลิต บันทึกยอด waste ต่อ job เทียบเป้าหมายไม่เกิน 5%",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PRODUCTION",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "production",
-    "prepress",
-    "qc",
-    "engineering",
-    "management",
-    "admin"
-   ]
-  }
- },
- "2e8b072e-98b4-5992-88e2-87cae2f89c88": {
-  "source": "SOP-LOG-755",
-  "rerank_text": "ขั้นตอนการจัดส่งและ export (WI-755-05) จัดเตรียมเอกสาร packing list และ invoice ตรวจจำนวนก่อนขึ้นรถ ยืนยันกับลูกค้าปลายทาง",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "LOGISTICS",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "logistics",
-    "sales",
-    "management",
-    "admin"
-   ]
-  }
- },
- "7d6e32d8-7bf8-5f87-bc24-561275b42175": {
-  "source": "SOP-LOG-755",
-  "rerank_text": "การวางแผนขนส่ง รวม order ปลายทางเดียวกันเพื่อลดเที่ยว ประหยัดค่าขนส่ง",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "LOGISTICS",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "logistics",
-    "sales",
-    "management",
-    "admin"
-   ]
-  }
- },
- "90bbefcd-6d5f-581b-b7e1-27301c57dadd": {
-  "source": "SOP-ENG-DOBOT",
-  "rerank_text": "การบำรุงรักษาเครื่องจักร dobot บำรุงรักษาเชิงป้องกันตามรอบ ตรวจ sensor และหล่อลื่นข้อต่อทุกสัปดาห์ บันทึกใน log",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "ENGINEERING",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "engineering",
-    "production",
-    "management",
-    "admin"
-   ]
-  }
- },
- "e75d00bb-0205-58c4-93c4-bd24984e7aa4": {
-  "source": "SOP-ENG-DOBOT",
-  "rerank_text": "แบบวิศวกรรมและ spec เครื่อง spec แรงบิดและระยะการเคลื่อนที่ของแขนกลตามคู่มือผู้ผลิต",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "ENGINEERING",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "engineering",
-    "production",
-    "management",
-    "admin"
-   ]
-  }
- },
- "df212dde-c22f-5a33-a2a5-dbdd43cf7fe8": {
-  "source": "SOP-PKG-755-06",
-  "rerank_text": "การผลิตกล่องลูกฟูก (WI-755-06) ขึ้นรูปกล่องลูกฟูกตามแบบ ตรวจความแข็งแรงขอบและรอยพับก่อนบรรจุ",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PACKAGING",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "production",
-    "logistics",
-    "qc",
-    "management",
-    "admin"
-   ]
-  }
- },
- "51c571c6-5542-5e75-bc4d-1081b5ee079d": {
-  "source": "SOP-PKG-755-06",
-  "rerank_text": "การห่อและรัดพาเลท รัดฟิล์มพาเลทให้แน่นกันสินค้าล้มระหว่างขนส่ง",
-  "payload": {
-   "acl_schema_version": 1,
-   "policy_version": "poc-v1",
-   "policy_status": "ACTIVE",
-   "collection_group": "PACKAGING",
-   "confidentiality_level": 2,
-   "allowed_roles": [
-    "production",
-    "logistics",
-    "qc",
-    "management",
-    "admin"
-   ]
-  }
- },
- "64d04951-d287-5002-bc21-8427c71d2e81": {
-  "source": "SOP-IT-MGR",
-  "rerank_text": "การเข้าใช้ระบบ Manager AE ผู้ใช้ต้อง login ด้วยบัญชีบริษัท เปลี่ยนรหัสผ่านทุก 90 วัน ห้ามแชร์บัญชี",
+ "a17ea8b9-0707-5c37-940e-1cde3558c474": {
+  "source": "P2-SYNTH-BANK-000",
+  "rerank_text": "การรีเซ็ตรหัสผ่าน (แนวปฏิบัติทั่วไป #0) ขั้นตอนการรีเซ็ตรหัสผ่านตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (0)",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -443,12 +20,13 @@
     "it",
     "management",
     "admin"
-   ]
+   ],
+   "synthetic": true
   }
  },
- "bcfb222d-80e3-5e4d-888d-1bb4419da3a0": {
-  "source": "SOP-IT-MGR",
-  "rerank_text": "การสำรองข้อมูลระบบ สำรองฐานข้อมูลทุกคืน เก็บ 30 วัน ทดสอบ restore ทุกไตรมาส",
+ "15da055c-f65b-51f6-aa5d-0c8449953606": {
+  "source": "P2-SYNTH-BANK-001",
+  "rerank_text": "การตั้งค่าอีเมลบริษัท (แนวปฏิบัติทั่วไป #1) ขั้นตอนการตั้งค่าอีเมลบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (1)",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -467,12 +45,1563 @@
     "it",
     "management",
     "admin"
-   ]
+   ],
+   "synthetic": true
   }
  },
- "7dace0b4-9e0a-5425-94b7-ab196d7a825c": {
-  "source": "SOP-SALES-722",
-  "rerank_text": "การจัดทำ JOB Packaging (WI-722) จัดทำใบ JOB สำหรับงานบรรจุภัณฑ์ ระบุสเปกกล่องและจำนวน ไม่ใช่ขั้นตอนเสนอราคา",
+ "2d49b5bd-b52d-5219-9390-7573f4aa0253": {
+  "source": "P2-SYNTH-BANK-002",
+  "rerank_text": "การจองห้องประชุม (แนวปฏิบัติทั่วไป #2) ขั้นตอนการจองห้องประชุมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (2)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "44548692-c6d5-547b-9ac6-1ef3127f1066": {
+  "source": "P2-SYNTH-BANK-003",
+  "rerank_text": "การเบิกอุปกรณ์สำนักงาน (แนวปฏิบัติทั่วไป #3) ขั้นตอนการเบิกอุปกรณ์สำนักงานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (3)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "eb9dbe9d-1a4e-5164-8289-191e77d056e2": {
+  "source": "P2-SYNTH-BANK-004",
+  "rerank_text": "การขอ VPN (แนวปฏิบัติทั่วไป #4) ขั้นตอนการขอ VPNตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (4)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "70f27488-d448-52df-b9d6-f28e4322268e": {
+  "source": "P2-SYNTH-BANK-005",
+  "rerank_text": "การแจ้งซ่อมคอมพิวเตอร์ (แนวปฏิบัติทั่วไป #5) ขั้นตอนการแจ้งซ่อมคอมพิวเตอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (5)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "748ee129-a0f2-5bdc-8dc4-a5d2b097a548": {
+  "source": "P2-SYNTH-BANK-006",
+  "rerank_text": "การใช้เครื่องพิมพ์ส่วนกลาง (แนวปฏิบัติทั่วไป #6) ขั้นตอนการใช้เครื่องพิมพ์ส่วนกลางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (6)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "14b8baeb-922e-51b3-9231-67137876e318": {
+  "source": "P2-SYNTH-BANK-007",
+  "rerank_text": "การตั้งค่า WiFi (แนวปฏิบัติทั่วไป #7) ขั้นตอนการตั้งค่า WiFiตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (7)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f712384d-026a-5e12-8a26-e3a23ed8cf94": {
+  "source": "P2-SYNTH-BANK-008",
+  "rerank_text": "การขอสิทธิ์เข้าโฟลเดอร์ (แนวปฏิบัติทั่วไป #8) ขั้นตอนการขอสิทธิ์เข้าโฟลเดอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (8)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "05d7e374-61a5-54e9-a1ea-9618fd7838dd": {
+  "source": "P2-SYNTH-BANK-009",
+  "rerank_text": "การอัปเดตโปรแกรม (แนวปฏิบัติทั่วไป #9) ขั้นตอนการอัปเดตโปรแกรมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (9)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "180e8547-d929-58dd-ad7e-79634ad3433d": {
+  "source": "P2-SYNTH-BANK-010",
+  "rerank_text": "การสำรองไฟล์ส่วนตัว (แนวปฏิบัติทั่วไป #10) ขั้นตอนการสำรองไฟล์ส่วนตัวตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (10)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "5cfef8f8-518f-55fe-a9ec-386657bbdccd": {
+  "source": "P2-SYNTH-BANK-011",
+  "rerank_text": "การใช้ระบบลางาน (แนวปฏิบัติทั่วไป #11) ขั้นตอนการใช้ระบบลางานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (11)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "c0602b4c-60ec-56ab-a582-7266f911814a": {
+  "source": "P2-SYNTH-BANK-012",
+  "rerank_text": "การบันทึกเวลาเข้าออก (แนวปฏิบัติทั่วไป #12) ขั้นตอนการบันทึกเวลาเข้าออกตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (12)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "97386671-3f7e-5919-9433-21f6f493a64a": {
+  "source": "P2-SYNTH-BANK-013",
+  "rerank_text": "การขอนามบัตร (แนวปฏิบัติทั่วไป #13) ขั้นตอนการขอนามบัตรตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (13)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "831f0573-aa98-5d27-9287-9e3cff18da5e": {
+  "source": "P2-SYNTH-BANK-014",
+  "rerank_text": "การจองรถบริษัท (แนวปฏิบัติทั่วไป #14) ขั้นตอนการจองรถบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (14)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4d572ba0-2b54-5936-96e4-e119b8606922": {
+  "source": "P2-SYNTH-BANK-015",
+  "rerank_text": "การเบิกค่าเดินทาง (แนวปฏิบัติทั่วไป #15) ขั้นตอนการเบิกค่าเดินทางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (15)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "004933ba-2686-5161-9fc4-d27c10b7110e": {
+  "source": "P2-SYNTH-BANK-016",
+  "rerank_text": "การรีเซ็ตรหัสผ่าน (แนวปฏิบัติทั่วไป #16) ขั้นตอนการรีเซ็ตรหัสผ่านตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (16)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "42bf8ea6-9384-57ac-a0c9-bcabac38a4e7": {
+  "source": "P2-SYNTH-BANK-017",
+  "rerank_text": "การตั้งค่าอีเมลบริษัท (แนวปฏิบัติทั่วไป #17) ขั้นตอนการตั้งค่าอีเมลบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (17)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4e8fbb05-699d-543a-8dbe-72d12f91dfaf": {
+  "source": "P2-SYNTH-BANK-018",
+  "rerank_text": "การจองห้องประชุม (แนวปฏิบัติทั่วไป #18) ขั้นตอนการจองห้องประชุมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (18)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "0e87d39f-24f0-5bda-99bf-185229de226e": {
+  "source": "P2-SYNTH-BANK-019",
+  "rerank_text": "การเบิกอุปกรณ์สำนักงาน (แนวปฏิบัติทั่วไป #19) ขั้นตอนการเบิกอุปกรณ์สำนักงานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (19)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "5658068a-d691-58fc-86df-d97be0a41d52": {
+  "source": "P2-SYNTH-BANK-020",
+  "rerank_text": "การขอ VPN (แนวปฏิบัติทั่วไป #20) ขั้นตอนการขอ VPNตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (20)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "0675666a-4987-5de9-9a48-a16369b2b4cf": {
+  "source": "P2-SYNTH-BANK-021",
+  "rerank_text": "การแจ้งซ่อมคอมพิวเตอร์ (แนวปฏิบัติทั่วไป #21) ขั้นตอนการแจ้งซ่อมคอมพิวเตอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (21)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "33f93e0e-a45e-58e7-8d33-d08011044eaa": {
+  "source": "P2-SYNTH-BANK-022",
+  "rerank_text": "การใช้เครื่องพิมพ์ส่วนกลาง (แนวปฏิบัติทั่วไป #22) ขั้นตอนการใช้เครื่องพิมพ์ส่วนกลางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (22)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "89adc40d-b9b2-5268-8888-878266c556bc": {
+  "source": "P2-SYNTH-BANK-023",
+  "rerank_text": "การตั้งค่า WiFi (แนวปฏิบัติทั่วไป #23) ขั้นตอนการตั้งค่า WiFiตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (23)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "a8a6acc9-2ebc-5221-98be-947d5d0c2980": {
+  "source": "P2-SYNTH-BANK-024",
+  "rerank_text": "การขอสิทธิ์เข้าโฟลเดอร์ (แนวปฏิบัติทั่วไป #24) ขั้นตอนการขอสิทธิ์เข้าโฟลเดอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (24)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4d08c167-e418-51fb-adcc-fe8973ef9398": {
+  "source": "P2-SYNTH-BANK-025",
+  "rerank_text": "การอัปเดตโปรแกรม (แนวปฏิบัติทั่วไป #25) ขั้นตอนการอัปเดตโปรแกรมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (25)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "20e4e5d3-5337-5cce-ab89-8e991b5177d4": {
+  "source": "P2-SYNTH-BANK-026",
+  "rerank_text": "การสำรองไฟล์ส่วนตัว (แนวปฏิบัติทั่วไป #26) ขั้นตอนการสำรองไฟล์ส่วนตัวตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (26)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4b765e98-57b0-5476-a3a1-a80f70899a87": {
+  "source": "P2-SYNTH-BANK-027",
+  "rerank_text": "การใช้ระบบลางาน (แนวปฏิบัติทั่วไป #27) ขั้นตอนการใช้ระบบลางานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (27)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "63bad416-5cab-5e47-95ce-6be82bccb558": {
+  "source": "P2-SYNTH-BANK-028",
+  "rerank_text": "การบันทึกเวลาเข้าออก (แนวปฏิบัติทั่วไป #28) ขั้นตอนการบันทึกเวลาเข้าออกตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (28)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "43678730-ff8b-5313-bb43-76e9cf08773a": {
+  "source": "P2-SYNTH-BANK-029",
+  "rerank_text": "การขอนามบัตร (แนวปฏิบัติทั่วไป #29) ขั้นตอนการขอนามบัตรตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (29)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "1a73d9ae-0b06-5b08-921b-838943bb1c4d": {
+  "source": "P2-SYNTH-BANK-030",
+  "rerank_text": "การจองรถบริษัท (แนวปฏิบัติทั่วไป #30) ขั้นตอนการจองรถบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (30)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "60bcfde3-f144-50cf-895a-de107f5d27a8": {
+  "source": "P2-SYNTH-BANK-031",
+  "rerank_text": "การเบิกค่าเดินทาง (แนวปฏิบัติทั่วไป #31) ขั้นตอนการเบิกค่าเดินทางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (31)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "2481393e-ff47-5585-bf44-6934b01f2325": {
+  "source": "P2-SYNTH-BANK-032",
+  "rerank_text": "การรีเซ็ตรหัสผ่าน (แนวปฏิบัติทั่วไป #32) ขั้นตอนการรีเซ็ตรหัสผ่านตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (32)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "39578bd3-dd03-57ee-a214-68fa6259930b": {
+  "source": "P2-SYNTH-BANK-033",
+  "rerank_text": "การตั้งค่าอีเมลบริษัท (แนวปฏิบัติทั่วไป #33) ขั้นตอนการตั้งค่าอีเมลบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (33)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "d047378d-a80e-5e86-b48c-b2c92aef535f": {
+  "source": "P2-SYNTH-BANK-034",
+  "rerank_text": "การจองห้องประชุม (แนวปฏิบัติทั่วไป #34) ขั้นตอนการจองห้องประชุมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (34)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4abc4871-b089-5938-b706-348823894d35": {
+  "source": "P2-SYNTH-BANK-035",
+  "rerank_text": "การเบิกอุปกรณ์สำนักงาน (แนวปฏิบัติทั่วไป #35) ขั้นตอนการเบิกอุปกรณ์สำนักงานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (35)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "176d5ed8-d31b-5b65-a004-df1fcdfda43a": {
+  "source": "P2-SYNTH-BANK-036",
+  "rerank_text": "การขอ VPN (แนวปฏิบัติทั่วไป #36) ขั้นตอนการขอ VPNตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (36)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "c5e345d3-618e-529a-aaa8-662361509b25": {
+  "source": "P2-SYNTH-BANK-037",
+  "rerank_text": "การแจ้งซ่อมคอมพิวเตอร์ (แนวปฏิบัติทั่วไป #37) ขั้นตอนการแจ้งซ่อมคอมพิวเตอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (37)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "482a119d-cb60-543f-81db-54edf56d1b14": {
+  "source": "P2-SYNTH-BANK-038",
+  "rerank_text": "การใช้เครื่องพิมพ์ส่วนกลาง (แนวปฏิบัติทั่วไป #38) ขั้นตอนการใช้เครื่องพิมพ์ส่วนกลางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (38)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "2c13362e-35ac-50b5-8e1e-9d4327dbdf79": {
+  "source": "P2-SYNTH-BANK-039",
+  "rerank_text": "การตั้งค่า WiFi (แนวปฏิบัติทั่วไป #39) ขั้นตอนการตั้งค่า WiFiตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (39)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "5f339a28-f73a-5513-bd96-2cadb6af245f": {
+  "source": "P2-SYNTH-BANK-040",
+  "rerank_text": "การขอสิทธิ์เข้าโฟลเดอร์ (แนวปฏิบัติทั่วไป #40) ขั้นตอนการขอสิทธิ์เข้าโฟลเดอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (40)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "9232624a-fb01-540b-9979-c223462564d5": {
+  "source": "P2-SYNTH-BANK-041",
+  "rerank_text": "การอัปเดตโปรแกรม (แนวปฏิบัติทั่วไป #41) ขั้นตอนการอัปเดตโปรแกรมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (41)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f7743154-0361-56fb-b958-5cbc89d592c8": {
+  "source": "P2-SYNTH-BANK-042",
+  "rerank_text": "การสำรองไฟล์ส่วนตัว (แนวปฏิบัติทั่วไป #42) ขั้นตอนการสำรองไฟล์ส่วนตัวตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (42)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "e69c5068-8f17-57ff-8a82-1239ff35107e": {
+  "source": "P2-SYNTH-BANK-043",
+  "rerank_text": "การใช้ระบบลางาน (แนวปฏิบัติทั่วไป #43) ขั้นตอนการใช้ระบบลางานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (43)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4ca8a2fe-34d6-50ff-8925-4f30ba694213": {
+  "source": "P2-SYNTH-BANK-044",
+  "rerank_text": "การบันทึกเวลาเข้าออก (แนวปฏิบัติทั่วไป #44) ขั้นตอนการบันทึกเวลาเข้าออกตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (44)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "bf3291b6-d909-5e89-bbdf-00984b065a3a": {
+  "source": "P2-SYNTH-BANK-045",
+  "rerank_text": "การขอนามบัตร (แนวปฏิบัติทั่วไป #45) ขั้นตอนการขอนามบัตรตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (45)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "bb5842ff-85d4-55dc-a0dc-e0063842abf1": {
+  "source": "P2-SYNTH-BANK-046",
+  "rerank_text": "การจองรถบริษัท (แนวปฏิบัติทั่วไป #46) ขั้นตอนการจองรถบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (46)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "e009a214-8cd1-5345-88d7-8c84b6957bbe": {
+  "source": "P2-SYNTH-BANK-047",
+  "rerank_text": "การเบิกค่าเดินทาง (แนวปฏิบัติทั่วไป #47) ขั้นตอนการเบิกค่าเดินทางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (47)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "230af3fb-9fe2-5f8f-b676-f224661f1a60": {
+  "source": "P2-SYNTH-BANK-048",
+  "rerank_text": "การรีเซ็ตรหัสผ่าน (แนวปฏิบัติทั่วไป #48) ขั้นตอนการรีเซ็ตรหัสผ่านตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (48)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "eb72fa7a-4fe6-534b-9a1e-969de079200c": {
+  "source": "P2-SYNTH-BANK-049",
+  "rerank_text": "การตั้งค่าอีเมลบริษัท (แนวปฏิบัติทั่วไป #49) ขั้นตอนการตั้งค่าอีเมลบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (49)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "6d1c1eac-029a-565b-9be0-5269169551f4": {
+  "source": "P2-SYNTH-BANK-050",
+  "rerank_text": "การจองห้องประชุม (แนวปฏิบัติทั่วไป #50) ขั้นตอนการจองห้องประชุมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (50)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "661fc18a-0c79-545b-bb94-3b19214f4db7": {
+  "source": "P2-SYNTH-BANK-051",
+  "rerank_text": "การเบิกอุปกรณ์สำนักงาน (แนวปฏิบัติทั่วไป #51) ขั้นตอนการเบิกอุปกรณ์สำนักงานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (51)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "a0211dc5-c9eb-5e6d-9371-9e0ec9e52928": {
+  "source": "P2-SYNTH-BANK-052",
+  "rerank_text": "การขอ VPN (แนวปฏิบัติทั่วไป #52) ขั้นตอนการขอ VPNตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (52)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f64ee371-99fa-53c3-a9bb-c5014232b611": {
+  "source": "P2-SYNTH-BANK-053",
+  "rerank_text": "การแจ้งซ่อมคอมพิวเตอร์ (แนวปฏิบัติทั่วไป #53) ขั้นตอนการแจ้งซ่อมคอมพิวเตอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (53)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "fc8864b9-916a-5dde-b5e6-d9b13b490982": {
+  "source": "P2-SYNTH-BANK-054",
+  "rerank_text": "การใช้เครื่องพิมพ์ส่วนกลาง (แนวปฏิบัติทั่วไป #54) ขั้นตอนการใช้เครื่องพิมพ์ส่วนกลางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (54)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "127c8a18-f38e-50c6-a76b-c5c4c05d1324": {
+  "source": "P2-SYNTH-BANK-055",
+  "rerank_text": "การตั้งค่า WiFi (แนวปฏิบัติทั่วไป #55) ขั้นตอนการตั้งค่า WiFiตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (55)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "697c4ccb-d4e0-5ce0-b3fb-3ea7e0e86713": {
+  "source": "P2-SYNTH-BANK-056",
+  "rerank_text": "การขอสิทธิ์เข้าโฟลเดอร์ (แนวปฏิบัติทั่วไป #56) ขั้นตอนการขอสิทธิ์เข้าโฟลเดอร์ตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (56)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "629d0b1c-3ba9-5e6f-95b8-51a8a509ccbd": {
+  "source": "P2-SYNTH-BANK-057",
+  "rerank_text": "การอัปเดตโปรแกรม (แนวปฏิบัติทั่วไป #57) ขั้นตอนการอัปเดตโปรแกรมตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (57)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f08ad60b-e410-5d48-87c4-45e1256a2342": {
+  "source": "P2-SYNTH-BANK-058",
+  "rerank_text": "การสำรองไฟล์ส่วนตัว (แนวปฏิบัติทั่วไป #58) ขั้นตอนการสำรองไฟล์ส่วนตัวตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (58)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "16b5fc38-0df0-54c9-b54a-5d021076ffaf": {
+  "source": "P2-SYNTH-BANK-059",
+  "rerank_text": "การใช้ระบบลางาน (แนวปฏิบัติทั่วไป #59) ขั้นตอนการใช้ระบบลางานตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (59)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "8b23ab05-1079-56ed-8616-95dc2415dc9e": {
+  "source": "P2-SYNTH-BANK-060",
+  "rerank_text": "การบันทึกเวลาเข้าออก (แนวปฏิบัติทั่วไป #60) ขั้นตอนการบันทึกเวลาเข้าออกตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (60)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "2bd825a3-4c06-5191-94b5-2ec4f6a14020": {
+  "source": "P2-SYNTH-BANK-061",
+  "rerank_text": "การขอนามบัตร (แนวปฏิบัติทั่วไป #61) ขั้นตอนการขอนามบัตรตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (61)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "31b6d5cb-dcc6-54b0-bd38-8cb315475a97": {
+  "source": "P2-SYNTH-BANK-062",
+  "rerank_text": "การจองรถบริษัท (แนวปฏิบัติทั่วไป #62) ขั้นตอนการจองรถบริษัทตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (62)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "86329b13-d81e-5bbe-8bca-90db7d181f93": {
+  "source": "P2-SYNTH-BANK-063",
+  "rerank_text": "การเบิกค่าเดินทาง (แนวปฏิบัติทั่วไป #63) ขั้นตอนการเบิกค่าเดินทางตามระเบียบภายใน ติดต่อ helpdesk หากมีปัญหา (63)",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f24e2285-0ffa-5565-bfb8-83ba36dfd0e8": {
+  "source": "P2-SYNTH-D-QUOTE",
+  "rerank_text": "การเสนอราคางานพิมพ์ รับสเปกจากลูกค้าแล้วคิดราคาจาก cost sheet ก่อนออกใบเสนอราคา",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -483,12 +1612,145 @@
     "sales",
     "management",
     "admin"
-   ]
+   ],
+   "synthetic": true
   }
  },
- "706dc63c-2144-5f80-85ee-ebb8696a6e18": {
-  "source": "SOP-QC-760",
-  "rerank_text": "การสอบเทียบเครื่องมือวัด (QP-760) สอบเทียบเครื่องวัดสีและตาชั่งตามรอบ ไม่เกี่ยวกับเกณฑ์ของเสีย",
+ "56bb34fb-580d-53ad-a34e-4cf02d145e4b": {
+  "source": "P2-SYNTH-D-RECALL",
+  "rerank_text": "การเรียกคืนผลิตภัณฑ์ เมื่อพบของเสียถึงมือลูกค้าแล้ว แจ้ง QMR เปิด recall notice ระบุ lot",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "27531b7a-378d-5971-8ab2-5837862cbe82": {
+  "source": "P2-SYNTH-D-TRAIN",
+  "rerank_text": "การอบรมพนักงานใหม่ พนักงานใหม่อบรม safety และ ISO ภายใน 30 วันแรก",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "81cc123f-0099-5c0c-87b1-49f8f0cc642d": {
+  "source": "P2-SYNTH-D-PO",
+  "rerank_text": "การจัดซื้อวัตถุดิบ เปิด PR เมื่อ stock ต่ำกว่า reorder point แล้วออก PO ให้ vendor ที่อนุมัติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "49992f89-1568-5bad-8875-36ff22faa5b1": {
+  "source": "P2-SYNTH-D-PRESS",
+  "rerank_text": "การตั้งเครื่องพิมพ์ ตั้ง register และแรงกดตามใบสั่งงาน ทดพิมพ์ให้ QC อนุมัติ first article",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "0aadd273-a27f-5ebf-b64a-7d47641ff7bc": {
+  "source": "P2-SYNTH-D-SHIP",
+  "rerank_text": "การจัดส่งสินค้า เตรียม packing list ตรวจจำนวนก่อนขึ้นรถ ยืนยันปลายทาง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "c56a29a8-95dd-53a9-93cd-33e8c0cd4c3b": {
+  "source": "P2-SYNTH-D-MAINT",
+  "rerank_text": "การบำรุงรักษาเครื่องจักร บำรุงรักษาเชิงป้องกันตามรอบ ตรวจ sensor และหล่อลื่น",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f3f7f74d-eb93-5f27-a381-51ac2b7440c7": {
+  "source": "P2-SYNTH-D-BACKUP",
+  "rerank_text": "การสำรองฐานข้อมูล สำรองฐานข้อมูลทุกคืน เก็บ 30 วัน ทดสอบ restore ทุกไตรมาส",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "99337564-68ff-5ac5-a635-80620ffa9221": {
+  "source": "P2-SYNTH-D-COLOR2",
+  "rerank_text": "การวัดสีก่อนส่งมอบ วัดค่าสีเทียบ proof ที่ลูกค้าอนุมัติก่อนปล่อยงาน",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -501,7 +1763,1558 @@
     "engineering",
     "management",
     "admin"
-   ]
+   ],
+   "synthetic": true
+  }
+ },
+ "1878f437-d56a-59b9-8afb-d1a6cf7d221f": {
+  "source": "P2-SYNTH-D-WRAP",
+  "rerank_text": "การรัดฟิล์มพาเลท รัดฟิล์มพาเลทให้แน่นกันสินค้าล้มระหว่างขนย้าย",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PACKAGING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "logistics",
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "7f8c3098-9265-5bf3-bbe3-d7737c562a11": {
+  "source": "P2-SYNTH-D-FIRSTLOGIN",
+  "rerank_text": "การเข้าระบบครั้งแรก เข้าครั้งแรกใช้รหัสชั่วคราวแล้วเปลี่ยนทันที",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "32db6fa7-600b-54ee-9cdd-13522560dac2": {
+  "source": "P2-SYNTH-D-PAYDAY",
+  "rerank_text": "รอบการจ่ายเงินเดือน จ่ายเงินเดือนทุกวันที่ 28 ของเดือน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "7409b923-2733-5952-8f89-ea3921d83c2b": {
+  "source": "P2-SYNTH-D-SORT",
+  "rerank_text": "การคัดแยกของเสีย แยกงานของเสียออกจากงานดีทันทีและติดป้ายกันปน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "98acd1f6-e80e-5193-9335-1f113304dc84": {
+  "source": "P2-SYNTH-D-EXPORTDOC",
+  "rerank_text": "เอกสารสำหรับส่งออก ส่งออกต้องมี invoice และ packing list ครบก่อนออกของ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "3e01b89a-fdeb-5ae5-ad6f-cc57dcb4651c": {
+  "source": "P2-SYNTH-D-READSPEC",
+  "rerank_text": "การอ่านแบบเครื่องจักร อ่านแบบตามสัญลักษณ์มาตรฐานและตรวจ tolerance ตามที่กำหนด",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "853895cb-207a-54b5-88ee-958f09df4691": {
+  "source": "P2-SYNTH-D-MAKEREADY",
+  "rerank_text": "การเตรียม make-ready เตรียมเพลท หมึก กระดาษให้ตรง job ด้วย checklist ลดเวลา setup",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "1c17c310-ad58-5b03-8857-dcd4b0c9524a": {
+  "source": "P2-SYNTH-D-FOLLOWUP",
+  "rerank_text": "การติดตามลูกค้า ติดตามลูกค้าภายใน 7 วันหลังส่งใบเสนอราคาและบันทึกใน CRM",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "22fc7a99-9b35-5a78-8682-6e5478df4fd5": {
+  "source": "P2-SYNTH-S-APPROVE",
+  "rerank_text": "การอนุมัติใบเสนอราคา ใบเสนอราคาเกิน 500,000 บาทต้องผ่านผู้จัดการฝ่ายขาย",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "9394879c-a1ea-53a5-939b-2f09ef644b2a": {
+  "source": "P2-SYNTH-S-APPROVE-TWIN",
+  "rerank_text": "การส่งใบเสนอราคา ส่งใบเสนอราคาทางอีเมลพร้อมสำเนาถึงฝ่ายบัญชี",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "357f2b12-9728-5015-9d5c-383285e42690": {
+  "source": "P2-SYNTH-S-MOCK",
+  "rerank_text": "การซ้อม mock recall ซ้อม mock recall ปีละ 1 ครั้ง วัดเวลาไม่เกิน 4 ชั่วโมง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "40fdb987-b1b5-508b-8686-71e4c38cfc4d": {
+  "source": "P2-SYNTH-S-MOCK-TWIN",
+  "rerank_text": "การรายงานผลเรียกคืน สรุปยอดเรียกคืนต่อผู้บริหารภายใน 3 วัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4788d809-9f0b-5230-8ea6-0b10a55412e5": {
+  "source": "P2-SYNTH-S-LEAVE",
+  "rerank_text": "ระเบียบการลาป่วย ลาป่วยเกิน 3 วันต้องมีใบรับรองแพทย์",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "8f55acd8-6598-5abb-a4e9-372bfa195567": {
+  "source": "P2-SYNTH-S-LEAVE-TWIN",
+  "rerank_text": "ระเบียบการลากิจ ลากิจต้องแจ้งล่วงหน้าอย่างน้อย 1 วัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "74a910d3-debf-5bb8-a0b8-8be439214433": {
+  "source": "P2-SYNTH-S-VENDOR",
+  "rerank_text": "การประเมิน vendor ประเมิน vendor ทุก 6 เดือน ด้านคุณภาพและการส่งมอบ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "44418bfc-b24c-5f1e-8261-6fe150feb836": {
+  "source": "P2-SYNTH-S-VENDOR-TWIN",
+  "rerank_text": "การขึ้นทะเบียน vendor ใหม่ vendor ใหม่ต้องส่งเอกสารรับรองก่อนอนุมัติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "adeeb534-5a4c-5185-90c4-a95221a208f4": {
+  "source": "P2-SYNTH-S-WASTE",
+  "rerank_text": "การควบคุมของเสียการผลิต บันทึก waste ต่อ job เทียบเป้าไม่เกิน 5%",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "2c7c891b-f91a-5203-bde2-89d263cf18e6": {
+  "source": "P2-SYNTH-S-WASTE-TWIN",
+  "rerank_text": "การควบคุมความเร็วเครื่อง ตั้งความเร็วเครื่องตามชนิดกระดาษ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "5cd1573a-a593-5124-b3b5-bb8266fc16c1": {
+  "source": "P2-SYNTH-S-PLAN",
+  "rerank_text": "การวางแผนขนส่ง รวม order ปลายทางเดียวกันเพื่อลดเที่ยวรถ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "8a3eefca-a672-50e8-b160-dc72dfce0265": {
+  "source": "P2-SYNTH-S-PLAN-TWIN",
+  "rerank_text": "การเลือกผู้ขนส่ง เลือกผู้ขนส่งจากราคาและความตรงต่อเวลา",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "7f87fbab-698d-5778-bc27-fe2c52d45c30": {
+  "source": "P2-SYNTH-S-CAL",
+  "rerank_text": "การหล่อลื่นข้อต่อ หล่อลื่นข้อต่อแขนกลทุกสัปดาห์ตามคู่มือ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "6476e6ae-6459-54f9-9102-2623da2de496": {
+  "source": "P2-SYNTH-S-CAL-TWIN",
+  "rerank_text": "การตรวจ sensor ตรวจความไวของ sensor ทุกเดือน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f42f8858-cc50-58ff-94fc-b9d73b46c698": {
+  "source": "P2-SYNTH-T-DE",
+  "rerank_text": "เกณฑ์ค่าสีงานพิมพ์ (ตาราง) ตาราง: Delta-E สูงสุด = 3.0 ; ค่าความเงา = 70 GU ; ความหนากระดาษ = 157 gsm",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "2a8b6d72-28e2-59fa-a260-646bf7d9b9ae": {
+  "source": "P2-SYNTH-T-DE-TWIN",
+  "rerank_text": "เกณฑ์ AQL งานพิมพ์ ตาราง: AQL major = 1.0 ; AQL minor = 2.5",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "bb7a0a81-b7ba-5173-949c-4e08d9b330cf": {
+  "source": "P2-SYNTH-T-LEADTIME",
+  "rerank_text": "ตาราง lead time งานพิมพ์ ตาราง: นามบัตร = 3 วัน ; โบรชัวร์ = 7 วัน ; กล่อง = 10 วัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "677a9cd8-5924-59c5-9212-5e7a005a7989": {
+  "source": "P2-SYNTH-T-LEADTIME-TWIN",
+  "rerank_text": "ตารางส่วนลดตามยอด ตาราง: ยอด 1 แสน = 3% ; ยอด 5 แสน = 5%",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "43ba35ed-1f52-522b-89f6-1d4218ed2b06": {
+  "source": "P2-SYNTH-T-REORDER",
+  "rerank_text": "ตาราง reorder point วัตถุดิบ ตาราง: กระดาษอาร์ต = 500 รีม ; หมึกดำ = 50 กก. ; กาว = 20 ลิตร",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "d061c058-67aa-5ddd-9fe4-430eb3d59c8f": {
+  "source": "P2-SYNTH-T-REORDER-TWIN",
+  "rerank_text": "ตารางราคาต่อหน่วย ตาราง: กระดาษอาร์ต = 120 บาท/รีม",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "7758cdca-0577-5888-b523-49689245dffd": {
+  "source": "P2-SYNTH-T-SPEED",
+  "rerank_text": "ตารางความเร็วเครื่องพิมพ์ ตาราง: กระดาษบาง = 8000 แผ่น/ชม. ; กระดาษหนา = 5000 แผ่น/ชม.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "70c02960-d707-5579-9308-a9e25df68c83": {
+  "source": "P2-SYNTH-T-SPEED-TWIN",
+  "rerank_text": "ตารางแรงกด ตาราง: กระดาษบาง = ระดับ 2",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "68922ae5-0290-50d7-bebb-ba0790e7c63e": {
+  "source": "P2-SYNTH-T-PALLET",
+  "rerank_text": "ตารางน้ำหนักพาเลท ตาราง: พาเลทไม้ = 25 กก. ; พาเลทพลาสติก = 15 กก.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "1ff09b6e-c4e0-5d55-a1b0-a5814bb06979": {
+  "source": "P2-SYNTH-T-PALLET-TWIN",
+  "rerank_text": "ตารางขนาดกล่อง ตาราง: กล่อง A = 30x20x15 ซม.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "a8d8223a-3757-50d2-bcb7-3b880c2033d5": {
+  "source": "P2-SYNTH-T-TORQUE",
+  "rerank_text": "ตารางค่า torque แขนกล ตาราง: ข้อต่อฐาน = 40 Nm ; ข้อต่อกลาง = 25 Nm ; ข้อต่อปลาย = 12 Nm",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "399241da-02a2-5af9-a339-f4b9dc850fbf": {
+  "source": "P2-SYNTH-T-TORQUE-TWIN",
+  "rerank_text": "ตารางระยะเคลื่อนที่ ตาราง: แกน X = 800 มม.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "1e7801e0-834f-54d9-971f-13ab1060055c": {
+  "source": "P2-SYNTH-N-DEFECT",
+  "rerank_text": "เกณฑ์ผ่าน/ไม่ผ่านงานพิมพ์ งานผ่านเมื่อผ่านทุกเกณฑ์ทั้งสีและความสะอาด งานที่ไม่มีจุดสกปรกแต่สีเพี้ยนเกิน Delta-E 3.0 ถือว่าไม่ผ่าน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "73b37d51-0003-52f6-bef3-bf1bed011354": {
+  "source": "P2-SYNTH-N-RECALL",
+  "rerank_text": "ขอบเขตการเปิด recall เปิด recall เฉพาะเมื่อสินค้าถึงมือลูกค้าแล้ว หากยังอยู่ในคลังให้ใช้ hold ภายในไม่ใช่ recall",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "55bce94c-71d5-5292-b69e-1c965ce16c06": {
+  "source": "P2-SYNTH-N-VENDOR",
+  "rerank_text": "การใช้ vendor สำรอง ใช้ vendor สำรองได้เฉพาะกรณีเร่งด่วน งานปกติห้ามใช้ vendor สำรอง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "5376f791-30c0-5c6b-b3d8-9a622bd3f2f7": {
+  "source": "P2-SYNTH-N-OT",
+  "rerank_text": "เงื่อนไขการทำ OT OT ต้องได้รับอนุมัติล่วงหน้า OT ที่ไม่ได้อนุมัติล่วงหน้าเบิกไม่ได้",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "04b3abe8-72e3-551d-991a-3190b5b14561": {
+  "source": "P2-SYNTH-N-FSC",
+  "rerank_text": "การใช้สัญลักษณ์ FSC ใช้ FSC ได้เฉพาะงานที่ certified งานที่ไม่ได้ certified ห้ามพิมพ์ FSC แม้ลูกค้าขอ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "69c546ec-2802-54db-9f31-817f5108dccd": {
+  "source": "P2-SYNTH-N-SHIP",
+  "rerank_text": "การปล่อยสินค้า ปล่อยสินค้าได้เมื่อ QC ผ่านเท่านั้น สินค้าที่ QC ยังไม่ผ่านห้ามขึ้นรถ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "9faf7cb1-2177-5484-bfe0-4626d3288912": {
+  "source": "P2-SYNTH-C-DE",
+  "rerank_text": "เกณฑ์ Delta-E ฉบับปัจจุบัน (rev.3, 2026) ฉบับปัจจุบัน rev.3 กำหนด Delta-E สูงสุด 3.0",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "9a874777-0158-5b12-823a-2ad152b569c6": {
+  "source": "P2-SYNTH-C-DE-TWIN",
+  "rerank_text": "เกณฑ์ Delta-E ฉบับเก่า (rev.2, ยกเลิกแล้ว) ฉบับเก่า rev.2 (superseded) เคยกำหนด Delta-E 5.0 ปัจจุบันยกเลิกแล้ว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "a866e353-f3c9-5be8-9923-062b11f928dc": {
+  "source": "P2-SYNTH-C-LEAD",
+  "rerank_text": "lead time นามบัตรฉบับปัจจุบัน (2026) ฉบับปัจจุบันกำหนดนามบัตร lead time 3 วัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "46528b80-df6d-5bb9-a78b-7c1d3fca72c5": {
+  "source": "P2-SYNTH-C-LEAD-TWIN",
+  "rerank_text": "lead time นามบัตรฉบับเก่า (ยกเลิก) ฉบับเก่า (superseded) เคยกำหนด 5 วัน ยกเลิกแล้ว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "a98743b7-fe09-5fa2-9c1e-26871e4c8022": {
+  "source": "P2-SYNTH-C-REORDER",
+  "rerank_text": "reorder หมึกดำฉบับปัจจุบัน ฉบับปัจจุบัน reorder หมึกดำที่ 50 กก.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f5a1bbe5-4f4a-590f-8d68-5ff4a8612894": {
+  "source": "P2-SYNTH-C-REORDER-TWIN",
+  "rerank_text": "reorder หมึกดำฉบับเก่า (ยกเลิก) ฉบับเก่า (superseded) เคยตั้ง 30 กก. ยกเลิกแล้ว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "e60f16aa-2d1d-5af9-8bd0-c105c2abda5f": {
+  "source": "P2-SYNTH-C-OT",
+  "rerank_text": "อัตรา OT ฉบับปัจจุบัน ฉบับปัจจุบันจ่าย OT 1.5 เท่าของค่าแรงปกติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "e739041d-7bd8-5479-a22d-18d81cb64f5e": {
+  "source": "P2-SYNTH-C-OT-TWIN",
+  "rerank_text": "อัตรา OT ฉบับเก่า (ยกเลิก) ฉบับเก่า (superseded) เคยจ่าย 1.25 เท่า ยกเลิกแล้ว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "9473c0ac-d732-508b-9217-9813d5344bf1": {
+  "source": "P2-SYNTH-C-SPEED",
+  "rerank_text": "ความเร็วกระดาษหนาฉบับปัจจุบัน ฉบับปัจจุบันกำหนดกระดาษหนา 5000 แผ่น/ชม.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "57a31c99-23db-5315-94ca-40c03e8d02e0": {
+  "source": "P2-SYNTH-C-SPEED-TWIN",
+  "rerank_text": "ความเร็วกระดาษหนาฉบับเก่า (ยกเลิก) ฉบับเก่า (superseded) เคยตั้ง 6000 แผ่น/ชม. ยกเลิกแล้ว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "9a23afb8-e277-5d35-aac7-88a5b801d259": {
+  "source": "P2-SYNTH-C-MAINT",
+  "rerank_text": "รอบบำรุงรักษาฉบับปัจจุบัน ฉบับปัจจุบันบำรุงรักษาทุก 1 สัปดาห์",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "2dea9e6d-868e-577f-9078-4c3271718e9d": {
+  "source": "P2-SYNTH-C-MAINT-TWIN",
+  "rerank_text": "รอบบำรุงรักษาฉบับเก่า (ยกเลิก) ฉบับเก่า (superseded) เคยกำหนดทุก 2 สัปดาห์ ยกเลิกแล้ว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "1508c0be-37f5-5669-886d-cf835f5e47be": {
+  "source": "P2-SYNTH-L-721",
+  "rerank_text": "การเสนอราคางาน P2-SYNTH-721 P2-SYNTH-721 ว่าด้วยการคิดราคาและออกใบเสนอราคา",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "e1ec269c-b04f-5875-858d-eee23dddbe4c": {
+  "source": "P2-SYNTH-L-721-TWIN",
+  "rerank_text": "การจัดทำ JOB packaging P2-SYNTH-722 P2-SYNTH-722 ว่าด้วยการจัดทำใบ JOB สำหรับงานบรรจุ ไม่ใช่การเสนอราคา",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "14f8b70a-3e54-5c6a-a4dd-a74d72cf79f8": {
+  "source": "P2-SYNTH-L-QP741",
+  "rerank_text": "การจัดซื้อ P2-SYNTH-741 P2-SYNTH-741 ว่าด้วยการเปิด PR และออก PO",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "b8a627dd-a002-5fe6-b9b4-1ae0415776ff": {
+  "source": "P2-SYNTH-L-QP741-TWIN",
+  "rerank_text": "การรับเข้าวัตถุดิบ P2-SYNTH-742 P2-SYNTH-742 ว่าด้วยการตรวจรับวัตถุดิบ ไม่ใช่การจัดซื้อ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f81fba5b-a075-5ee3-b7f7-ecdb80ddb963": {
+  "source": "P2-SYNTH-L-WI423",
+  "rerank_text": "การควบคุม FSC P2-SYNTH-423 P2-SYNTH-423 ว่าด้วยการตรวจสัญลักษณ์ FSC",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "1a001f42-0092-5832-9a81-28645775ae47": {
+  "source": "P2-SYNTH-L-WI423-TWIN",
+  "rerank_text": "การสอบเทียบเครื่องมือ P2-SYNTH-424 P2-SYNTH-424 ว่าด้วยการสอบเทียบเครื่องวัด ไม่ใช่ FSC",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "b3907b48-ae0a-5236-8511-9ff00b1a32a6": {
+  "source": "P2-SYNTH-L-QP710",
+  "rerank_text": "การตั้งเครื่อง P2-SYNTH-710 P2-SYNTH-710 ว่าด้วยการตั้ง register และแรงกด",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "fdcba92b-c597-53f1-ac7c-e7c60a5a3ff3": {
+  "source": "P2-SYNTH-L-QP710-TWIN",
+  "rerank_text": "การล้างเครื่อง P2-SYNTH-711 P2-SYNTH-711 ว่าด้วยการล้างลูกกลิ้ง ไม่ใช่การตั้งเครื่อง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "81b57b08-fc95-5b46-bda4-47781f2790d7": {
+  "source": "P2-SYNTH-L-WI755",
+  "rerank_text": "การจัดส่ง P2-SYNTH-755 P2-SYNTH-755 ว่าด้วยการเตรียมเอกสารและตรวจจำนวนก่อนส่ง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "c1ed170a-df82-57c6-8236-b50bc31e27c9": {
+  "source": "P2-SYNTH-L-WI755-TWIN",
+  "rerank_text": "การรับคืนสินค้า P2-SYNTH-756 P2-SYNTH-756 ว่าด้วยการรับคืนสินค้า ไม่ใช่การจัดส่ง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4323c7df-870c-57dc-8b5d-680d50396bd7": {
+  "source": "P2-SYNTH-L-QP852",
+  "rerank_text": "การเรียกคืน P2-SYNTH-852 P2-SYNTH-852 ว่าด้วยการเปิด recall notice",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "06dbcd77-8919-5dfd-95a5-d51d265b340f": {
+  "source": "P2-SYNTH-L-QP852-TWIN",
+  "rerank_text": "การกักกันภายใน P2-SYNTH-853 P2-SYNTH-853 ว่าด้วยการ hold ในคลัง ไม่ใช่การเรียกคืน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "54ff3481-ded5-5a1b-bc6f-61a2803e3fd6": {
+  "source": "P2-SYNTH-M-QUOTE",
+  "rerank_text": "การเสนอราคางานเร่งด่วนเกิน 5 แสน งานเร่งด่วนและเกิน 500,000 บาท ต้องคิด surcharge 10% และผ่านผู้จัดการ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "ce195ef1-88a2-518d-9cb1-bbabce5bfd2c": {
+  "source": "P2-SYNTH-M-QUOTE-TWIN",
+  "rerank_text": "การเสนอราคางานปกติ งานปกติคิดราคาตาม cost sheet ไม่มี surcharge",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "b67d87d4-6084-538f-a3af-350a96ebfc23": {
+  "source": "P2-SYNTH-M-SHIP",
+  "rerank_text": "การส่งออกต่างประเทศแบบด่วน ส่งออกต่างประเทศและเร่งด่วนต้องมีเอกสารศุลกากรครบและใช้ผู้ขนส่งด่วนที่อนุมัติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "38672294-0460-5657-8266-87b0526ef3cc": {
+  "source": "P2-SYNTH-M-SHIP-TWIN",
+  "rerank_text": "การส่งในประเทศ ส่งในประเทศใช้เอกสาร packing list ปกติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "ce92541e-b72d-5cca-bff6-a13a5ffd6c65": {
+  "source": "P2-SYNTH-M-PO",
+  "rerank_text": "การจัดซื้อเร่งด่วนมูลค่าสูง จัดซื้อเร่งด่วนและมูลค่าเกิน 200,000 ใช้ vendor สำรองได้แต่ต้องขออนุมัติผู้จัดการย้อนหลัง 24 ชม.",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "a835ef1d-decb-55b8-981c-b8f0c908c822": {
+  "source": "P2-SYNTH-M-PO-TWIN",
+  "rerank_text": "การจัดซื้อมูลค่าต่ำ มูลค่าต่ำเปิด PO ปกติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "f94c638f-6f1e-561c-b4c4-14066aca29e8": {
+  "source": "P2-SYNTH-M-QC",
+  "rerank_text": "การตรวจงานสีพิเศษจำนวนมาก งานสีพิเศษและจำนวนเกิน 10,000 ชิ้น ต้องสุ่มตรวจถี่ขึ้นและวัด Delta-E ทุกล็อต",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "e4ccd760-0dc8-5b80-9c62-562c1c54941d": {
+  "source": "P2-SYNTH-M-QC-TWIN",
+  "rerank_text": "การตรวจงานทั่วไป งานทั่วไปสุ่มตรวจตาม AQL ปกติ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "10d34dc0-1a8d-53d5-95a0-50e5a0b8d3e0": {
+  "source": "P2-SYNTH-M-PROD",
+  "rerank_text": "การผลิตกระดาษหนางานด่วน งานด่วนและกระดาษหนา ต้องลดความเร็วเหลือ 4000 แผ่น/ชม. และเพิ่มคนคุมเครื่อง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "322eda6d-0be6-514f-b0ce-39591bb7c1b9": {
+  "source": "P2-SYNTH-M-PROD-TWIN",
+  "rerank_text": "การผลิตงานปกติ งานปกติเดินตามความเร็วมาตรฐาน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PRODUCTION",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "81242326-319a-59c0-934e-05bda791fe90": {
+  "source": "P2-SYNTH-M-HR",
+  "rerank_text": "การอบรมพนักงานใหม่ตำแหน่งคุมเครื่อง พนักงานใหม่และเป็นตำแหน่งคุมเครื่อง ต้องอบรม safety เพิ่มและผ่านทดสอบก่อนขึ้นเครื่อง",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "b2068c33-3660-5e05-85ad-c5476a82daef": {
+  "source": "P2-SYNTH-M-HR-TWIN",
+  "rerank_text": "การอบรมพนักงานใหม่ทั่วไป พนักงานใหม่ทั่วไปอบรม safety และ ISO พื้นฐาน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "ba2b12d6-53ff-5fd9-a348-abb8c1329138": {
+  "source": "P2-SYNTH-G-QUOTE",
+  "rerank_text": "การเสนอราคางานพิมพ์ (สรุปครบ) สรุปครบตั้งแต่รับสเปก คิดราคา จนออกและอนุมัติใบเสนอราคา",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "3174208d-297f-59da-9313-13088c9c6cc7": {
+  "source": "P2-SYNTH-G-QUOTE-SUP",
+  "rerank_text": "รายละเอียดวงเงินอนุมัติ วงเงินอนุมัติเกิน 5 แสนผ่านผู้จัดการ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "bdd762c8-1f14-5814-883c-d137f0088e71": {
+  "source": "P2-SYNTH-G-RECALL",
+  "rerank_text": "ขั้นตอนเรียกคืนและรายงาน (สรุปครบ) สรุปครบตั้งแต่เปิด recall จนรายงานผลต่อผู้บริหาร",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "5bb7b9f0-320e-5d09-a7df-2f3643ccffa5": {
+  "source": "P2-SYNTH-G-RECALL-SUP",
+  "rerank_text": "รายละเอียดกำหนดเวลารายงาน รายงานผลภายใน 3 วัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "RECALL",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "qc",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "05cf0615-900b-5a45-b92b-340a30eac360": {
+  "source": "P2-SYNTH-G-PO",
+  "rerank_text": "ภาพรวมจัดซื้อและประเมิน vendor (สรุปครบ) สรุปครบตั้งแต่เปิด PR ออก PO จนประเมิน vendor",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4bc56a5e-7a91-5c29-a374-d64cc7b9f964": {
+  "source": "P2-SYNTH-G-PO-SUP",
+  "rerank_text": "รายละเอียดรอบประเมิน vendor ประเมิน vendor ทุก 6 เดือน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "aefac1fe-7bf6-50e2-91f9-7995ac0273cd": {
+  "source": "P2-SYNTH-G-QC",
+  "rerank_text": "ภาพรวมตรวจสีและเกณฑ์ของเสีย (สรุปครบ) สรุปครบทั้งการวัดสีและเกณฑ์ตัดสินของเสีย",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "5c5e81a3-8df3-53d2-aa8d-53c54141d3d7": {
+  "source": "P2-SYNTH-G-QC-SUP",
+  "rerank_text": "รายละเอียดค่า Delta-E Delta-E สูงสุด 3.0",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "d2279e37-505c-5a8f-8ded-0941d09f6fc5": {
+  "source": "P2-SYNTH-G-SHIP",
+  "rerank_text": "ภาพรวมจัดส่งและวางแผนขนส่ง (สรุปครบ) สรุปครบทั้งการเตรียมส่งและการวางแผนรวมเที่ยว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "94459329-82c3-5452-ad5b-cd98d6d3a0ac": {
+  "source": "P2-SYNTH-G-SHIP-SUP",
+  "rerank_text": "รายละเอียดการรวมเที่ยว รวม order ปลายทางเดียวกันลดเที่ยว",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "LOGISTICS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "logistics",
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
   }
  }
 }
