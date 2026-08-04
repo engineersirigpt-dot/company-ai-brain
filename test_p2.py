@@ -242,8 +242,8 @@ check("B6.1: reviewed_by หาย -> error", any("reviewed_by" in e for e in V(
 
 # ── B6.1: Data Owner sign-off (hash-bound) + decision gate ────────────────────
 _gs = {"eval_set_sha256": E.eval_set_sha256([case()]), "corpus_manifest_sha256": E.corpus_manifest_sha256(CORPUS),
-       "benchmark_contract_version": E.BENCHMARK_CONTRACT_VERSION, "git_commit": "abc", "reviewer": "owner",
-       "data_owner_role": "QA Lead", "reviewed_at": "2026-08-04", "decision": "approved"}
+       "benchmark_contract_version": E.BENCHMARK_CONTRACT_VERSION, "git_commit": "2364bb1a1b2c3d", "reviewer": "owner",
+       "data_owner_role": "QA Lead", "reviewed_at": "2026-08-04T10:00:00+07:00", "decision": "approved"}
 check("validate_signoff: ไม่มี signoff -> error", E.validate_signoff(None, [case()], CORPUS) != [])
 check("validate_signoff: hash ตรง + approved -> ผ่าน", E.validate_signoff(_gs, [case()], CORPUS) == [])
 check("validate_signoff: eval hash ไม่ตรง -> error", any("eval_set_sha256" in e for e in E.validate_signoff({**_gs, "eval_set_sha256": "x"}, [case()], CORPUS)))
@@ -269,6 +269,40 @@ check("M1: decision_benchmark cases=[] corpus=None -> controlled (ไม่ cras
       _no_crash(lambda: E.decision_benchmark_errors([], None, KNOWN, ["qc"], ["direct"], {"decision": "approved"})))
 check("M1: validate_signoff corpus=None (hash fail) -> controlled list",
       isinstance(E.validate_signoff(dict(_gs, corpus_manifest_sha256="x"), [case()], None), list))
+
+# ── M1.1: sign-off field types (exact, ไม่ใช่ truthiness) ──────────────────────
+check("M1.1: reviewer bool -> error", any("reviewer" in e for e in E.validate_signoff({**_gs, "reviewer": True}, [case()], CORPUS)))
+check("M1.1: data_owner_role list -> error", any("data_owner_role" in e for e in E.validate_signoff({**_gs, "data_owner_role": ["x"]}, [case()], CORPUS)))
+check("M1.1: git_commit ไม่ใช่ hex -> error", any("git_commit" in e for e in E.validate_signoff({**_gs, "git_commit": "zzz"}, [case()], CORPUS)))
+check("M1.1: reviewed_at ไม่มี tz -> error", any("reviewed_at" in e for e in E.validate_signoff({**_gs, "reviewed_at": "2026-08-04"}, [case()], CORPUS)))
+check("M1.1: reviewed_at dict -> error", any("reviewed_at" in e for e in E.validate_signoff({**_gs, "reviewed_at": {"not": "time"}}, [case()], CORPUS)))
+check("M1.1: signoff ครบถูกชนิด -> ผ่าน", E.validate_signoff(_gs, [case()], CORPUS) == [])
+
+# ── B3.1: real M4 / canary evidence validators (exact PASS, ไม่ใช่ truthiness) ──
+_eh, _ch = E.eval_set_sha256([case()]), E.corpus_manifest_sha256(CORPUS)
+_m4 = {"status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
+       "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0, "model_revision": "m",
+       "tokenizer_revision": "t", "image_digest": "d", "retrieval_index_manifest_sha256": "idx",
+       "run_id": "r", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
+_can = {"status": "PASS", "leak_count": 0, "auth_status": "VERIFIED",
+        "arm_status": {"dense": "PASS", "rerank": "PASS", "fused": "PASS"},
+        "retrieval_index_manifest_sha256": "idx", "run_id": "r", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
+check("B3.1: m4 PASS + hash ตรง -> valid", E.validate_m4_evidence(_m4, _eh, _ch) == [])
+check("B3.1: m4 status=FAIL -> error (truthy dict ไม่ผ่าน)", E.validate_m4_evidence({**_m4, "status": "FAIL"}, _eh, _ch) != [])
+check("B3.1: m4 sentinel_reached_model=True -> error", E.validate_m4_evidence({**_m4, "sentinel_reached_model": True}, _eh, _ch) != [])
+check("B3.1: m4 hash ไม่ตรง -> error", E.validate_m4_evidence(_m4, "x", _ch) != [])
+check("B3.1: canary PASS -> valid", E.validate_canary_evidence(_can, _eh, _ch) == [])
+check("B3.1: canary leak>0 -> error", E.validate_canary_evidence({**_can, "leak_count": 99}, _eh, _ch) != [])
+check("B3.1: canary auth UNVERIFIED -> error", E.validate_canary_evidence({**_can, "auth_status": "UNVERIFIED"}, _eh, _ch) != [])
+check("B3.1: canary arm ขาด -> error", E.validate_canary_evidence({**_can, "arm_status": {"dense": "PASS"}}, _eh, _ch) != [])
+
+# ── B3.2: smoke manifest ใช้กับ ai-reviewed ได้ ; decision path ปฏิเสธ ──────────
+_ai = case(label_status="ai-reviewed")
+check("B3.2: smoke manifest กับ ai-reviewed -> approved=False + decision_eligible=False",
+      E.artifact_manifest_unapproved([_ai], CORPUS, KNOWN).get("approved") is False
+      and E.artifact_manifest_unapproved([_ai], CORPUS, KNOWN).get("decision_eligible") is False)
+check("B3.2: decision path (validate_benchmark default) ปฏิเสธ ai-reviewed",
+      any("label_status" in e for e in E.validate_benchmark([_ai], CORPUS, KNOWN)))
 
 # ── M1.1: corpus/cases fail-closed ────────────────────────────────────────────
 check("M1.1: corpus ว่าง -> error", E.validate_corpus({}) != [])

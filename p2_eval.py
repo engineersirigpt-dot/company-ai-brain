@@ -8,6 +8,7 @@ P2 eval-set validation + freeze (Codex B2/M1/M2/M5) — pure, offline
 from __future__ import annotations
 import hashlib
 import json
+import re
 import unicodedata
 
 import policy as P
@@ -25,9 +26,20 @@ REQUIRED_CASE_FIELDS = ("query_id", "intent_id", "query", "role", "lang", "categ
 SIGNOFF_FIELDS = ("eval_set_sha256", "corpus_manifest_sha256", "benchmark_contract_version",
                   "git_commit", "reviewer", "data_owner_role", "reviewed_at", "decision")
 VALID_SPLITS = frozenset({"dev", "test"})
-VALID_LABEL_STATUS = frozenset({"human-reviewed"})     # benchmark gate (B6: AI review ไม่พอ)
+VALID_LABEL_STATUS = frozenset({"human-reviewed"})     # decision gate (B6: AI review ไม่พอ)
 AI_LABEL_STATUS = frozenset({"draft", "ai-reviewed"})  # ระหว่าง AI review เท่านั้น
+SMOKE_LABEL_STATUS = VALID_LABEL_STATUS | AI_LABEL_STATUS   # B3.2: smoke ยอม ai-reviewed ได้
 MIN_TEST_INTENTS = 50                                  # arm-eligibility (B2): independent intent groups
+ARMS_EXACT = ("dense", "rerank", "fused")              # B3.1: canary ต้องครอบทุก arm
+_ISO8601_TZ = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)$")
+
+
+def _good_str(x) -> bool:
+    return not _bad_str(x)
+
+
+def _is_hex_commit(x) -> bool:
+    return isinstance(x, str) and 7 <= len(x) <= 64 and all(c in "0123456789abcdef" for c in x.lower())
 
 
 def _effective_access(role: str):
@@ -68,7 +80,8 @@ def _is_grade(g) -> bool:
     return type(g) is int and g in LOCKED_GRADES
 
 
-def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
+def validate_ranking_eval_set(cases, corpus: dict, known_roles,
+                              allowed_label_status=VALID_LABEL_STATUS) -> list:
     """
     คืน list ของ error (ว่าง = ผ่าน). corpus[point_id] = {"source": str, "rerank_text": str, "payload": {v1}}
     fail เมื่อ: field บังคับหาย/ผิดชนิด/control char · query_id/query/source/point ซ้ำ-ว่าง ·
@@ -105,8 +118,8 @@ def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
             errs.append(f"{tag}: case_type ต้อง 'ranking' (no-answer -> abstention suite แยก)")
         if c.get("split") not in VALID_SPLITS:
             errs.append(f"{tag}: split ผิด {c.get('split')!r}")
-        if c.get("label_status") not in VALID_LABEL_STATUS:
-            errs.append(f"{tag}: label_status ต้อง human-reviewed")
+        if c.get("label_status") not in allowed_label_status:
+            errs.append(f"{tag}: label_status ต้องอยู่ใน {sorted(allowed_label_status)}")
         if _bad_str(c.get("lang")):
             errs.append(f"{tag}: lang ว่าง")
         if _bad_str(c.get("category")):
@@ -228,12 +241,12 @@ def validate_corpus(corpus) -> list:
     return errs
 
 
-def validate_benchmark(cases, corpus, known_roles) -> list:
+def validate_benchmark(cases, corpus, known_roles, allowed_label_status=VALID_LABEL_STATUS) -> list:
     """รวม corpus + cases validation ; benchmark valid ก็ต่อเมื่อคืน []"""
     errs = validate_corpus(corpus)
     if not isinstance(cases, list) or not cases:
         errs.append("ranking cases ว่าง")
-    errs += validate_ranking_eval_set(cases, corpus, known_roles)
+    errs += validate_ranking_eval_set(cases, corpus, known_roles, allowed_label_status)
     return errs
 
 
@@ -277,10 +290,21 @@ def validate_signoff(signoff, cases, corpus) -> list:
     if not isinstance(signoff, dict) or not signoff:
         return ["ไม่มี Data Owner sign-off manifest (human sign-off ต้องมีก่อน decision benchmark)"]
     errs = [f"signoff field '{f}' หาย" for f in SIGNOFF_FIELDS if not signoff.get(f)]
-    if signoff.get("decision") != "approved":
-        errs.append(f"signoff decision != approved ({signoff.get('decision')!r})")
+    if signoff.get("decision") not in ("approved", "rejected"):
+        errs.append(f"signoff decision ต้องเป็น enum approved/rejected ({signoff.get('decision')!r})")
+    elif signoff.get("decision") != "approved":
+        errs.append("signoff decision != approved")
     if signoff.get("benchmark_contract_version") != BENCHMARK_CONTRACT_VERSION:
         errs.append("signoff benchmark_contract_version ไม่ตรง")
+    # M1.1: exact field types — กัน bool/list/dict/control char ที่ audit ไม่ได้
+    if not _good_str(signoff.get("reviewer")):
+        errs.append("signoff reviewer ต้องเป็น non-blank str")
+    if not _good_str(signoff.get("data_owner_role")):
+        errs.append("signoff data_owner_role ต้องเป็น non-blank str")
+    if not _is_hex_commit(signoff.get("git_commit")):
+        errs.append("signoff git_commit ต้องเป็น hex commit id (7-64)")
+    if not isinstance(signoff.get("reviewed_at"), str) or not _ISO8601_TZ.match(signoff.get("reviewed_at", "")):
+        errs.append("signoff reviewed_at ต้องเป็น ISO-8601 พร้อม timezone")
     # M1: hashing อาจ crash เมื่อ artifacts malformed (NaN/surrogate/None) → คืน controlled error
     try:
         if signoff.get("eval_set_sha256") != eval_set_sha256(cases):
@@ -307,25 +331,73 @@ def decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles,
             + validate_signoff(signoff, cases, corpus))
 
 
+def validate_m4_evidence(m4, eval_hash, corpus_hash) -> list:
+    """
+    B3.1: real M4 evidence ต้อง PASS จริง (exact type ไม่ใช่ truthiness) + ผูก artifact hashes
+    """
+    if not isinstance(m4, dict):
+        return ["m4_evidence ต้องเป็น validated dict summary"]
+    errs = []
+    for f in ("status", "isolated_interlock", "independent_oracle"):
+        if m4.get(f) != "PASS":
+            errs.append(f"m4 {f} != PASS ({m4.get(f)!r})")
+    if m4.get("sentinel_reached_model") is not False:
+        errs.append("m4 sentinel_reached_model ต้องเป็น False (exact)")
+    if m4.get("unauthorized_in_model_inputs") != 0 or isinstance(m4.get("unauthorized_in_model_inputs"), bool):
+        errs.append("m4 unauthorized_in_model_inputs ต้องเป็น 0 (exact int)")
+    for f in ("model_revision", "tokenizer_revision", "image_digest",
+              "retrieval_index_manifest_sha256", "run_id"):
+        if not _good_str(m4.get(f)):
+            errs.append(f"m4 '{f}' หาย/ผิดชนิด")
+    if m4.get("eval_set_sha256") != eval_hash:
+        errs.append("m4 eval_set_sha256 ไม่ตรง artifacts")
+    if m4.get("corpus_manifest_sha256") != corpus_hash:
+        errs.append("m4 corpus_manifest_sha256 ไม่ตรง artifacts")
+    return errs
+
+
+def validate_canary_evidence(canary, eval_hash, corpus_hash) -> list:
+    """B3.1: P5b canary evidence ต้อง leak=0/VERIFIED/ทุก arm PASS + ผูก artifact hashes"""
+    if not isinstance(canary, dict):
+        return ["canary_evidence ต้องเป็น validated dict summary"]
+    errs = []
+    if canary.get("status") != "PASS":
+        errs.append(f"canary status != PASS ({canary.get('status')!r})")
+    if canary.get("leak_count") != 0 or isinstance(canary.get("leak_count"), bool):
+        errs.append("canary leak_count ต้องเป็น 0 (exact int)")
+    if canary.get("auth_status") != "VERIFIED":
+        errs.append(f"canary auth_status != VERIFIED ({canary.get('auth_status')!r})")
+    arm_status = canary.get("arm_status")
+    if not isinstance(arm_status, dict) or set(arm_status) != set(ARMS_EXACT) \
+            or any(arm_status.get(a) != "PASS" for a in ARMS_EXACT):
+        errs.append(f"canary arm_status ต้องมี {ARMS_EXACT} = PASS ครบ")
+    for f in ("retrieval_index_manifest_sha256", "run_id"):
+        if not _good_str(canary.get(f)):
+            errs.append(f"canary '{f}' หาย/ผิดชนิด")
+    if canary.get("eval_set_sha256") != eval_hash:
+        errs.append("canary eval_set_sha256 ไม่ตรง artifacts")
+    if canary.get("corpus_manifest_sha256") != corpus_hash:
+        errs.append("canary corpus_manifest_sha256 ไม่ตรง artifacts")
+    return errs
+
+
 def decision_benchmark_manifest(cases, corpus, known_roles, evaluated_roles,
                                 gate_tags, signoff, m4_evidence, canary_evidence) -> dict:
     """
-    B3: **entry point เดียวสำหรับ decision/freeze** — bypass combined gate ไม่ได้.
-    สร้าง manifest ได้ก็ต่อเมื่อ decision gate ผ่าน + มี real M4 evidence + P5b canary PASS evidence.
-    (mechanics smoke ใช้ artifact_manifest_unapproved ที่ติดป้าย approved=False)
+    B3/B3.1: **entry point เดียวสำหรับ decision/freeze** — bypass combined gate ไม่ได้.
+    approved=True ได้ก็ต่อเมื่อ combined gate ผ่าน **และ** validated real M4 + P5b canary PASS (ไม่ใช่ truthiness)
     """
     errs = decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff)
-    if not m4_evidence:
-        errs.append("ขาด real M4 evidence (unauthorized sentinel ไม่ถึง cross-encoder)")
-    if not canary_evidence:
-        errs.append("ขาด P5b canary evidence (leak=0, auth VERIFIED ทุก arm)")
+    if not errs:                                        # artifacts valid → hash ได้ปลอดภัย
+        eh, ch = eval_set_sha256(cases), corpus_manifest_sha256(corpus)
+        errs += validate_m4_evidence(m4_evidence, eh, ch)
+        errs += validate_canary_evidence(canary_evidence, eh, ch)
     if errs:
         raise ValueError(f"decision benchmark ยังไม่ผ่าน gate ({len(errs)} ข้อ): {errs[:3]}")
     return {
-        "kind": "decision-benchmark", "approved": True,
+        "kind": "decision-benchmark", "approved": True, "decision_eligible": True,
         "benchmark_contract_version": BENCHMARK_CONTRACT_VERSION,
-        "eval_set_sha256": eval_set_sha256(cases),
-        "corpus_manifest_sha256": corpus_manifest_sha256(corpus),
+        "eval_set_sha256": eh, "corpus_manifest_sha256": ch,
         "signoff": signoff, "m4_evidence": m4_evidence, "canary_evidence": canary_evidence,
     }
 
@@ -358,11 +430,12 @@ def artifact_manifest_unapproved(cases, corpus: dict, known_roles) -> dict:
     B3: manifest สำหรับ **mechanics smoke เท่านั้น** (structural valid) — ติดป้าย approved=False
     **ห้าม**ใช้ตัดสิน/freeze arm ; decision/freeze ต้องใช้ decision_benchmark_manifest() เท่านั้น
     """
-    errs = validate_benchmark(cases, corpus, known_roles)
+    # B3.2: smoke ยอม draft/ai-reviewed ได้ (structural เท่านั้น) แต่ output ต้องไม่ decision-eligible
+    errs = validate_benchmark(cases, corpus, known_roles, allowed_label_status=SMOKE_LABEL_STATUS)
     if errs:
-        raise ValueError(f"artifacts ยังไม่ valid ({len(errs)} errors): {errs[:3]}")
+        raise ValueError(f"artifacts ยังไม่ valid structurally ({len(errs)} errors): {errs[:3]}")
     return {
-        "kind": "mechanics-smoke-unapproved", "approved": False,
+        "kind": "mechanics-smoke-unapproved", "approved": False, "decision_eligible": False,
         "benchmark_contract_version": BENCHMARK_CONTRACT_VERSION,
         "eval_set_sha256": eval_set_sha256(cases),
         "corpus_manifest_sha256": corpus_manifest_sha256(corpus),
