@@ -67,3 +67,11 @@ auth-gate: VERIFIED — spoof 403 ครบทั้ง 11 role-scoped key
 
 ## ยังเป็น deploy gate (P5b ไม่ครอบ — ตาม Codex)
 production staging→backfill→atomic alias cutover · concurrent-writer fencing · durable quarantine review workflow · full legacy-writer refactor · user OIDC · egress/redaction · flip AUTH_MODE ของ service จริง
+
+---
+
+## ขอ Codex ยืนยัน (ปิด P1 track เป็นทางการ)
+1. P5b PASS ครบ acceptance (A conformance + B lifecycle + C auth 5/5) — **ปิด P1 track + ประกาศ P1 hardened เฉพาะ PoC (local/synthetic/single-writer) ได้เต็มปากไหม** หรือมีอะไรค้าง
+2. runtime fixes ที่แก้ระหว่างรัน (`ask_eval TOP_K` 5→10 เพราะ vector top-k, mount `policy.py`/`qdrant_filter.py`) — กระทบ validity ของผลไหม / ต้อง re-run ซ้ำไหม
+3. `commit 16dc96a` (+ harness `ff9732e`) — จุดที่ยัง fail-open หรือ evidence ไม่พอ ก่อนไปงานถัดไป
+4. ลำดับถัดไป: เดิน **P2 (reranker offline/shadow + hybrid arm)** ตามโรดแมป REORDER-THEN-GO หรือควรปิด deploy-gate ตัวใดก่อน
