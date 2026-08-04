@@ -216,6 +216,7 @@ class SearchRequest(BaseModel):
 
 class SearchResult(BaseModel):
     rank: int
+    point_id: str  # Qdrant point id — additive (P5a: ให้ eval/permission-test assert identity ได้ ไม่ใช่แค่ชื่อ source)
     score: float
     source: str
     collection: str
@@ -239,7 +240,10 @@ class AskRequest(BaseModel):
 
 class AskCitation(BaseModel):
     ref: int          # หมายเลขที่ LLM ใช้อ้างใน answer เช่น [1]
+    point_id: str     # Qdrant point id — additive (P5a: permission test assert identity)
     source: str
+    collection: str   # collection_group — additive (P5a: เช็ค leak ระดับ collection ตาม ACL)
+    level: int        # confidentiality_level — additive (P5a: เช็ค clearance)
     heading: str
     score: float
 
@@ -297,6 +301,7 @@ def search(req: SearchRequest, request: Request):
         results=[
             SearchResult(
                 rank=i + 1,
+                point_id=str(r.id),
                 score=round(r.score, 4),
                 source=r.payload.get("source", ""),
                 collection=r.payload.get("collection_group", "?"),
@@ -374,7 +379,10 @@ def ask(req: AskRequest, request: Request):
         citations=[
             AskCitation(
                 ref=i + 1,
+                point_id=str(p.id),
                 source=p.payload.get("source", ""),
+                collection=p.payload.get("collection_group", "?"),
+                level=p.payload.get("confidentiality_level", 0),
                 heading=p.payload.get("heading", ""),
                 score=round(p.score, 4),
             )
