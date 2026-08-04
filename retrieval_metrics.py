@@ -34,6 +34,20 @@ def _check_ids(ids) -> None:
         seen.add(x)
 
 
+def _check_relevant_ids(rids) -> None:
+    """relevant_ids ต้องเป็น collection ของ id (ไม่ใช่ string เดี่ยว ที่ set() จะแตกเป็นตัวอักษร)"""
+    if isinstance(rids, str):
+        raise ValueError("relevant_ids เป็น string เดี่ยว — ต้องเป็น set/list/dict ของ id")
+    if not isinstance(rids, (set, frozenset, list, tuple, dict)):
+        raise ValueError(f"relevant_ids ผิดชนิด: {type(rids).__name__}")
+    ids = list(rids)
+    for x in ids:
+        if not isinstance(x, str) or not x.strip():
+            raise ValueError(f"relevant id ว่าง/ผิดชนิด: {x!r}")
+    if len(set(ids)) != len(ids):
+        raise ValueError("relevant id ซ้ำ")
+
+
 def _check_relevance(rel) -> None:
     if not isinstance(rel, dict):
         raise ValueError("relevance ต้องเป็น dict")
@@ -49,6 +63,7 @@ def candidate_recall_at_n(candidate_ids: list, relevant_ids, n: int):
     """สัดส่วน relevant ที่โผล่ใน candidate pool top-N (ก่อน rerank) — วัด candidate generation"""
     _check_k(n)
     _check_ids(candidate_ids)
+    _check_relevant_ids(relevant_ids)
     rel = set(relevant_ids)
     if not rel:
         return None
@@ -59,12 +74,14 @@ def candidate_recall_at_n(candidate_ids: list, relevant_ids, n: int):
 def hit_at_k(ranked_ids: list, relevant_ids, k: int) -> float:
     _check_k(k)
     _check_ids(ranked_ids)
+    _check_relevant_ids(relevant_ids)
     return 1.0 if set(ranked_ids[:k]) & set(relevant_ids) else 0.0
 
 
 def mrr_at_k(ranked_ids: list, relevant_ids, k: int) -> float:
     _check_k(k)
     _check_ids(ranked_ids)
+    _check_relevant_ids(relevant_ids)
     rel = set(relevant_ids)
     for i, pid in enumerate(ranked_ids[:k], 1):
         if pid in rel:
@@ -75,6 +92,7 @@ def mrr_at_k(ranked_ids: list, relevant_ids, k: int) -> float:
 def recall_at_k(ranked_ids: list, relevant_ids, k: int):
     _check_k(k)
     _check_ids(ranked_ids)
+    _check_relevant_ids(relevant_ids)
     rel = set(relevant_ids)
     if not rel:
         return None

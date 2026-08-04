@@ -181,8 +181,47 @@ check("M1: corpus_manifest_sha256 เปลี่ยนเมื่อ ACL เ�
       E.corpus_manifest_sha256(CORPUS) != E.corpus_manifest_sha256(
           {"pa": centry("D1", ["qc", "admin", "sales"]), "pb": CORPUS["pb"]}))
 check("M1: benchmark_manifest มี eval+corpus hash + contract version",
-      set(E.benchmark_manifest([case()], CORPUS)) >=
+      set(E.benchmark_manifest([case()], CORPUS, KNOWN)) >=
       {"eval_set_sha256", "corpus_manifest_sha256", "benchmark_contract_version", "rerank_text_version"})
+
+# ── B2.1: is_authorized reject scalar/malformed policy ────────────────────────
+check("B2.1: scalar allowed_roles -> ไม่ authorized (แม้ matches_policy match)", E.is_authorized(pl("qc"), "qc") is False)
+check("B2.1: allowed_roles=null -> ไม่ authorized", E.is_authorized(pl(None), "qc") is False)
+check("B2.1: schema bool -> ไม่ authorized", E.is_authorized(pl(["qc"], schema=True), "qc") is False)
+check("B2.1: payload ไม่ใช่ policy-v1 -> ไม่ authorized", E.is_authorized({"allowed_roles": ["qc"]}, "qc") is False)
+check("B2.1: empty ACL -> ไม่ authorized", E.is_authorized(pl([]), "qc") is False)
+check("B2.1: valid policy-v1 + role -> authorized", E.is_authorized(pl(["qc", "admin"]), "qc") is True)
+
+# ── M5.1: relevant_sources exact set-equality + no dup ────────────────────────
+CORPUS2 = {"pa": centry("D1", ["qc", "admin"]), "pc": centry("D2", ["qc", "admin"])}
+def V2(cases):
+    return E.validate_ranking_eval_set(cases, CORPUS2, KNOWN)
+check("M5.1: source ซ้ำ ใน relevant_sources -> error", any("ซ้ำ" in e for e in V2([case(rel={"pa": 2}, rsrc=["D1", "D1"])])))
+check("M5.1: extra source -> error (exact set)", any("ไม่ตรง exact" in e for e in V2([case(rel={"pa": 2}, rsrc=["D1", "D999"])])))
+check("M5.1: missing source -> error", any("ไม่ตรง exact" in e for e in V2([case(rel={"pa": 2, "pc": 1}, rsrc=["D1"])])))
+check("M5.1: exact match (สองเอกสารครบ) -> ไม่มี error", V2([case(rel={"pa": 2, "pc": 1}, rsrc=["D1", "D2"])]) == [])
+
+# ── M1.1: corpus/cases fail-closed ────────────────────────────────────────────
+check("M1.1: corpus ว่าง -> error", E.validate_corpus({}) != [])
+check("M1.1: corpus entry ไม่ใช่ dict -> error (ไม่ crash)", any("ไม่ใช่ object" in e for e in E.validate_corpus({"px": "bad"})))
+check("M1.1: corpus payload ไม่ใช่ policy-v1 -> error",
+      any("policy-v1" in e for e in E.validate_corpus({"px": {"source": "D1", "rerank_text": "t", "payload": {"x": 1}}})))
+check("M1.1: corpus payload scalar allowed_roles -> error", any("contract" in e for e in E.validate_corpus({"px": centry("D1", "qc")})))
+check("M1.1: corpus rerank_text ว่าง -> error", any("rerank_text" in e for e in E.validate_corpus({"px": centry("D1", ["qc"], text=" ")})))
+check("M1.1: corpus ดี -> ไม่มี error", E.validate_corpus(CORPUS) == [])
+check("M1.1: validate_benchmark cases ว่าง -> error", any("cases ว่าง" in e for e in E.validate_benchmark([], CORPUS, KNOWN)))
+check("M1.1: benchmark_manifest invalid -> ValueError", raises(lambda: E.benchmark_manifest([], CORPUS, KNOWN)))
+check("M1.1: corpus_manifest_sha256 rerank_text ผิดชนิด -> ValueError",
+      raises(lambda: E.corpus_manifest_sha256({"px": {"source": "D1", "rerank_text": 123, "payload": pl(["qc"])}})))
+
+# ── M3.1: public boundary guards ──────────────────────────────────────────────
+check("M3.1: relevant_ids เป็น string เดี่ยว -> fail (กัน char set)", raises(lambda: M.hit_at_k(["a"], "abc", 1)))
+check("M3.1: relevant_ids ผิดชนิด -> fail", raises(lambda: M.recall_at_k(["a"], 123, 1)))
+check("M3.1: relevant id ว่าง -> fail", raises(lambda: M.mrr_at_k(["a"], ["", "b"], 2)))
+check("M3.1: dense_rank_map rank ไม่ positive int -> fail", raises(lambda: R.fused_rrf({"x": ["a", "b"]}, dense_rank_map={"a": 1, "b": 0})))
+check("M3.1: dense_rank_map rank ซ้ำ -> fail", raises(lambda: R.fused_rrf({"x": ["a", "b"]}, dense_rank_map={"a": 1, "b": 1})))
+check("M3.1: dense_rank_map rank bool -> fail", raises(lambda: R.fused_rrf({"x": ["a", "b"]}, dense_rank_map={"a": 1, "b": True})))
+check("M3.1: dense_rank_map() builder validate candidate", raises(lambda: R.dense_rank_map([cand("a", 1), cand("a", 2)])))
 
 # ── B1: permission gate type-strict (ปิด fail-open) ───────────────────────────
 check("B1: gate exit 0 -> valid", E.permission_gate_ok(0) is True)

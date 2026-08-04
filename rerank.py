@@ -101,8 +101,15 @@ def fused_rrf(rankings: dict, rrf_k: int = RRF_K_DEFAULT, dense_rank_map: dict =
             universe = s
         elif s != universe:
             raise ValueError(f"ranking '{name}' ไม่ใช่ permutation ของ universe เดียว (missing/extra id)")
-    if dense_rank_map is not None and set(dense_rank_map) != universe:
-        raise ValueError("dense_rank_map ต้องครอบ exact universe ของ rankings")
+    if dense_rank_map is not None:
+        if set(dense_rank_map) != universe:
+            raise ValueError("dense_rank_map ต้องครอบ exact universe ของ rankings")
+        vals = list(dense_rank_map.values())
+        for v in vals:                                    # M3.1: rank ต้อง positive int, ไม่ซ้ำ
+            if type(v) is not int or v < 1:
+                raise ValueError(f"dense_rank_map rank ต้อง positive int: {v!r}")
+        if len(set(vals)) != len(vals):
+            raise ValueError("dense_rank_map rank ซ้ำ")
     scores: dict = {pid: 0.0 for pid in universe}
     for r in rankings.values():
         for rank, pid in enumerate(r, 1):
@@ -112,4 +119,6 @@ def fused_rrf(rankings: dict, rrf_k: int = RRF_K_DEFAULT, dense_rank_map: dict =
 
 
 def dense_rank_map(cands: list) -> dict:
+    """สร้าง point_id -> dense_rank (validate candidate contract ก่อน — M3.1)"""
+    validate_candidates(cands)
     return {c["point_id"]: c["dense_rank"] for c in cands}

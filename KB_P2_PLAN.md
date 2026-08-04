@@ -21,7 +21,7 @@ filter ก่อน candidates เสมอ (reranker เห็นเฉพา�
 - latency แยก `candidate_retrieval_ms` / `rerank_ms` / `total_ms` — p50/p95 หลัง warm-up
 - Slice 2: paired **win/tie/loss** ต่อ query + paired **bootstrap CI** ของ primary-metric delta
 - `citation_accuracy` ตัดออก (offline retrieval ไม่มี citation) → ใช้ `source_hit`/`document_hit` ; no-answer แยก suite (abstention ต้องมี threshold contract ก่อน)
-- **primary metric ประกาศล่วงหน้า = `nDCG@5` + `MRR@5`** ; รายงาน k ∈ {1,3,5}
+- **primary metric เดียว = mean paired `nDCG@5`** ; `MRR@5`/Hit/Recall/document-level = key secondary/diagnostic ; รายงาน k ∈ {1,3,5}
 
 ## Fusion (Codex Q2) — RRF only ใน Slice 1
 ```
@@ -55,12 +55,29 @@ Candidate { point_id: non-empty unique str · document_id/source: stable str ·
 - **P2b (later):** dense+sparse hybrid — งานแยก
 - **held-out real/redacted/approved eval:** ก่อนสรุป business/hardware — synthetic ประกาศได้แค่ "P2 mechanics PASS on synthetic"
 
-## Acceptance ก่อนเลือก arm (ประกาศล่วงหน้า)
-1. permission leak=0 + auth gate ผ่านทุก arm (**hard gate**)
-2. candidate label coverage / ACL validation = 100%
-3. rerank/fusion ต้องไม่ลด primary metric เทียบ dense เกิน tolerance + รายงาน CI/win-tie-loss
-4. `fused_rrf` ต้องชนะ `rerank`-only อย่างมีสาระจึงคุ้ม complexity ; ไม่งั้นเลือก rerank-only
-5. latency p95 ใน budget ที่บันทึกพร้อม hardware/model revision
+## Acceptance ที่ Codex ล็อก (ประกาศก่อน model run) — แยก **benchmark valid** จาก **arm eligible**
+> โมเดลไม่ชนะ ≠ benchmark fail. dataset: `test` ranking ≥ **50 cases** (น้อยกว่า = smoke) ; dev เลือก N, test รายงานครั้งเดียว ห้ามปรับ N/threshold จากผล test.
+
+**A. Candidate pool / เลือก N** — sweep `N∈{10,20,30,50}` บน **dev**, เลือก N ต่ำสุดที่ผ่านพร้อมกัน:
+- point-level `CandidateRecall@N ≥ 0.95` · document-level `CandidateRecall@N ≥ 0.95` · `CandidateHit@N = 1.00` ทุก case
+- ไม่มี N ใดผ่าน/test หลุด → รายงาน mechanics ได้แต่ verdict = **candidate-generation limited → P2b** (ห้ามสรุป reranker ชนะ/แพ้)
+
+**B. Improvement + paired CI** — paired bootstrap ระดับ query, **10,000 resamples**, fixed seed บันทึกก่อน run, 95% CI:
+- `rerank` แทน `dense` เมื่อ mean `ΔnDCG@5 ≥ +0.02` และ CI lower bound `≥ 0.00`
+- CI lower `≥ -0.01` แต่ไม่ถึงเกณฑ์ = non-inferior เท่านั้น → คง dense default · CI lower `< -0.01` = rerank ไม่ผ่าน
+- `fused_rrf` แทน `rerank` เมื่อ `+≥0.01` และ CI lower `≥ 0.00` ; ไม่งั้นเลือก arm ที่ง่ายกว่า
+- hard-negative category ใด mean delta `< -0.05` → arm นั้นไม่ผ่าน แม้ค่าเฉลี่ยรวมผ่าน
+
+**C. Latency budget** (บันทึก CPU/GPU/RAM/CUDA/container digest/model+tokenizer rev/batch ; warm-up ≥10, samples ≥150, sync GPU):
+- incremental rerank `p95 ≤ 1,500 ms/query` · candidate+rerank total `p95 ≤ 2,500 ms/query` · RRF overhead `p95 ≤ 10 ms/query` (N≤50) · error/OOM = 0
+- CPU-only = คุณภาพใช้ได้ แต่ latency เป็น diagnostic ไม่ใช่ hardware verdict
+
+**D. Benchmark-valid hard gates** (publish quality ได้เมื่อครบ):
+- frozen validation ผ่าน + hashes/manifest ตรง + ไม่มี duplicate/unknown label
+- permission gate leak=0, auth VERIFIED, ERROR=0, INCONCLUSIVE=0
+- **M4 sentinel ไม่ถึง scorer** + exact authorized-set assertions ผ่านทุก arm
+- arm output = exact candidate permutation (ไม่มี missing/extra/duplicate)
+- evidence: commit · image/model/tokenizer/embedding rev · Qdrant/index manifest · config · seed · raw per-query metric/latency · aggregate CI
 
 ## Out of scope (คง deploy gate)
 wire reranker เข้า live /search · shadow-in-API (เฉพาะหลัง prod auth/audit/packaging gate + ไม่ log unauthorized text) · production collection/cutover · cloud egress · P2b hybrid · hardware sizing verdict

@@ -26,8 +26,18 @@ def _effective_access(role: str):
 
 
 def is_authorized(payload: dict, role: str) -> bool:
-    """P1 policy path เดียวกับ retrieval (admin ไม่มี bypass; stale/quarantine/wrong-version ไม่ผ่าน)"""
+    """
+    P1 policy path เดียวกับ retrieval **บวก stored-shape validation** (B2.1):
+    matches_policy เลียนแบบ Qdrant MatchAny → scalar `allowed_roles:"qc"` จะ match ได้ แต่ผิด
+    policy-v1 contract (write boundary ต้อง quarantine) → ต้องผ่าน validate_stored_payload ก่อน
+    (admin ไม่มี bypass; stale/quarantine/wrong-version/scalar/non-list/bad-schema ไม่ผ่าน)
+    """
     if role not in P.KNOWN_ROLES:
+        return False
+    if not P.payload_is_policy_v1(payload):
+        return False
+    valid, _ = P.validate_stored_payload(payload)
+    if not valid:
         return False
     return P.matches_policy(payload, P.compile_retrieval_filter(_effective_access(role)))
 
@@ -88,27 +98,75 @@ def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
         if role not in known:
             errs.append(f"{tag}: role ไม่รู้จัก {role!r}")
         rsrc = c.get("relevant_sources")
-        if not isinstance(rsrc, list) or not rsrc or any(_bad_str(s) for s in rsrc):
-            errs.append(f"{tag}: relevant_sources ว่าง/ผิดชนิด")
-            rsrc = []
+        rsrc_ok = isinstance(rsrc, list) and rsrc and not any(_bad_str(s) for s in rsrc)
+        if not rsrc_ok:
+            errs.append(f"{tag}: relevant_sources ว่าง/ผิดชนิด/control char")
+        elif len(set(rsrc)) != len(rsrc):
+            errs.append(f"{tag}: relevant_sources มี source ซ้ำ")
         rel = c.get("relevance")
         if not isinstance(rel, dict) or not rel:
             errs.append(f"{tag}: relevance ว่าง (ranking ต้องมี relevant point)")
             continue
+        derived = set()
         for pid, grade in rel.items():
             if _bad_str(pid):
                 errs.append(f"{tag}: relevant point id ว่าง")
                 continue
             if not _is_grade(grade):
                 errs.append(f"{tag}: grade นอก allowlist {LOCKED_GRADES} ({pid}={grade!r})")
-            if pid not in corpus:
+            entry = corpus.get(pid)
+            if not isinstance(entry, dict):
                 errs.append(f"{tag}: relevant point {pid} ไม่อยู่ใน frozen corpus")
                 continue
-            entry = corpus[pid]
             if role in known and not is_authorized(entry.get("payload", {}), role):
                 errs.append(f"{tag}: relevant point {pid} ไม่ authorized (P1 policy) สำหรับ role {role}")
-            if entry.get("source") not in rsrc:
-                errs.append(f"{tag}: source ของ {pid} ({entry.get('source')!r}) ไม่อยู่ใน relevant_sources")
+            if isinstance(entry.get("source"), str):
+                derived.add(entry["source"])
+        # M5.1: relevant_sources ต้อง exact set-equality กับ source ที่ derive จาก relevant points
+        if rsrc_ok:
+            want = set(rsrc)
+            if derived != want:
+                errs.append(f"{tag}: relevant_sources ไม่ตรง exact "
+                            f"(missing={sorted(derived - want)} extra={sorted(want - derived)})")
+    return errs
+
+
+# ── frozen-corpus validation (M1.1) — fail-closed ก่อนคำนวณ/hash ────────────────
+def validate_corpus(corpus) -> list:
+    """
+    frozen corpus ต้อง fail-closed: dict ไม่ว่าง ; แต่ละ entry มี point_id/source/rerank_text เป็น
+    non-blank str ไม่มี control char ; payload เป็น policy-v1 ที่ validate_stored_payload ผ่าน
+    """
+    if not isinstance(corpus, dict) or not corpus:
+        return ["corpus ว่าง/ไม่ใช่ dict"]
+    errs = []
+    for pid, e in corpus.items():
+        tag = f"corpus[{pid!r}]"
+        if _bad_str(pid):
+            errs.append(f"{tag}: point_id ว่าง/control char")
+        if not isinstance(e, dict):
+            errs.append(f"{tag}: entry ไม่ใช่ object")
+            continue
+        if _bad_str(e.get("source")):
+            errs.append(f"{tag}: source ว่าง/control char")
+        if _bad_str(e.get("rerank_text")):
+            errs.append(f"{tag}: rerank_text ว่าง/ผิดชนิด/control char")
+        pay = e.get("payload")
+        if not P.payload_is_policy_v1(pay):
+            errs.append(f"{tag}: payload ไม่ใช่ policy-v1")
+        else:
+            ok, reason = P.validate_stored_payload(pay)
+            if not ok:
+                errs.append(f"{tag}: payload ผิด contract ({reason})")
+    return errs
+
+
+def validate_benchmark(cases, corpus, known_roles) -> list:
+    """รวม corpus + cases validation ; benchmark valid ก็ต่อเมื่อคืน []"""
+    errs = validate_corpus(corpus)
+    if not isinstance(cases, list) or not cases:
+        errs.append("ranking cases ว่าง")
+    errs += validate_ranking_eval_set(cases, corpus, known_roles)
     return errs
 
 
@@ -118,18 +176,28 @@ def eval_set_sha256(cases) -> str:
 
 
 def corpus_manifest_sha256(corpus: dict, rerank_text_version: str = RERANK_TEXT_VERSION) -> str:
+    def _text_hash(rt):
+        if not isinstance(rt, str):
+            raise ValueError("rerank_text ต้องเป็น str (validate_corpus ก่อน hash)")
+        return hashlib.sha256(rt.encode("utf-8")).hexdigest()
     rows = [{
         "point_id": pid,
         "source": corpus[pid].get("source"),
-        "rerank_text_sha256": hashlib.sha256((corpus[pid].get("rerank_text") or "").encode("utf-8")).hexdigest(),
+        "rerank_text_sha256": _text_hash(corpus[pid].get("rerank_text")),
         "payload": corpus[pid].get("payload"),
         "rerank_text_version": rerank_text_version,
     } for pid in sorted(corpus)]
     return hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def benchmark_manifest(cases, corpus: dict) -> dict:
-    """hash ที่ต้องผูกกับ git commit/model/tokenizer/image ใน run metadata ก่อน benchmark (Slice 2)"""
+def benchmark_manifest(cases, corpus: dict, known_roles) -> dict:
+    """
+    สร้างได้เฉพาะเมื่อ validate_benchmark ผ่าน (M1.1) — ผูกกับ git/model/tokenizer/image + Slice 2
+    ต้องเพิ่ม retrieval_index_manifest_sha256 (actual vectors/index digest) ใน run metadata
+    """
+    errs = validate_benchmark(cases, corpus, known_roles)
+    if errs:
+        raise ValueError(f"benchmark ยังไม่ valid ({len(errs)} errors) — สร้าง manifest ไม่ได้: {errs[:3]}")
     return {
         "benchmark_contract_version": BENCHMARK_CONTRACT_VERSION,
         "eval_set_sha256": eval_set_sha256(cases),
