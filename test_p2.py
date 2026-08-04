@@ -223,6 +223,28 @@ check("M3.1: dense_rank_map rank ซ้ำ -> fail", raises(lambda: R.fused_rrf(
 check("M3.1: dense_rank_map rank bool -> fail", raises(lambda: R.fused_rrf({"x": ["a", "b"]}, dense_rank_map={"a": 1, "b": True})))
 check("M3.1: dense_rank_map() builder validate candidate", raises(lambda: R.dense_rank_map([cand("a", 1), cand("a", 2)])))
 
+# ── M1.2: non-dict corpus -> controlled error (ไม่ AttributeError) ─────────────
+rc = [case(rel={"pa": 2}, rsrc=["D1"])]
+check("M1.2: validate_ranking_eval_set corpus=None -> controlled error",
+      E.validate_ranking_eval_set(rc, None, KNOWN) == ["corpus ต้องเป็น dict"])
+check("M1.2: validate_benchmark corpus=list -> error (ไม่ crash)", len(E.validate_benchmark(rc, [], KNOWN)) > 0)
+check("M1.2: validate_benchmark corpus=string -> error", len(E.validate_benchmark(rc, "bad", KNOWN)) > 0)
+check("M1.2: benchmark_manifest corpus=None -> ValueError (ไม่ AttributeError)",
+      raises(lambda: E.benchmark_manifest(rc, None, KNOWN)))
+
+# ── M1.3: lone surrogate (Cs) reject + canonical hash (surrogate/NaN safe) ─────
+check("M1.3: _bad_str reject lone surrogate (Cs)", E._bad_str("\ud800") is True)
+_sur = {"px": {"source": "D1", "rerank_text": "\ud800", "payload": pl(["qc"])}}
+check("M1.3: validate_corpus reject surrogate rerank_text", any("rerank_text" in e for e in E.validate_corpus(_sur)))
+check("M1.3: query surrogate -> error", any("query" in e for e in V([case(query="\ud800")])))
+check("M1.3: corpus_manifest_sha256 surrogate -> ValueError (ไม่ UnicodeEncodeError)",
+      raises(lambda: E.corpus_manifest_sha256(_sur)))
+check("M1.3: eval_set_sha256 NaN -> ValueError (allow_nan=False)",
+      raises(lambda: E.eval_set_sha256([{"query_id": "q", "x": float("nan")}])))
+check("M1.3: Thai/emoji hash ได้ + deterministic",
+      E.corpus_manifest_sha256({"pa": centry("D1", ["qc"], text="ทดสอบ 🚀 test")}) ==
+      E.corpus_manifest_sha256({"pa": centry("D1", ["qc"], text="ทดสอบ 🚀 test")}))
+
 # ── B1: permission gate type-strict (ปิด fail-open) ───────────────────────────
 check("B1: gate exit 0 -> valid", E.permission_gate_ok(0) is True)
 check("B1: gate exit 1 -> invalid", E.permission_gate_ok(1) is False)

@@ -43,10 +43,16 @@ def is_authorized(payload: dict, role: str) -> bool:
 
 
 def _bad_str(s) -> bool:
-    """ว่าง/ผิดชนิด/มี control char (ยกเว้น none — Thai ปกติผ่าน)"""
+    """ว่าง/ผิดชนิด/มี control char (Cc) หรือ lone surrogate (Cs) — Thai/emoji ปกติผ่าน"""
     if not isinstance(s, str) or not s.strip():
         return True
-    return any(unicodedata.category(ch) == "Cc" for ch in s)
+    return any(unicodedata.category(ch) in ("Cc", "Cs") for ch in s)
+
+
+def _canonical_json(obj) -> bytes:
+    """canonical hashing bytes เดียวสำหรับ eval/corpus: escape non-ASCII (surrogate-safe), reject NaN/Inf"""
+    return json.dumps(obj, sort_keys=True, ensure_ascii=True, allow_nan=False,
+                      separators=(",", ":")).encode("utf-8")
 
 
 def _is_grade(g) -> bool:
@@ -63,6 +69,8 @@ def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
     """
     if not isinstance(cases, list):
         return ["cases ต้องเป็น list"]
+    if not isinstance(corpus, dict):          # M1.2: กัน corpus.get() บน non-dict (AttributeError)
+        return ["corpus ต้องเป็น dict"]
     known = set(known_roles)
     errs, seen_qid = [], set()
     for i, c in enumerate(cases):
@@ -172,14 +180,17 @@ def validate_benchmark(cases, corpus, known_roles) -> list:
 
 # ── freeze (M1) — ต้องมี corpus hash ไม่ใช่แค่ cases ─────────────────────────────
 def eval_set_sha256(cases) -> str:
-    return hashlib.sha256(json.dumps(cases, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return hashlib.sha256(_canonical_json(cases)).hexdigest()
 
 
 def corpus_manifest_sha256(corpus: dict, rerank_text_version: str = RERANK_TEXT_VERSION) -> str:
     def _text_hash(rt):
         if not isinstance(rt, str):
             raise ValueError("rerank_text ต้องเป็น str (validate_corpus ก่อน hash)")
-        return hashlib.sha256(rt.encode("utf-8")).hexdigest()
+        try:
+            return hashlib.sha256(rt.encode("utf-8")).hexdigest()   # M1.3: lone surrogate -> controlled ValueError
+        except UnicodeEncodeError:
+            raise ValueError("rerank_text มี lone surrogate (encode utf-8 ไม่ได้)")
     rows = [{
         "point_id": pid,
         "source": corpus[pid].get("source"),
@@ -187,7 +198,7 @@ def corpus_manifest_sha256(corpus: dict, rerank_text_version: str = RERANK_TEXT_
         "payload": corpus[pid].get("payload"),
         "rerank_text_version": rerank_text_version,
     } for pid in sorted(corpus)]
-    return hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return hashlib.sha256(_canonical_json(rows)).hexdigest()
 
 
 def benchmark_manifest(cases, corpus: dict, known_roles) -> dict:
