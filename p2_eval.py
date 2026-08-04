@@ -20,7 +20,10 @@ GRADE_RUBRIC = {3: "ตอบครบโดยลำพัง (fully answers al
                 2: "supporting/partial", 1: "contextual"}
 REQUIRED_CASE_FIELDS = ("query_id", "intent_id", "query", "role", "lang", "category",
                         "challenge_tags", "split", "case_type", "relevance",
-                        "hard_negative_ids", "relevant_sources", "label_status")
+                        "hard_negative_ids", "relevant_sources", "label_status",
+                        "reviewed_by", "review_revision")   # B6.1: provenance บังคับ
+SIGNOFF_FIELDS = ("eval_set_sha256", "corpus_manifest_sha256", "benchmark_contract_version",
+                  "git_commit", "reviewer", "data_owner_role", "reviewed_at", "decision")
 VALID_SPLITS = frozenset({"dev", "test"})
 VALID_LABEL_STATUS = frozenset({"human-reviewed"})     # benchmark gate (B6: AI review ไม่พอ)
 AI_LABEL_STATUS = frozenset({"draft", "ai-reviewed"})  # ระหว่าง AI review เท่านั้น
@@ -166,11 +169,19 @@ def validate_ranking_eval_set(cases, corpus: dict, known_roles) -> list:
                     errs.append(f"{tag}: hard_negative {hid} ไม่ authorized สำหรับ role {role}")
                 if hid in rel:
                     errs.append(f"{tag}: hard_negative {hid} ห้ามอยู่ใน relevance")
-        # B5: multi-relevance ต้องมี grade_rationale (rubric) ต่อทุก relevant pid
+        # B5/B5.1: multi-relevance ต้องมี grade_rationale case-specific ต่อทุก relevant pid (exact)
         if len(rel) > 1:
             gr = c.get("grade_rationale")
-            if not isinstance(gr, dict) or any(_bad_str(gr.get(pid)) for pid in rel):
-                errs.append(f"{tag}: multi-relevance ต้องมี grade_rationale ต่อทุก relevant pid (B5)")
+            generic = {v.strip() for v in GRADE_RUBRIC.values()}
+            if not isinstance(gr, dict) or set(gr) != set(rel):
+                errs.append(f"{tag}: grade_rationale ต้องครอบทุก relevant pid แบบ exact (B5)")
+            else:
+                for pid in rel:
+                    r = gr.get(pid)
+                    if _bad_str(r):
+                        errs.append(f"{tag}: grade_rationale ของ {pid} ว่าง")
+                    elif r.strip() in generic or len(r.strip()) < 12:
+                        errs.append(f"{tag}: grade_rationale ของ {pid} generic/สั้นเกิน (B5.1: ต้อง case-specific)")
     # B2: paraphrase ของ intent เดียวกันต้องอยู่ split เดียว
     by_intent = {}
     for iid, sp in intent_splits:
@@ -246,6 +257,48 @@ def arm_eligibility_errors(cases, gate_tags, min_intents: int = MIN_TEST_INTENTS
         if cnt < min_per_tag:
             errs.append(f"gate challenge '{tag}' มี {cnt} test intents < {min_per_tag}")
     return errs
+
+
+def dev_role_coverage_errors(cases, evaluated_roles, min_dev_per_role: int = 1) -> list:
+    """B2.1: dev ต้องมี intent ครอบทุก evaluated role (เลือก N ต่อ role ได้)"""
+    dev = {}
+    for c in cases:
+        if isinstance(c, dict) and c.get("split") == "dev" and c.get("intent_id"):
+            dev.setdefault(c.get("role"), set()).add(c["intent_id"])
+    return [f"dev role coverage: {r} มี {len(dev.get(r, set()))} dev intents < {min_dev_per_role}"
+            for r in evaluated_roles if len(dev.get(r, set())) < min_dev_per_role]
+
+
+def validate_signoff(signoff, cases, corpus) -> list:
+    """
+    B6.1: Data Owner sign-off manifest (มนุษย์สร้าง — AI ห้ามกรอกแทน) ต้องผูก hash artifacts จริง
+    decision benchmark จะ fail ถ้า sign-off hash ไม่ตรง eval/corpus ปัจจุบัน
+    """
+    if not isinstance(signoff, dict) or not signoff:
+        return ["ไม่มี Data Owner sign-off manifest (human sign-off ต้องมีก่อน decision benchmark)"]
+    errs = [f"signoff field '{f}' หาย" for f in SIGNOFF_FIELDS if not signoff.get(f)]
+    if signoff.get("decision") != "approved":
+        errs.append(f"signoff decision != approved ({signoff.get('decision')!r})")
+    if signoff.get("eval_set_sha256") != eval_set_sha256(cases):
+        errs.append("signoff eval_set_sha256 ไม่ตรง artifacts ปัจจุบัน")
+    if signoff.get("corpus_manifest_sha256") != corpus_manifest_sha256(corpus):
+        errs.append("signoff corpus_manifest_sha256 ไม่ตรง artifacts ปัจจุบัน")
+    if signoff.get("benchmark_contract_version") != BENCHMARK_CONTRACT_VERSION:
+        errs.append("signoff benchmark_contract_version ไม่ตรง")
+    return errs
+
+
+def decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles,
+                              gate_tags, signoff) -> list:
+    """
+    B6.1: **decision gate เดียว** ที่รวมทุกด่าน — publish arm verdict / freeze ได้เมื่อคืน []:
+      structural + human-reviewed labels (validate_benchmark) + sample coverage (arm_eligibility)
+      + dev role coverage + Data Owner sign-off ที่ hash ตรง. AI ห้ามสร้าง sign-off เอง
+    """
+    return (validate_benchmark(cases, corpus, known_roles)
+            + arm_eligibility_errors(cases, gate_tags)
+            + dev_role_coverage_errors(cases, evaluated_roles)
+            + validate_signoff(signoff, cases, corpus))
 
 
 # ── freeze (M1) — ต้องมี corpus hash ไม่ใช่แค่ cases ─────────────────────────────

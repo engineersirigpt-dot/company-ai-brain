@@ -1707,7 +1707,7 @@
  },
  "c56a29a8-95dd-53a9-93cd-33e8c0cd4c3b": {
   "source": "P2-SYNTH-D-MAINT",
-  "rerank_text": "การบำรุงรักษาเครื่องจักร บำรุงรักษาเชิงป้องกันตามรอบ ตรวจ sensor และหล่อลื่น",
+  "rerank_text": "การบำรุงรักษาเครื่องจักร บำรุงรักษาเชิงป้องกันต้องตรวจ sensor และหล่อลื่นข้อต่อ",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -1914,6 +1914,144 @@
    "confidentiality_level": 3,
    "allowed_roles": [
     "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "4333b327-244a-5205-baf9-a659f09ffd59": {
+  "source": "P2-SYNTH-D-VPN",
+  "rerank_text": "การขอใช้ VPN ขอ VPN ผ่านระบบและต้องได้รับอนุมัติหัวหน้าก่อนใช้งานนอกสถานที่",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "c59be5a5-87f1-557f-8cd8-f4dace64e1b2": {
+  "source": "P2-SYNTH-D-PWRESET",
+  "rerank_text": "การรีเซ็ตรหัสผ่านที่ลืม แจ้ง helpdesk ยืนยันตัวตนแล้วรับรหัสชั่วคราวเปลี่ยนทันที",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "IT_SYSTEMS",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "production",
+    "prepress",
+    "qc",
+    "engineering",
+    "sales",
+    "purchasing",
+    "logistics",
+    "hr",
+    "it",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "e40af0e0-794e-50e0-abf0-fbdce5c8d0a8": {
+  "source": "P2-SYNTH-D-INSPECT",
+  "rerank_text": "การตรวจสภาพเครื่องประจำวัน ตรวจเสียงผิดปกติ อุณหภูมิ และการรั่วซึมก่อนเริ่มงานทุกวัน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "ENGINEERING",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "engineering",
+    "production",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "9d90cfe2-e403-511b-b2ad-9ce593e128ae": {
+  "source": "P2-SYNTH-D-CONTRACT",
+  "rerank_text": "การจัดทำสัญญาขาย ออกสัญญาหลังลูกค้ายืนยันใบเสนอราคาและตรวจเงื่อนไขการชำระเงิน",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "SALES",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "sales",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "397a4ace-458a-581c-8f80-41e712db4e05": {
+  "source": "P2-SYNTH-D-STOCK",
+  "rerank_text": "การตรวจนับสต็อกวัตถุดิบ ตรวจนับสต็อกวัตถุดิบทุกสิ้นเดือนเทียบยอดในระบบ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "PURCHASING",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "purchasing",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "b4cd65e8-7c73-5773-a193-bd3a9d10e72f": {
+  "source": "P2-SYNTH-D-QCFIRST",
+  "rerank_text": "การตรวจ first article ตรวจชิ้นแรกของงานเทียบสเปกก่อนอนุมัติให้ผลิตต่อ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "QUALITY",
+   "confidentiality_level": 2,
+   "allowed_roles": [
+    "qc",
+    "production",
+    "engineering",
+    "management",
+    "admin"
+   ],
+   "synthetic": true
+  }
+ },
+ "c4da15f9-caa7-58d0-80e7-a0caf353a2f8": {
+  "source": "P2-SYNTH-D-HRRECORD",
+  "rerank_text": "การเก็บประวัติพนักงาน เก็บเอกสารประวัติและสัญญาจ้างในแฟ้มบุคคลตามระเบียบ",
+  "payload": {
+   "acl_schema_version": 1,
+   "policy_version": "poc-v1",
+   "policy_status": "ACTIVE",
+   "collection_group": "HR",
+   "confidentiality_level": 3,
+   "allowed_roles": [
+    "hr",
     "management",
     "admin"
    ],
@@ -3141,9 +3279,9 @@
    "synthetic": true
   }
  },
- "ba2b12d6-53ff-5fd9-a348-abb8c1329138": {
+ "a9d44925-d499-5796-b7c4-9f450fc13362": {
   "source": "P2-SYNTH-G-QUOTE",
-  "rerank_text": "การเสนอราคางานพิมพ์ (สรุปครบ) สรุปครบตั้งแต่รับสเปก คิดราคา จนออกและอนุมัติใบเสนอราคา",
+  "rerank_text": "การเสนอราคาและการอนุมัติใบเสนอราคา รับสเปกลูกค้าแล้วคิดราคาจาก cost sheet ออกใบเสนอราคา และงานเกิน 500,000 บาทต้องส่งผู้จัดการฝ่ายขายอนุมัติก่อนส่งลูกค้า",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3158,9 +3296,9 @@
    "synthetic": true
   }
  },
- "3174208d-297f-59da-9313-13088c9c6cc7": {
+ "790e2a2f-6dba-58f1-8865-bfa309fde44e": {
   "source": "P2-SYNTH-G-QUOTE-SUP",
-  "rerank_text": "รายละเอียดวงเงินอนุมัติ วงเงินอนุมัติเกิน 5 แสนผ่านผู้จัดการ",
+  "rerank_text": "การติดตามหลังส่งใบเสนอราคา ติดตามลูกค้าภายใน 7 วันและบันทึกผลใน CRM",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3175,9 +3313,9 @@
    "synthetic": true
   }
  },
- "bdd762c8-1f14-5814-883c-d137f0088e71": {
+ "7b2ffe44-79a5-5432-becd-9065611a90fa": {
   "source": "P2-SYNTH-G-RECALL",
-  "rerank_text": "ขั้นตอนเรียกคืนและรายงาน (สรุปครบ) สรุปครบตั้งแต่เปิด recall จนรายงานผลต่อผู้บริหาร",
+  "rerank_text": "การเรียกคืนและการรายงานผล แจ้ง QMR เปิด recall notice ระบุ lot ที่กระทบ ติดตามสินค้าคืน แล้วสรุปยอดที่เรียกคืนได้รายงานต่อผู้บริหารภายใน 3 วัน",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3192,9 +3330,9 @@
    "synthetic": true
   }
  },
- "5bb7b9f0-320e-5d09-a7df-2f3643ccffa5": {
+ "c89ed713-fbb8-5ec6-b5d4-6f8356b894e4": {
   "source": "P2-SYNTH-G-RECALL-SUP",
-  "rerank_text": "รายละเอียดกำหนดเวลารายงาน รายงานผลภายใน 3 วัน",
+  "rerank_text": "การซ้อม mock recall ซ้อม mock recall ปีละ 1 ครั้งเพื่อวัดเวลาติดตามคืน",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3209,9 +3347,9 @@
    "synthetic": true
   }
  },
- "05cf0615-900b-5a45-b92b-340a30eac360": {
+ "7a3cfdc8-0f99-54a2-a797-7bdb68ec3c2b": {
   "source": "P2-SYNTH-G-PO",
-  "rerank_text": "ภาพรวมจัดซื้อและประเมิน vendor (สรุปครบ) สรุปครบตั้งแต่เปิด PR ออก PO จนประเมิน vendor",
+  "rerank_text": "การจัดซื้อและการประเมิน vendor เปิด PR เมื่อ stock ต่ำกว่า reorder ออก PO ให้ vendor ที่อนุมัติ และประเมิน vendor ทุก 6 เดือนด้านคุณภาพและการส่งมอบ",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3226,9 +3364,9 @@
    "synthetic": true
   }
  },
- "4bc56a5e-7a91-5c29-a374-d64cc7b9f964": {
+ "52885162-6d55-5283-915b-26ad27d54648": {
   "source": "P2-SYNTH-G-PO-SUP",
-  "rerank_text": "รายละเอียดรอบประเมิน vendor ประเมิน vendor ทุก 6 เดือน",
+  "rerank_text": "การขึ้นทะเบียน vendor ใหม่ vendor ใหม่ต้องส่งเอกสารรับรองก่อนอนุมัติเข้าทะเบียน",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3243,9 +3381,9 @@
    "synthetic": true
   }
  },
- "aefac1fe-7bf6-50e2-91f9-7995ac0273cd": {
+ "bc552c1b-54b9-50f1-9830-bd75213a0c64": {
   "source": "P2-SYNTH-G-QC",
-  "rerank_text": "ภาพรวมตรวจสีและเกณฑ์ของเสีย (สรุปครบ) สรุปครบทั้งการวัดสีและเกณฑ์ตัดสินของเสีย",
+  "rerank_text": "การตรวจสีและการตัดสินของเสีย วัดค่าสีเทียบ proof ที่อนุมัติโดย Delta-E ต้องไม่เกิน 3.0 และงานที่เกินเกณฑ์สีหรือมีจุดสกปรกเกิน AQL ถือเป็นของเสีย",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3262,9 +3400,9 @@
    "synthetic": true
   }
  },
- "5c5e81a3-8df3-53d2-aa8d-53c54141d3d7": {
+ "1bbed476-2cc3-5614-b5db-8b078e63bc96": {
   "source": "P2-SYNTH-G-QC-SUP",
-  "rerank_text": "รายละเอียดค่า Delta-E Delta-E สูงสุด 3.0",
+  "rerank_text": "การบันทึกผลตรวจ บันทึกผลวัดสีและจำนวนของเสียต่อ job",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3281,9 +3419,9 @@
    "synthetic": true
   }
  },
- "d2279e37-505c-5a8f-8ded-0941d09f6fc5": {
+ "22042f5e-720b-5b4c-be32-8678fc644a47": {
   "source": "P2-SYNTH-G-SHIP",
-  "rerank_text": "ภาพรวมจัดส่งและวางแผนขนส่ง (สรุปครบ) สรุปครบทั้งการเตรียมส่งและการวางแผนรวมเที่ยว",
+  "rerank_text": "การจัดส่งและการวางแผนขนส่ง เตรียม packing list ตรวจจำนวนก่อนขึ้นรถและยืนยันปลายทาง โดยวางแผนรวม order ปลายทางเดียวกันเพื่อลดจำนวนเที่ยวรถ",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",
@@ -3299,9 +3437,9 @@
    "synthetic": true
   }
  },
- "94459329-82c3-5452-ad5b-cd98d6d3a0ac": {
+ "4d6978b5-b790-5380-8f6e-7e69cacab439": {
   "source": "P2-SYNTH-G-SHIP-SUP",
-  "rerank_text": "รายละเอียดการรวมเที่ยว รวม order ปลายทางเดียวกันลดเที่ยว",
+  "rerank_text": "การเลือกผู้ขนส่ง เลือกผู้ขนส่งจากราคาและความตรงต่อเวลา",
   "payload": {
    "acl_schema_version": 1,
    "policy_version": "poc-v1",

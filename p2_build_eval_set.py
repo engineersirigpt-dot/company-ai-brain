@@ -68,23 +68,36 @@ BANK = build_bank()
 # ── families: แต่ละ topic → 1 intent (answer + hard-neg twin) ───────────────────
 # spec = (topic_key, role, collection, answer_heading, answer_text, twin_heading, twin_text,
 #         [ (query, lang, variant) ... ])
-def gen_family(tag, specs, dev_first=1):
-    """สร้าง intents ของ family หนึ่ง; intent แรก dev_first ตัว = dev, ที่เหลือ = test (group-stratified)"""
+def gen_family(tag, specs, dev_first=0):
+    """สร้าง intents (split=test ทั้งหมด) — dev ถูกเลือกทีหลังด้วย assign_splits ให้ครอบทุก role (B2.1)"""
     intents = []
-    for si, s in enumerate(specs):
+    for s in specs:
         key, role, coll, ah, at, th, tt, paraphrases = s
         ans = add_point(f"P2-SYNTH-{key}", ah, at, coll)
-        hard = []
-        if th:
-            hard.append(add_point(f"P2-SYNTH-{key}-TWIN", th, tt, coll))
+        hard = [add_point(f"P2-SYNTH-{key}-TWIN", th, tt, coll)] if th else []
         intents.append({
-            "intent_id": f"INT-{key}", "role": role, "tag": tag,
-            "source": f"P2-SYNTH-{key}",
-            "relevance": {ans: 3}, "hard_negative_ids": hard,
-            "split": "dev" if si < dev_first else "test",
+            "intent_id": f"INT-{key}", "role": role, "tag": tag, "source": f"P2-SYNTH-{key}",
+            "relevance": {ans: 3}, "hard_negative_ids": hard, "split": "test",
             "paraphrases": paraphrases,
         })
     return intents
+
+
+EVALUATED_ROLES = ["sales", "qc", "hr", "purchasing", "production", "logistics", "engineering", "it"]
+
+
+def assign_splits(intents, evaluated_roles, dev_per_role=2):
+    """
+    B2.1: เลือก dev_per_role intents ต่อ evaluated role -> dev (deterministic) ที่เหลือ test
+    เลือกจาก 'direct' (non-gate) ก่อน เพื่อไม่ดึง gate-challenge test intents ออกจนต่ำกว่าเกณฑ์
+    """
+    by_role = {}
+    for it in intents:
+        by_role.setdefault(it["role"], []).append(it)
+    for r in evaluated_roles:
+        cand = sorted(by_role.get(r, []), key=lambda x: (x["tag"] != "direct", x["intent_id"]))
+        for it in cand[:dev_per_role]:
+            it["split"] = "dev"
 
 
 # challenge families (แต่ละ family >= 6 test intents เพื่อ gate B3) --------------
@@ -104,8 +117,8 @@ FAMILIES += gen_family("direct", [
      [("ก่อนเดินเครื่องพิมพ์ต้องเซ็ตอะไร", "th", "colloquial"), ("press setup ก่อนรันจริง", "th-en", "mixed")]),
     ("D-SHIP", "logistics", "LOGISTICS", "การจัดส่งสินค้า", "เตรียม packing list ตรวจจำนวนก่อนขึ้นรถ ยืนยันปลายทาง", "", "",
      [("จะส่งของออกต้องเตรียมอะไร", "th", "colloquial"), ("shipping preparation steps", "th-en", "mixed")]),
-    ("D-MAINT", "engineering", "ENGINEERING", "การบำรุงรักษาเครื่องจักร", "บำรุงรักษาเชิงป้องกันตามรอบ ตรวจ sensor และหล่อลื่น", "", "",
-     [("ดูแลเครื่องจักรยังไงไม่ให้พัง", "th", "colloquial"), ("preventive maintenance รอบไหน", "th-en", "mixed")]),
+    ("D-MAINT", "engineering", "ENGINEERING", "การบำรุงรักษาเครื่องจักร", "บำรุงรักษาเชิงป้องกันต้องตรวจ sensor และหล่อลื่นข้อต่อ", "", "",
+     [("ดูแลเครื่องจักรต้องตรวจอะไรบ้าง", "th", "colloquial"), ("preventive maintenance ต้องตรวจอะไร", "th-en", "mixed")]),
     ("D-BACKUP", "it", "IT_SYSTEMS", "การสำรองฐานข้อมูล", "สำรองฐานข้อมูลทุกคืน เก็บ 30 วัน ทดสอบ restore ทุกไตรมาส", "", "",
      [("ข้อมูลระบบ backup ยังไง", "th", "colloquial"), ("database backup policy", "th-en", "mixed")]),
     ("D-COLOR2", "qc", "QUALITY", "การวัดสีก่อนส่งมอบ", "วัดค่าสีเทียบ proof ที่ลูกค้าอนุมัติก่อนปล่อยงาน", "", "",
@@ -126,7 +139,21 @@ FAMILIES += gen_family("direct", [
      [("เตรียมงานก่อนพิมพ์ลดเวลายังไง", "th", "colloquial"), ("make-ready ลด setup time", "th-en", "mixed")]),
     ("D-FOLLOWUP", "sales", "SALES", "การติดตามลูกค้า", "ติดตามลูกค้าภายใน 7 วันหลังส่งใบเสนอราคาและบันทึกใน CRM", "", "",
      [("ส่งใบเสนอราคาไปแล้วตามลูกค้ายังไง", "th", "colloquial"), ("customer follow-up หลัง quote", "th-en", "mixed")]),
-], dev_first=1)
+    ("D-VPN", "it", "IT_SYSTEMS", "การขอใช้ VPN", "ขอ VPN ผ่านระบบและต้องได้รับอนุมัติหัวหน้าก่อนใช้งานนอกสถานที่", "", "",
+     [("จะใช้ VPN ทำงานนอกออฟฟิศต้องทำไง", "th", "colloquial"), ("request VPN access ยังไง", "th-en", "mixed")]),
+    ("D-PWRESET", "it", "IT_SYSTEMS", "การรีเซ็ตรหัสผ่านที่ลืม", "แจ้ง helpdesk ยืนยันตัวตนแล้วรับรหัสชั่วคราวเปลี่ยนทันที", "", "",
+     [("ลืมรหัสผ่านเข้าระบบทำยังไง", "th", "colloquial"), ("forgot password reset ทำไง", "th-en", "mixed")]),
+    ("D-INSPECT", "engineering", "ENGINEERING", "การตรวจสภาพเครื่องประจำวัน", "ตรวจเสียงผิดปกติ อุณหภูมิ และการรั่วซึมก่อนเริ่มงานทุกวัน", "", "",
+     [("ก่อนเริ่มงานต้องเช็คเครื่องอะไรบ้าง", "th", "colloquial"), ("daily machine check ดูอะไร", "th-en", "mixed")]),
+    ("D-CONTRACT", "sales", "SALES", "การจัดทำสัญญาขาย", "ออกสัญญาหลังลูกค้ายืนยันใบเสนอราคาและตรวจเงื่อนไขการชำระเงิน", "", "",
+     [("ลูกค้าตกลงแล้วทำสัญญายังไง", "th", "colloquial"), ("sales contract หลังลูกค้า confirm", "th-en", "mixed")]),
+    ("D-STOCK", "purchasing", "PURCHASING", "การตรวจนับสต็อกวัตถุดิบ", "ตรวจนับสต็อกวัตถุดิบทุกสิ้นเดือนเทียบยอดในระบบ", "", "",
+     [("นับสต็อกวัตถุดิบทำเมื่อไร", "th", "colloquial"), ("stock count วัตถุดิบทำตอนไหน", "th-en", "mixed")]),
+    ("D-QCFIRST", "qc", "QUALITY", "การตรวจ first article", "ตรวจชิ้นแรกของงานเทียบสเปกก่อนอนุมัติให้ผลิตต่อ", "", "",
+     [("ตรวจชิ้นแรกก่อนผลิตยังไง", "th", "colloquial"), ("first article inspection ทำไง", "th-en", "mixed")]),
+    ("D-HRRECORD", "hr", "HR", "การเก็บประวัติพนักงาน", "เก็บเอกสารประวัติและสัญญาจ้างในแฟ้มบุคคลตามระเบียบ", "", "",
+     [("เก็บเอกสารประวัติพนักงานยังไง", "th", "colloquial"), ("employee record filing ทำไง", "th-en", "mixed")]),
+])
 
 # SIBLING-HARD-NEGATIVE (answer + sibling ในเอกสารเดียวที่ใกล้แต่ผิด)
 FAMILIES += gen_family("sibling-hard-negative", [
@@ -265,38 +292,51 @@ FAMILIES += gen_family("multi-constraint", [
      [("พนักงานใหม่ตำแหน่งคุมเครื่องอบรมต่างจากทั่วไปยังไง", "th", "multi"), ("new machine operator training", "th-en", "mixed")]),
 ], dev_first=1)
 
-# GRADED-MULTI (2 relevant: primary grade 3 + supporting grade 2 + rubric rationale)
+# GRADED-MULTI (primary grade 3 = ตอบทั้งสองส่วนของ conjunction จริง ; supporting grade 2 = เสริม)
+# spec = (key, role, coll, (prim_h, prim_t), (supp_h, supp_t), rat_primary, rat_support, paraphrases)
 GRADED = [
-    ("G-QUOTE", "sales", "SALES", "การเสนอราคาและการอนุมัติ",
-     ("การเสนอราคางานพิมพ์ (สรุปครบ)", "สรุปครบตั้งแต่รับสเปก คิดราคา จนออกและอนุมัติใบเสนอราคา"),
-     ("รายละเอียดวงเงินอนุมัติ", "วงเงินอนุมัติเกิน 5 แสนผ่านผู้จัดการ"),
-     [("อธิบายการเสนอราคาและการอนุมัติ", "th", "conjunction"), ("quotation and approval overview", "th-en", "mixed")]),
-    ("G-RECALL", "qc", "RECALL", "การเรียกคืนและการรายงาน",
-     ("ขั้นตอนเรียกคืนและรายงาน (สรุปครบ)", "สรุปครบตั้งแต่เปิด recall จนรายงานผลต่อผู้บริหาร"),
-     ("รายละเอียดกำหนดเวลารายงาน", "รายงานผลภายใน 3 วัน"),
-     [("อธิบายการเรียกคืนและการรายงานผล", "th", "conjunction"), ("recall and reporting overview", "th-en", "mixed")]),
-    ("G-PO", "purchasing", "PURCHASING", "การจัดซื้อและการประเมิน vendor",
-     ("ภาพรวมจัดซื้อและประเมิน vendor (สรุปครบ)", "สรุปครบตั้งแต่เปิด PR ออก PO จนประเมิน vendor"),
-     ("รายละเอียดรอบประเมิน vendor", "ประเมิน vendor ทุก 6 เดือน"),
-     [("อธิบายการจัดซื้อและการประเมิน vendor", "th", "conjunction"), ("purchasing and vendor eval overview", "th-en", "mixed")]),
-    ("G-QC", "qc", "QUALITY", "การตรวจสีและเกณฑ์ของเสีย",
-     ("ภาพรวมตรวจสีและเกณฑ์ของเสีย (สรุปครบ)", "สรุปครบทั้งการวัดสีและเกณฑ์ตัดสินของเสีย"),
-     ("รายละเอียดค่า Delta-E", "Delta-E สูงสุด 3.0"),
-     [("อธิบายการตรวจสีและเกณฑ์ของเสีย", "th", "conjunction"), ("color check and defect criteria", "th-en", "mixed")]),
-    ("G-SHIP", "logistics", "LOGISTICS", "การจัดส่งและการวางแผนขนส่ง",
-     ("ภาพรวมจัดส่งและวางแผนขนส่ง (สรุปครบ)", "สรุปครบทั้งการเตรียมส่งและการวางแผนรวมเที่ยว"),
-     ("รายละเอียดการรวมเที่ยว", "รวม order ปลายทางเดียวกันลดเที่ยว"),
-     [("อธิบายการจัดส่งและการวางแผนขนส่ง", "th", "conjunction"), ("shipping and transport planning", "th-en", "mixed")]),
+    ("G-QUOTE", "sales", "SALES",
+     ("การเสนอราคาและการอนุมัติใบเสนอราคา", "รับสเปกลูกค้าแล้วคิดราคาจาก cost sheet ออกใบเสนอราคา และงานเกิน 500,000 บาทต้องส่งผู้จัดการฝ่ายขายอนุมัติก่อนส่งลูกค้า"),
+     ("การติดตามหลังส่งใบเสนอราคา", "ติดตามลูกค้าภายใน 7 วันและบันทึกผลใน CRM"),
+     "ตอบทั้งขั้นตอนเสนอราคาและเงื่อนไขการอนุมัติซึ่งเป็นแกนของคำถาม",
+     "เสริมขั้นตอนติดตามหลังเสนอราคา ไม่ใช่แกนคำถามโดยตรง",
+     [("การเสนอราคาและการอนุมัติทำอย่างไร", "th", "conjunction"), ("quotation and approval process", "th-en", "mixed")]),
+    ("G-RECALL", "qc", "RECALL",
+     ("การเรียกคืนและการรายงานผล", "แจ้ง QMR เปิด recall notice ระบุ lot ที่กระทบ ติดตามสินค้าคืน แล้วสรุปยอดที่เรียกคืนได้รายงานต่อผู้บริหารภายใน 3 วัน"),
+     ("การซ้อม mock recall", "ซ้อม mock recall ปีละ 1 ครั้งเพื่อวัดเวลาติดตามคืน"),
+     "ตอบทั้งการเปิดเรียกคืนและการรายงานผลตามคำถาม",
+     "เสริมเรื่องการซ้อม ไม่ใช่การเรียกคืน/รายงานจริง",
+     [("การเรียกคืนและการรายงานผลทำอย่างไร", "th", "conjunction"), ("recall and result reporting", "th-en", "mixed")]),
+    ("G-PO", "purchasing", "PURCHASING",
+     ("การจัดซื้อและการประเมิน vendor", "เปิด PR เมื่อ stock ต่ำกว่า reorder ออก PO ให้ vendor ที่อนุมัติ และประเมิน vendor ทุก 6 เดือนด้านคุณภาพและการส่งมอบ"),
+     ("การขึ้นทะเบียน vendor ใหม่", "vendor ใหม่ต้องส่งเอกสารรับรองก่อนอนุมัติเข้าทะเบียน"),
+     "ตอบทั้งการจัดซื้อและรอบการประเมิน vendor ตามคำถาม",
+     "เสริมการขึ้นทะเบียน vendor ใหม่ ไม่ใช่แกนคำถาม",
+     [("การจัดซื้อและการประเมิน vendor ทำอย่างไร", "th", "conjunction"), ("purchasing and vendor evaluation", "th-en", "mixed")]),
+    ("G-QC", "qc", "QUALITY",
+     ("การตรวจสีและการตัดสินของเสีย", "วัดค่าสีเทียบ proof ที่อนุมัติโดย Delta-E ต้องไม่เกิน 3.0 และงานที่เกินเกณฑ์สีหรือมีจุดสกปรกเกิน AQL ถือเป็นของเสีย"),
+     ("การบันทึกผลตรวจ", "บันทึกผลวัดสีและจำนวนของเสียต่อ job"),
+     "ตอบทั้งวิธีวัดสีและเกณฑ์ตัดสินของเสียตามคำถาม",
+     "เสริมการบันทึกผล ไม่ใช่เกณฑ์ตัดสิน",
+     [("การตรวจสีและการตัดสินของเสียทำอย่างไร", "th", "conjunction"), ("color check and defect judgement", "th-en", "mixed")]),
+    ("G-SHIP", "logistics", "LOGISTICS",
+     ("การจัดส่งและการวางแผนขนส่ง", "เตรียม packing list ตรวจจำนวนก่อนขึ้นรถและยืนยันปลายทาง โดยวางแผนรวม order ปลายทางเดียวกันเพื่อลดจำนวนเที่ยวรถ"),
+     ("การเลือกผู้ขนส่ง", "เลือกผู้ขนส่งจากราคาและความตรงต่อเวลา"),
+     "ตอบทั้งขั้นตอนจัดส่งและวิธีวางแผนลดเที่ยวตามคำถาม",
+     "เสริมการเลือกผู้ขนส่ง ไม่ใช่แกนคำถาม",
+     [("การจัดส่งและการวางแผนขนส่งทำอย่างไร", "th", "conjunction"), ("shipping and transport planning", "th-en", "mixed")]),
 ]
-for gi, (key, role, coll, _t, prim, supp, paraphrases) in enumerate(GRADED):
+for key, role, coll, prim, supp, rat_p, rat_s, paraphrases in GRADED:
     p3 = add_point(f"P2-SYNTH-{key}", prim[0], prim[1], coll)
     p2 = add_point(f"P2-SYNTH-{key}-SUP", supp[0], supp[1], coll)
     FAMILIES.append({
         "intent_id": f"INT-{key}", "role": role, "tag": "graded-multi", "source": f"P2-SYNTH-{key}",
         "relevance": {p3: 3, p2: 2}, "hard_negative_ids": [],
-        "grade_rationale": {p3: GRADE_RATIONALE_3, p2: GRADE_RATIONALE_2},
-        "split": "dev" if gi < 1 else "test", "paraphrases": paraphrases,
+        "grade_rationale": {p3: rat_p, p2: rat_s},
+        "split": "test", "paraphrases": paraphrases,
     })
+
+assign_splits(FAMILIES, EVALUATED_ROLES, dev_per_role=2)   # B2.1: dev ครอบทุก evaluated role
 
 
 def build_cases():
@@ -342,22 +382,26 @@ def main():
     struct = E.validate_ranking_eval_set(cases, CORPUS, known)
     only_label = [e for e in struct if "label_status" not in e]
     arm = E.arm_eligibility_errors(cases, GATE_TAGS)
+    devcov = E.dev_role_coverage_errors(cases, EVALUATED_ROLES, min_dev_per_role=1)
+    decision = E.decision_benchmark_errors(cases, CORPUS, known, EVALUATED_ROLES, GATE_TAGS, signoff=None)
     dev = [c for c in cases if c["split"] == "dev"]
     test = [c for c in cases if c["split"] == "test"]
     pools = role_pool_sizes()
-    evaluated = sorted({c["role"] for c in cases})
+    dev_by_role = {r: len({c["intent_id"] for c in dev if c["role"] == r}) for r in EVALUATED_ROLES}
 
     print(f"corpus points     : {len(CORPUS)} (bank {len(BANK)} + answers/twins)")
     print(f"cases             : {len(cases)} (dev {len(dev)}, test {len(test)})")
     print(f"intents           : dev {len({c['intent_id'] for c in dev})}, test {E.count_test_intents(cases)} (ต้อง >= {E.MIN_TEST_INTENTS})")
     print(f"corpus valid      : {E.validate_corpus(CORPUS) == []}")
-    print(f"struct errors (ยกเว้น label_status draft): {len(only_label)}")
+    print(f"struct errors (ยกเว้น label_status ai-reviewed): {len(only_label)}")
     for e in only_label[:8]:
         print(f"  - {e}")
     print(f"arm_eligibility   : {'PASS' if not arm else 'FAIL'} {arm}")
-    print(f"pool ต่อ evaluated role (ต้อง >= 60): "
-          + ", ".join(f"{r}={pools[r]}" for r in evaluated))
+    print(f"dev_role_coverage : {'PASS' if not devcov else 'FAIL'} {devcov}")
+    print(f"  dev intents/role: " + ", ".join(f"{r}={dev_by_role[r]}" for r in EVALUATED_ROLES))
+    print(f"pool ต่อ evaluated role (ต้อง >= 60): " + ", ".join(f"{r}={pools[r]}" for r in EVALUATED_ROLES))
     print(f"label_status      : ai-reviewed (B6: รอ Data Owner ลงชื่อ human-reviewed)")
+    print(f"decision_benchmark: BLOCKED (ตามคาด) — เหลือ {len(decision)} ข้อ (label human-reviewed + Data Owner sign-off)")
     print(f"eval hash {E.eval_set_sha256(cases)[:16]} · corpus hash {E.corpus_manifest_sha256(CORPUS)[:16]}")
 
 

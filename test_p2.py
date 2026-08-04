@@ -139,9 +139,10 @@ def case(qid="q1", role="qc", rel=None, rsrc=None, iid="i1", tags=None, hn=None,
          "category": "sibling", "challenge_tags": (["sibling"] if tags is None else tags),
          "split": "test", "case_type": "ranking", "relevance": rel_,
          "hard_negative_ids": ([] if hn is None else hn),
-         "relevant_sources": ["D1"] if rsrc is None else rsrc, "label_status": "human-reviewed"}
+         "relevant_sources": ["D1"] if rsrc is None else rsrc, "label_status": "human-reviewed",
+         "reviewed_by": "tester", "review_revision": "r1"}
     if len(rel_) > 1:
-        c["grade_rationale"] = {pid: "rationale" for pid in rel_}
+        c["grade_rationale"] = {pid: f"chunk {pid} ตอบส่วนหลักของคำถามนี้อย่างครบถ้วน" for pid in rel_}
     c.update(over)
     return c
 CORPUS = {"pa": centry("D1", ["qc", "admin"]), "pb": centry("D2", ["sales", "admin"])}
@@ -225,6 +226,30 @@ check("count_test_intents", E.count_test_intents(_mini) == 3)
 check("arm_eligibility: <50 test intents -> error", any("intents" in e for e in E.arm_eligibility_errors(_mini, ["direct"])))
 check("arm_eligibility: gate tag < 5 intents -> error",
       any("challenge" in e for e in E.arm_eligibility_errors(_mini, ["direct"], min_intents=1)))
+
+# ── B2.1: dev role coverage ────────────────────────────────────────────────────
+check("dev_role_coverage: role ไม่มี dev intent -> error",
+      any("sales" in e for e in E.dev_role_coverage_errors(
+          [case(iid="i1", role="qc", split="dev"), case(iid="i2", role="sales", split="test")], ["qc", "sales"])))
+check("dev_role_coverage: ครบ -> ไม่มี error", E.dev_role_coverage_errors([case(iid="i1", role="qc", split="dev")], ["qc"]) == [])
+
+# ── B5.1: grade_rationale case-specific + provenance ──────────────────────────
+check("B5.1: grade_rationale generic (rubric string) -> error",
+      any("generic" in e for e in V2([{**case(rel={"pa": 2, "pc": 1}, rsrc=["D1", "D2"]),
+                                        "grade_rationale": {"pa": E.GRADE_RUBRIC[2], "pc": E.GRADE_RUBRIC[1]}}])))
+check("B5.1: grade_rationale case-specific -> ผ่าน", V2([case(rel={"pa": 2, "pc": 1}, rsrc=["D1", "D2"])]) == [])
+check("B6.1: reviewed_by หาย -> error", any("reviewed_by" in e for e in V([{k: v for k, v in case().items() if k != "reviewed_by"}])))
+
+# ── B6.1: Data Owner sign-off (hash-bound) + decision gate ────────────────────
+_gs = {"eval_set_sha256": E.eval_set_sha256([case()]), "corpus_manifest_sha256": E.corpus_manifest_sha256(CORPUS),
+       "benchmark_contract_version": E.BENCHMARK_CONTRACT_VERSION, "git_commit": "abc", "reviewer": "owner",
+       "data_owner_role": "QA Lead", "reviewed_at": "2026-08-04", "decision": "approved"}
+check("validate_signoff: ไม่มี signoff -> error", E.validate_signoff(None, [case()], CORPUS) != [])
+check("validate_signoff: hash ตรง + approved -> ผ่าน", E.validate_signoff(_gs, [case()], CORPUS) == [])
+check("validate_signoff: eval hash ไม่ตรง -> error", any("eval_set_sha256" in e for e in E.validate_signoff({**_gs, "eval_set_sha256": "x"}, [case()], CORPUS)))
+check("validate_signoff: decision != approved -> error", any("decision" in e for e in E.validate_signoff({**_gs, "decision": "rejected"}, [case()], CORPUS)))
+check("decision_benchmark: <50 test intents -> error แม้ signoff ตรง",
+      len(E.decision_benchmark_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs)) > 0)
 
 # ── M1.1: corpus/cases fail-closed ────────────────────────────────────────────
 check("M1.1: corpus ว่าง -> error", E.validate_corpus({}) != [])
