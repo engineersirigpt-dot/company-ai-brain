@@ -13,10 +13,42 @@ point/chunk-level แยกจาก document/source-level (Codex: กันห�
 from __future__ import annotations
 import math
 
+LOCKED_GRADES = (1, 2, 3)   # graded relevance allowlist (ตรงกับ p2_eval)
+
+
+# ── input guards (M3 — กัน config/input ที่ทำคะแนนผิดความหมาย) ──────────────────
+def _check_k(k) -> None:
+    if type(k) is not int or k < 1:
+        raise ValueError(f"k/n ต้อง positive int: {k!r}")
+
+
+def _check_ids(ids) -> None:
+    if not isinstance(ids, (list, tuple)):
+        raise ValueError("ranked/candidate ids ต้องเป็น list")
+    seen = set()
+    for x in ids:
+        if not isinstance(x, str) or not x.strip():
+            raise ValueError(f"id ว่าง/ผิดชนิดใน ranking: {x!r}")
+        if x in seen:
+            raise ValueError(f"id ซ้ำใน ranking: {x}")
+        seen.add(x)
+
+
+def _check_relevance(rel) -> None:
+    if not isinstance(rel, dict):
+        raise ValueError("relevance ต้องเป็น dict")
+    for pid, g in rel.items():
+        if not isinstance(pid, str) or not pid.strip():
+            raise ValueError(f"relevance key ว่าง/ผิดชนิด: {pid!r}")
+        if type(g) is not int or g not in LOCKED_GRADES:
+            raise ValueError(f"grade นอก allowlist {LOCKED_GRADES}: {pid}={g!r}")
+
 
 # ── candidate generation (บังคับ — reranker ช่วย point นอก pool ไม่ได้) ─────────
 def candidate_recall_at_n(candidate_ids: list, relevant_ids, n: int):
     """สัดส่วน relevant ที่โผล่ใน candidate pool top-N (ก่อน rerank) — วัด candidate generation"""
+    _check_k(n)
+    _check_ids(candidate_ids)
     rel = set(relevant_ids)
     if not rel:
         return None
@@ -25,10 +57,14 @@ def candidate_recall_at_n(candidate_ids: list, relevant_ids, n: int):
 
 # ── ordering metrics (point/chunk-level) ───────────────────────────────────────
 def hit_at_k(ranked_ids: list, relevant_ids, k: int) -> float:
+    _check_k(k)
+    _check_ids(ranked_ids)
     return 1.0 if set(ranked_ids[:k]) & set(relevant_ids) else 0.0
 
 
 def mrr_at_k(ranked_ids: list, relevant_ids, k: int) -> float:
+    _check_k(k)
+    _check_ids(ranked_ids)
     rel = set(relevant_ids)
     for i, pid in enumerate(ranked_ids[:k], 1):
         if pid in rel:
@@ -37,6 +73,8 @@ def mrr_at_k(ranked_ids: list, relevant_ids, k: int) -> float:
 
 
 def recall_at_k(ranked_ids: list, relevant_ids, k: int):
+    _check_k(k)
+    _check_ids(ranked_ids)
     rel = set(relevant_ids)
     if not rel:
         return None
@@ -49,13 +87,19 @@ def _dcg(grades: list) -> float:
 
 
 def ndcg_at_k(ranked_ids: list, relevance: dict, k: int):
-    """graded nDCG@k ; None ถ้าไม่มี graded relevance (IDCG=0)"""
+    """graded nDCG@k ในช่วง [0,1] ; None ถ้าไม่มี graded relevance (IDCG=0)"""
+    _check_k(k)
+    _check_ids(ranked_ids)
+    _check_relevance(relevance)
     gains = [relevance.get(pid, 0) for pid in ranked_ids[:k]]
     ideal = sorted(relevance.values(), reverse=True)[:k]
     idcg = _dcg(ideal)
     if idcg == 0:
         return None
-    return _dcg(gains) / idcg
+    val = _dcg(gains) / idcg
+    if not math.isfinite(val) or not (0.0 <= val <= 1.0 + 1e-9):
+        raise ValueError(f"nDCG นอกช่วง [0,1]: {val} (relevance/ranking ผิด contract?)")
+    return min(val, 1.0)
 
 
 # ── document/source-level (collapse chunk → เอกสาร) ────────────────────────────
@@ -82,7 +126,10 @@ def document_relevance(relevance: dict, point_to_doc: dict) -> dict:
 
 # ── latency ────────────────────────────────────────────────────────────────────
 def percentiles(values: list, ps=(50, 95)) -> dict:
-    """p50/p95 (nearest-rank) ; ผู้เรียกควรตัด warm-up ออกก่อน"""
+    """p50/p95 (nearest-rank) ; ผู้เรียกควรตัด warm-up ออกก่อน. latency ต้อง finite non-negative (M3)"""
+    for v in values:
+        if not (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0):
+            raise ValueError(f"latency ต้อง finite non-negative: {v!r}")
     s = sorted(values)
     if not s:
         return {p: None for p in ps}

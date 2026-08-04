@@ -86,15 +86,23 @@ def fused_rrf(rankings: dict, rrf_k: int = RRF_K_DEFAULT, dense_rank_map: dict =
     """
     if not rankings:
         raise ValueError("rankings ว่าง")
+    if type(rrf_k) is not int or rrf_k < 1:      # M3: rrf_k ต้อง positive int (กัน div-by-zero/คะแนนผิด)
+        raise ValueError(f"rrf_k ต้อง positive int: {rrf_k!r}")
     universe = None
     for name, r in rankings.items():
+        if not isinstance(r, (list, tuple)):
+            raise ValueError(f"ranking '{name}' ต้องเป็น list")
         if len(set(r)) != len(r):
             raise ValueError(f"ranking '{name}' มี id ซ้ำ")
+        if any(not isinstance(x, str) or not x.strip() for x in r):
+            raise ValueError(f"ranking '{name}' มี id ว่าง/ผิดชนิด")
         s = set(r)
         if universe is None:
             universe = s
         elif s != universe:
             raise ValueError(f"ranking '{name}' ไม่ใช่ permutation ของ universe เดียว (missing/extra id)")
+    if dense_rank_map is not None and set(dense_rank_map) != universe:
+        raise ValueError("dense_rank_map ต้องครอบ exact universe ของ rankings")
     scores: dict = {pid: 0.0 for pid in universe}
     for r in rankings.values():
         for rank, pid in enumerate(r, 1):
