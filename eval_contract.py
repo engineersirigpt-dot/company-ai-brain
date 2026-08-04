@@ -1,77 +1,165 @@
 """
-Measurement contract สำหรับ ask_eval / permission tests (P5a — Codex review KB_NEXT_STEPS_CODEX_REVIEW B3/M2)
+Measurement contract สำหรับ permission-leakage / ask-quality harness
+P5a rev2 — ปิด Codex FIX-THEN-GO (B1-B4, M1-M4)
 
-pure logic — ไม่พึ่ง network/Qdrant/model → unit-test ได้โดยไม่ต้องรัน stack
-จุดที่ Codex ชี้ว่า harness เดิม "เขียวผิดเหตุผล" แล้วแก้ที่นี่:
+pure logic ล้วน — ไม่พึ่ง network/Qdrant/model → unit-test + harness-test ได้โดยไม่ต้องรัน stack
+ทุก decision ที่ตัด exit code ของ suite อยู่ในไฟล์นี้ เพื่อให้ test assert ได้ตรง
 
-- B3: auth/HTTP error ถูก catch เป็น `citations:[]` แล้วนับว่า "ไม่รั่ว"
-      → แยกผลเป็น 4 สถานะชัด: OK / NO_RESULT / DENIED(401/403) / ERROR
-      → DENIED/NO_RESULT/ERROR **ห้าม** collapse เป็น CLEAN (ไม่รั่ว)
-- B3: leak เดิมเช็คแค่ keyword ใน source → เพิ่ม assert retrieved point-id ⊆ allow-set
-- M2: citation 92% = retrieval hit ไม่ใช่ citation accuracy
-      → parse `[n]` ที่ answer อ้างจริง แยก retrieval-hit / citation-reference-validity ออกจากกัน
+สิ่งที่ปิดจากรีวิว:
+- B1: suite ต้อง **ไม่** exit 0 เมื่อทุก request โดน DENIED/NO_RESULT — เพราะ deny/empty ไม่ใช่
+      หลักฐานว่า filter ทำงาน. เขียวได้เฉพาะเมื่อมี positive control ที่ 'เจอ canary' คู่กับ
+      negative control ที่ 'ไม่เจอ canary' (ดู pair_verdict / permission_suite_ok)
+- B2: แยก transport_outcome (SUCCESS/DENIED/ERROR/MALFORMED) ออกจาก retrieval_outcome
+      (HAS_RESULTS/NO_RESULTS) — no-answer case ไม่ถูกตัดหายจาก denominator อีก
+- B3: expected policy มาจาก manifest อิสระ (ไม่ derive จาก rbac_config) — ดู permission_manifest.json
+- B4: leak ตัดด้วย **point_id** จริง (collection เป็น diagnostic เฉย ๆ)
+- M1: positive control เป็น requirement — pair ที่ positive ไม่เจอ canary = INCONCLUSIVE (fail)
+- M3: malformed/partial JSON / ผิด shape → MALFORMED (structured, non-zero)
+- M4: blank source ไม่นับเป็น retrieval hit
 """
 from __future__ import annotations
 import re
 
-# ---- outcome ของการเรียก API (ต้องแยกให้ชัด ห้าม collapse) ----
-OK, NO_RESULT, DENIED, ERROR = "OK", "NO_RESULT", "DENIED", "ERROR"
+# ── transport outcome (ชั้น HTTP/auth) ─────────────────────────────────────────
+SUCCESS, DENIED, ERROR, MALFORMED = "SUCCESS", "DENIED", "ERROR", "MALFORMED"
+# ── retrieval outcome (ชั้นผลค้น — มีความหมายเฉพาะเมื่อ transport == SUCCESS) ────
+HAS_RESULTS, NO_RESULTS = "HAS_RESULTS", "NO_RESULTS"
+# ── pair / probe verdict ───────────────────────────────────────────────────────
+PASS, LEAK, INCONCLUSIVE = "PASS", "LEAK", "INCONCLUSIVE"
 
 
-def classify_outcome(status_code: int | None, exc: BaseException | None, n_citations: int) -> str:
+def classify_transport(status_code: int | None, exc: BaseException | None,
+                       malformed: bool = False) -> str:
     """
-    แยกผลเรียก /ask|/search เป็น 4 สถานะ (B3):
-      DENIED    — 401/403 (auth/authorization ปฏิเสธ) — เป็นผลที่ "ถูกต้อง" ของ probe หวงห้าม
-      ERROR     — exception อื่น (timeout/connection) หรือ 4xx/5xx ที่ไม่ใช่ auth — inconclusive
-      OK        — 200 + มี citations/results
-      NO_RESULT — 200 + ว่าง (ถูก filter หมด หรือไม่มีข้อมูล)
-    หมายเหตุ: DENIED/ERROR/NO_RESULT ห้ามนับเป็น "ไม่รั่ว" (ดู leak_verdict)
+    แยกผลชั้น transport (B2) — ไม่ยุ่งกับจำนวนผลลัพธ์:
+      MALFORMED — body ไม่ใช่ JSON/ผิด shape (M3)
+      DENIED    — 401/403 (auth/authorization ปฏิเสธ) — **ไม่ใช่** หลักฐานว่า filter ทำงาน
+      ERROR     — exception (timeout/conn) / status None / 4xx-5xx อื่น — inconclusive
+      SUCCESS   — 2xx และ body well-formed
     """
+    if malformed:
+        return MALFORMED
     if status_code in (401, 403):
         return DENIED
-    if exc is not None or (status_code is not None and status_code >= 400):
+    if exc is not None or status_code is None:
         return ERROR
-    return OK if n_citations > 0 else NO_RESULT
+    if 200 <= status_code < 300:
+        return SUCCESS
+    return ERROR
 
 
-# ---- citation integrity (M2) ----
+def extract_points(resp, key: str) -> list[dict]:
+    """
+    validate shape ของ response ก่อนใช้ (M3) — raise ValueError ถ้า malformed
+      key = 'results' (/search) หรือ 'citations' (/ask)
+    ไม่คืน/ไม่ log raw body (อาจมีข้อมูลลับ) — ให้ caller จับ ValueError → MALFORMED
+    """
+    if not isinstance(resp, dict):
+        raise ValueError("response ไม่ใช่ JSON object")
+    pts = resp.get(key, [])
+    if not isinstance(pts, list):
+        raise ValueError(f"'{key}' ไม่ใช่ list")
+    for p in pts:
+        if not isinstance(p, dict):
+            raise ValueError(f"element ใน '{key}' ไม่ใช่ object")
+    return pts
+
+
+def retrieval_outcome(n_points: int) -> str:
+    return HAS_RESULTS if n_points > 0 else NO_RESULTS
+
+
+def point_ids(points: list[dict]) -> list[str]:
+    return [str(p.get("point_id", "")) for p in points]
+
+
+def source_hit(expected_source: str, sources: list[str]):
+    """
+    M4: blank source ไม่นับเป็น hit — 's in expected' ตอน s=='' เคยเป็น true ปลอม
+    คืน None ถ้าไม่มี expected (ไม่ประเมิน), True/False ถ้ามี
+    """
+    if not expected_source:
+        return None
+    return any(bool(s) and (expected_source in s or s in expected_source) for s in sources)
+
+
+def canary_found(points: list[dict], canary_point_id: str,
+                 canary_token: str, texts: list[str]) -> bool:
+    """เจอ canary ไหม — โดย exact point_id (หลัก) หรือ token โผล่ใน content (สำรอง)"""
+    if canary_point_id and canary_point_id in point_ids(points):
+        return True
+    if canary_token:
+        tok = canary_token.lower()
+        return any(tok in (t or "").lower() for t in texts)
+    return False
+
+
+# ── citation integrity (M2 เดิม — retrieval-hit แยกจาก [n]-reference validity) ──
 _REF = re.compile(r"\[(\d+)\]")
 
 
 def parse_citation_refs(answer: str) -> list[int]:
-    """ดึงเลข [n] ที่ answer อ้างจริง (unique, เรียงจากน้อยไปมาก)"""
     return sorted({int(m) for m in _REF.findall(answer or "")})
 
 
 def citation_integrity(answer: str, n_citations: int) -> dict:
-    """
-    M2: แยก 'retrieval-source-hit' ออกจาก 'citation-reference-validity'
-      refs         — เลข [n] ที่ answer อ้าง
-      invalid_refs — ref ที่อยู่นอกช่วง [1, n_citations]
-      valid        — ทุก ref อยู่ในช่วง (ไม่มี dangling reference)
-      cited_any    — answer อ้าง [n] อย่างน้อยหนึ่ง (ไม่ใช่ตอบลอยไม่อ้างที่มา)
-    """
     refs = parse_citation_refs(answer)
     invalid = [r for r in refs if r < 1 or r > n_citations]
     return {"refs": refs, "invalid_refs": invalid, "valid": not invalid, "cited_any": bool(refs)}
 
 
-# ---- permission leak verdict (B3) ----
-CLEAN, LEAK = "CLEAN", "LEAK"
+# ── permission pair verdict (หัวใจของ B1/M1) ───────────────────────────────────
+def pair_verdict(pos: dict, neg: dict) -> str:
+    """
+    ตัดสิน canary หนึ่งตัวจากผลสองด้าน (ต้องคู่กันเสมอ — M1):
+      pos = role ที่ **มีสิทธิ์** ค้น canary  → คาดว่า SUCCESS + found
+      neg = role ที่ **ไม่มีสิทธิ์** ค้น canary → คาดว่า SUCCESS + not found + ไม่มี banned
+
+    return:
+      LEAK         — neg เจอ point/token ต้องห้าม (รั่วจริง)
+      INCONCLUSIVE — สรุปไม่ได้: transport ไม่ SUCCESS ด้านใดด้านหนึ่ง หรือ pos หา canary ไม่เจอ
+                     (deny/error/empty ไม่พิสูจน์ว่า filter ทำงาน — B1)
+      PASS         — pos เจอ, neg ไม่เจอ, ทั้งคู่ transport SUCCESS
+
+    dict keys: pos/neg = {"transport": str, "found": bool, "banned_hit": list}
+    """
+    if pos.get("transport") != SUCCESS or neg.get("transport") != SUCCESS:
+        return INCONCLUSIVE
+    if not pos.get("found"):
+        return INCONCLUSIVE
+    if neg.get("found") or neg.get("banned_hit"):
+        return LEAK
+    return PASS
 
 
-def leak_verdict(outcome: str, retrieved_ids, allow_ids, answer: str, banned) -> dict:
+def permission_suite_ok(pair_verdicts: list[str]) -> bool:
+    """เขียวได้เฉพาะเมื่อมี pair อย่างน้อยหนึ่ง และ **ทุก** pair == PASS (B1)"""
+    return bool(pair_verdicts) and all(v == PASS for v in pair_verdicts)
+
+
+# ── ask-quality gate (แยกจาก permission — B2) ──────────────────────────────────
+def ask_quality_failures(records: list[dict]) -> list[str]:
     """
-    ตัดสิน permission probe แบบไม่ false-pass (B3):
-      - ถ้า outcome ไม่ใช่ OK (DENIED/NO_RESULT/ERROR) → คืน outcome ตรงๆ
-        **ห้าม** นับเป็น CLEAN (เพราะ error/deny ไม่ใช่หลักฐานว่า filter ทำงาน)
-      - ถ้า OK → LEAK เมื่อ (retrieved_ids ⊄ allow_ids) หรือ (มี banned canary ใน answer)
-                มิฉะนั้น CLEAN
+    hard-fail ของฝั่ง /ask (ไม่รวม permission):
+      - transport ERROR/MALFORMED/DENIED = inconclusive/พัง (key ไม่ scope → DENIED ก็ fail)
+      - has_answer แต่ retrieval ว่าง (200+0) = quality failure (B1)
+    NO_RESULTS ของ no_answer case = ผ่านตาม contract (ไม่ fail)
+    record keys: category, transport, retrieval
     """
-    if outcome != OK:
-        return {"verdict": outcome, "leaked_ids": [], "banned_hit": []}
-    allow = set(allow_ids)
-    over = [i for i in retrieved_ids if i not in allow]
-    banned_hit = [b for b in (banned or []) if b.lower() in (answer or "").lower()]
-    verdict = LEAK if (over or banned_hit) else CLEAN
-    return {"verdict": verdict, "leaked_ids": over, "banned_hit": banned_hit}
+    fails = []
+    for i, r in enumerate(records):
+        t = r.get("transport")
+        if t in (ERROR, MALFORMED, DENIED):
+            fails.append(f"ask[{i}] {r.get('category')}: transport={t}")
+        elif r.get("category") == "has_answer" and r.get("retrieval") == NO_RESULTS:
+            fails.append(f"ask[{i}] has_answer: retrieval ว่าง (200+0)")
+    return fails
+
+
+def suite_exit_code(pair_verdicts: list[str], ask_records: list[dict],
+                    auth_preflight_ok: bool = True) -> int:
+    """0 เฉพาะเมื่อ: permission suite ผ่าน + ask ไม่มี hard-fail + auth preflight ผ่าน"""
+    ok = (permission_suite_ok(pair_verdicts)
+          and not ask_quality_failures(ask_records)
+          and auth_preflight_ok)
+    return 0 if ok else 1

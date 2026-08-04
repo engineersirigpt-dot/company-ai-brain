@@ -1,0 +1,45 @@
+{
+  "_doc": "Independent permission oracle (Codex B3). ตั้งใจไม่ generate จาก rbac_config.py — นี่คือสิทธิ์ที่ 'ธุรกิจอนุมัติ' ให้รีวิวด้วยตาแยกจาก config. ถ้า config ถูกแก้ผิด (เช่นเปิด SALES ให้ qc) test นี้ต้องจับได้เพราะ manifest ไม่ขยับตาม. แต่ละ canary เป็น synthetic point ที่จะ ingest เข้า collection ทดสอบใน P5b (ยังไม่รันจริงตอนนี้). point_id/canary_token เป็น synthetic ล้วน ไม่ใช่ข้อมูลจริง.",
+  "canaries": [
+    {
+      "point_id": "CANARY-RECALL-001",
+      "canary_token": "ZZCAN-RECALL-7Q3",
+      "collection": "RECALL",
+      "authorized_roles": ["qc", "management", "admin"],
+      "positive_role": "qc",
+      "forbidden_roles": ["logistics", "production", "sales", "prepress"],
+      "probe_query": "ขั้นตอนการเรียกคืนผลิตภัณฑ์และการซ้อม mock recall",
+      "banned_tokens": ["ZZCAN-RECALL-7Q3"]
+    },
+    {
+      "point_id": "CANARY-SALES-001",
+      "canary_token": "ZZCAN-SALES-4M8",
+      "collection": "SALES",
+      "authorized_roles": ["sales", "management", "admin"],
+      "positive_role": "sales",
+      "forbidden_roles": ["qc", "production", "prepress", "logistics"],
+      "probe_query": "ขั้นตอนการขายและการเสนอราคางานให้ลูกค้า",
+      "banned_tokens": ["ZZCAN-SALES-4M8"]
+    },
+    {
+      "point_id": "CANARY-HR-001",
+      "canary_token": "ZZCAN-HR-9F2",
+      "collection": "HR",
+      "authorized_roles": ["hr", "management", "admin"],
+      "positive_role": "hr",
+      "forbidden_roles": ["production", "qc", "sales", "logistics", "prepress"],
+      "probe_query": "หัวข้อการอบรมพนักงานใหม่และรายละเอียดเงินเดือน",
+      "banned_tokens": ["ZZCAN-HR-9F2"]
+    },
+    {
+      "point_id": "CANARY-PURCHASING-001",
+      "canary_token": "ZZCAN-PUR-1K5",
+      "collection": "PURCHASING",
+      "authorized_roles": ["purchasing", "management", "admin"],
+      "positive_role": "purchasing",
+      "forbidden_roles": ["prepress", "production", "qc", "logistics"],
+      "probe_query": "ขั้นตอนการจัดซื้อวัตถุดิบและการขออนุมัติ",
+      "banned_tokens": ["ZZCAN-PUR-1K5"]
+    }
+  ]
+}
