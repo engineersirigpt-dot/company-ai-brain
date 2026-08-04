@@ -9,6 +9,9 @@
 > **⚠️ Scope (2026-08-04):** repo นี้ = **Knowledge Brain (Module 12) เท่านั้น** — คลังความรู้กลาง (RAG, `/search`, `/ask`, RBAC)
 > งาน **RFQ/ENQ backend (Module 01/02)** ที่เคยลองทำใน repo นี้ (migrations, enq_api, sign-off/version/draft-edit) **ถูกลบออกแล้ว** เพราะเป็นคนละ module — RFQ ตัวจริงอยู่ที่โปรเจกต์ `../RFQ_Estimate` (Estimate-Packaging) ; ประวัติ RFQ ยังอยู่ใน git history ถ้าต้องหยิบดีไซน์ governance ไปเสริม RFQ_Estimate
 
+> **✅ P1 closure (2026-08-04, Codex GO @ `d120935`):** *P1 permission policy hardened สำหรับ PoC local/synthetic/single-writer ที่ d120935; evidence/run2 PASS. ยังไม่ production-ready และ deploy gates ทั้งหมดยังเปิด.*
+> เดินต่อ **P2 (reranker offline/shadow + hybrid arm)** เป็น in-progress. **production reality ไม่เปลี่ยน:** AUTH_MODE=warn, user auth/OIDC และ /ask egress ยังไม่ปิด. P2 guardrail: filter ก่อน candidates เสมอ (reranker ห้ามเห็น point นอกสิทธิ์แม้ shadow), candidate set เดียวเทียบ dense/reranked/hybrid, แยก retrieval-quality metric ออกจาก permission suite (`TOP_K=10` ของ P5b ไม่นับเป็น quality result), คง canary leak=0 เป็น regression gate, ไม่แตะ production/cloud egress.
+
 ---
 
 ## 1. เป้าหมายของระบบ
@@ -38,7 +41,7 @@ Enquiry → RFQ → ตรวจความครบถ้วน → อนุ�
 
 | # | Module (คำเฮีย) | สถานะเรา | หมายเหตุ |
 |---|---|---|---|
-| 12 | **AI Knowledge Brain** ("ความทรงจำองค์กร") | ✅ **PoC รันจริง** (เหลือ hardening) | = company-ai-brain (2,263 chunks, /search มี consumer จริง, /ask ใช้ได้, RBAC ทำงาน) — **ยังไม่ production-ready**: AUTH_MODE=warn, ยังไม่มี user auth, audit/monitoring ใน backlog, /ask ส่ง context ไป Claude |
+| 12 | **AI Knowledge Brain** ("ความทรงจำองค์กร") | ✅ **PoC รันจริง + P1 policy hardened (PoC)** ; P2 in-progress | = company-ai-brain (2,263 chunks, /search มี consumer จริง, /ask ใช้ได้, RBAC ทำงาน) — **P1 permission policy hardened สำหรับ PoC local/synthetic/single-writer ที่ `d120935`, `evidence/run2` PASS** · **ยังไม่ production-ready** (production reality: AUTH_MODE=warn, ยังไม่มี user auth/OIDC, audit/monitoring backlog, /ask egress ยังไม่ปิด — deploy gates ทั้งหมดยังเปิด) |
 | 02 | **RFQ** (AI RFQ Agent) | ➡️ **แยกโปรเจกต์ = `../RFQ_Estimate` (Estimate-Packaging)** | RFQ intake/form + AI parse (`/ai/parse-spec`) + estimate engine + quotation อยู่ที่ RFQ_Estimate ; backend prototype (migrations/enq_api) ที่เคยลองใน repo นี้ **ถูกลบออก 2026-08-04** — repo นี้ = Knowledge Brain (Module 12) เท่านั้น |
 | 01 | ENQ | ➡️ **ส่วนหนึ่งของ `../RFQ_Estimate`** | AI parse enquiry → RFQ อยู่ใน RFQ_Estimate ; prototype extraction ใน repo นี้ถูกลบออก 2026-08-04 |
 | 03 | AI Estimate | ⬜ ออกแบบไว้ | ต่อ RFQ → `/search`/`/ask` (SOP) + Costing deterministic (PostgreSQL, tb_master_* จริง) |

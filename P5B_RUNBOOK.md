@@ -66,9 +66,9 @@ docker compose -f docker-compose.p5b.yml -p brain_p5b down -v
 ## Pre-verified offline แล้ว (ก่อนแตะ infra)
 รันได้ทันทีโดยไม่ต้อง Docker/Qdrant — พิสูจน์ fixtures + expectation ตรงกับ conservative model:
 ```
-python test_p5b_fixtures.py    # 8/8 — matches_policy == expect_roles (conformance จะเทียบชุดนี้กับ Qdrant จริง)
-python test_policy.py          # 68/68 (รวม P5B-B1 guard)
-python test_eval_contract.py / test_ask_eval_harness.py / test_auth.py
+python test_p5b_fixtures.py    # 11/11 — matches_policy == expect_roles + marker + UNCLASSIFIED resolver
+python test_policy.py          # 69/69 (รวม P5B-B1 marker guard)
+python test_eval_contract.py (64) / test_ask_eval_harness.py (12) / test_auth.py (11)
 ```
 
 ## ยังเป็น deploy gate (ไม่อยู่ใน P5b)

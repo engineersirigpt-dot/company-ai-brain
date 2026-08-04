@@ -26,7 +26,9 @@ services:
       - API_KEYS_FILE=/app/api_keys.json
     volumes:
       - hf_cache:/root/.cache/huggingface
-      # โค้ด mount จาก repo — deploy ใหม่ = git pull + docker restart brain_api (ไม่ต้อง rebuild)
+      # app/ mount จาก repo — แก้ app/*.py = git pull + docker restart brain_api พอ
+      # แต่ policy.py/qdrant_filter.py/rbac_config.py อยู่ **ใน image** (Dockerfile COPY, ไม่ bind-mount)
+      # → แก้ 3 ไฟล์นี้ต้อง **rebuild image** (restart-only จะรันโค้ดเก่า) — production packaging gate
       - ./app:/app/app:ro
       # service API keys (hash) — สร้างไฟล์นี้บน server ก่อน compose up (gitignored)
       - ./api_keys.json:/app/api_keys.json:ro

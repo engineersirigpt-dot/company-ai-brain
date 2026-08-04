@@ -39,6 +39,11 @@ def main() -> None:
     if not args.collection or not args.run_id or not keys:
         print("ERROR: ต้องตั้ง P5B_COLLECTION, P5B_RUN_ID, KB_EVAL_KEYS", file=sys.stderr)
         sys.exit(2)
+    # N3: registry ต้องครบทุก known role มิฉะนั้น negative probe อาจ false-clean เพราะ role ที่ขาดไม่ถูกยิง
+    if set(keys) != set(P.KNOWN_ROLES):
+        print(f"ERROR: KB_EVAL_KEYS ต้องครบทุก known role — ขาด {sorted(set(P.KNOWN_ROLES) - set(keys))}",
+              file=sys.stderr)
+        sys.exit(2)
 
     client = QdrantClient(url=args.qdrant_url)
     count = client.count(args.collection).count
@@ -79,6 +84,9 @@ def main() -> None:
         print(f"  [{mark}] role={role:10s} found={f} want={want}")
 
     # missing/stale/quarantine → ไม่มีใคร (รวม admin) พบ
+    # NB (N3): นี่เป็น secondary end-to-end check ผ่าน API ; **authoritative** ของ malformed no-match
+    # คือ direct filtered scroll ใน p5b_conformance.py (ไม่พึ่ง vector top-k). corpus นี้ bounded
+    # (visible/role ≤ ~10 < top_k=10) จึงไม่มี false-clean จากลำดับที่เกิน limit
     print("== missing-ACL / stale-schema / quarantine (ไม่มีใครพบแม้ admin) ==")
     for name, tid in deny_targets.items():
         leaked = []
