@@ -80,8 +80,8 @@ auth/filter/oracle/index mismatch · partial query · exception · empty/vacuous
 canonical raw receipt ของ: seed manifest, index, oracle output, provider candidates, **spy trace (id+text hashes)**, model metadata, command/timestamps/exit, stdout/stderr hashes
 - summary อ้าง **raw-evidence digest/path** ไม่พึ่งไฟล์ gitignored ชุดเดียว
 
-### 11. Acceptance (M4 PASS ก็ต่อเมื่อครบ — validator `p2_eval.validate_m4_run_evidence` v4 + `p2_runplan.validate_m4_preflight_bundle` บังคับแล้ว)
-- `isolated_interlock=PASS` · `independent_oracle=PASS` · `schema_version=p2-m4-v4`
+### 11. Acceptance (M4 PASS ก็ต่อเมื่อครบ — validator `p2_eval.validate_m4_run_evidence` **v5** + `p2_runplan.validate_m4_preflight_bundle` บังคับแล้ว)
+- `isolated_interlock=PASS` (มาคู่ **IsolationProof** ที่ recompute ตรง) · `independent_oracle=PASS` (มาคู่ **OracleProof** ครอบ exact case set) · `schema_version=p2-m4-v5`
 - **B1:** `sentinel_pairs ⊆ unfiltered_topn_pairs` (sentinel ติด unfiltered top-N) แล้ว `∩ model_input = ∅`
 - **B3:** `model_call_count>0` · `model_input_count>0` · `score_count==model_input_count` · `all_scores_finite=True` · `scorer_kind=pinned-cross-encoder` · `expected_case_count==completed_case_count>0` · `error_count==skip_count==0`
 - `unauthorized_in_model_inputs == 0` (exact int) · `sentinel_reached_model=False`
@@ -92,36 +92,44 @@ canonical raw receipt ของ: seed manifest, index, oracle output, provider c
 - **export evidence ก่อน teardown** · ระบุ collection UUID/volume/network ที่ลบ
 - เก็บเฉพาะ evidence ที่ **ไม่มี secret/raw text**
 
-## Evidence schema (M4Evidence **v4** — per_case authoritative) ที่ validator บังคับแล้ว
+## Evidence schema (M4Evidence **v5** — per_case authoritative + provenance-bound) ที่ validator บังคับแล้ว
+> **compat:** v5 = v4 + `query_text_sha256` (frozen+per_case) + `isolation_proof`/`oracle_proof` + scorer_kind/pin จาก **ScorerProof**.
+> artifact v4 เก่า **ถูก reject** (validator ใหม่ไม่ reinterpret) — ต้อง re-run ด้วย v5 producer
 ```
-schema_version = p2-m4-v4 · status/isolated_interlock/independent_oracle = PASS · scorer_kind = pinned-cross-encoder
+schema_version = p2-m4-v5 · status/isolated_interlock/independent_oracle = PASS
+scorer_kind = pinned-cross-encoder ← มาจาก ScorerProof (validate_scorer_metadata == M4RunRequest) ไม่ hardcode/ไม่รับจาก run_meta
 evidence_stage ∈ {preflight-n50, selected-n} · sentinel_reached_model = false · unauthorized_in_model_inputs = 0
 m4_case_manifest_sha256   ← ต้อง == RunPlan.m4_case_manifest_sha256 (frozen binding, B2)
 raw_evidence_sha256       ← recompute จาก canonical(per_case) (B3, ไม่ใช่ self-stamp)
 per_case[]:               ← **หลักฐาน authoritative** (security invariant ตรวจต่อ case/role — B1)
-  case_id_sha256 · role_identity_sha256 · category · selected_n · query_vector_sha256
+  case_id_sha256 · role_identity_sha256 · category · selected_n · query_text_sha256 · query_vector_sha256
   pair_components[{point_id_sha256, rerank_text_sha256, pair_sha256}]  ← recompute pair (B3)
   unfiltered_topn_pairs[]  (raw unfiltered query) · observed_sentinel_ranks[[pair, rank≤N]]  (B1/M2)
   provider_pairs[] ⊆ authorized(frozen) · model_input_pairs[] ⊆ provider · rerank_output_pairs = permutation(model_input)
   model_input ∩ sentinel(frozen) = ∅ · sentinel ⊆ unfiltered_topn
   model_call_count/model_input_count/score_count > 0 (score==input) · all_scores_finite · status = PASS
-# pin + durable binding
-model_revision / tokenizer_revision (commit) · image_digest · model_file_manifest_sha256
+# run-level provenance proofs (B2 — verdict derive จาก proof จริง ไม่ใช่ string/count)
+isolation_proof{project/network/volume/collection_uuid_sha256 (distinct) · marker_sha256 · isolation_proof_sha256=recompute(body)}
+   ← marker_sha256 == receipt.isolation_marker_sha256 (marker load-bearing, ตรวจใน preflight bundle)
+oracle_proof{frozen_manifest_sha256==m4_manifest · retrieval_index_manifest_sha256==M4RunRequest · case_set_sha256==sorted(frozen cases) · oracle_proof_sha256=recompute(body)}
+# pin + durable binding — scorer_kind/model_revision/tokenizer_revision/model_file_manifest_sha256/inference_config มาจาก ScorerProof
+model_revision / tokenizer_revision (commit) · image_digest · model_file_manifest_sha256 · inference_config
 run_id · retrieval_index_manifest_sha256 · eval/corpus hash · run_manifest_sha256 (decision) · selection_digest (M4b)
-# per_case: effective_role · QueryProbe (query_vector_sha256 == frozen ; unfiltered/filtered vector == query_vector ; limit==N)
+# per_case: effective_role · QueryProbe (query_text_sha256 == frozen ; query_vector_sha256 == frozen ; unfiltered/filtered vector == query_vector ; limit==N)
 #   · run_receipt_sha256 (durable receipt reference — ไม่ใส่ command/raw log ตรง ๆ) · exact hash-only keys (reject raw/unknown)
 # M4RunRequest (expected) — จาก RunPlan/frozen run request : model_revision · tokenizer_revision · model_file_manifest_sha256
 #   · image_digest · inference_config · retrieval_index_manifest_sha256 [· run_id]  → validator เทียบ **exact ทั้ง M4a/M4b**
+#   scorer จริงต้องประกาศ metadata() == M4RunRequest ก่อน delegate (mock/wrong pin → run_case raise, ไม่มี evidence)
 # frozen M4 manifest (fixture/oracle — expected_visible_roles matrix):
-#   cases{case_id_sha256: {role_identity_sha256, effective_role, category, query_vector_sha256, authorized_pairs[], sentinel_pairs[]}}
+#   cases{case_id_sha256: {role_identity_sha256, effective_role, category, query_text_sha256, query_vector_sha256, authorized_pairs[], sentinel_pairs[]}}
 #   required_categories[] · evaluated_roles[]  → digest = m4_case_manifest_sha256 (ผูกเข้า RunPlan)
 # validate_m4_frozen_manifest (ก่อน hash, ไม่ crash): exact types/keys · sha256 · non-blank/unique pairs ·
 #   authorized/sentinel disjoint · **ทุก required_category + evaluated_role มี case**
 # validator: exact case set · case roles == evaluated_roles == plan · required_categories == plan · QueryProbe==frozen · zero missing
 ```
-> validator `validate_m4_run_evidence` v4 + `validate_m4_frozen_manifest` + M4RunRequest + RunPlan binding พร้อมแล้ว
-> (test_p2_m4.py 39/39 — cross-role swap · rank-เท็จ · QueryProbe-ผูก-frozen · M4a exact pin · role-ไม่มี-case · malformed · mixed-key · raw-field)
-> harness เพียงผลิต evidence ตาม schema นี้ + `M4RunReceipt` (command/timestamp/exit/log hashes) แยกที่ `run_receipt_sha256` อ้างถึง
+> validator `validate_m4_run_evidence` v5 + `validate_m4_frozen_manifest` + `validate_m4_isolation_proof`/`validate_m4_oracle_proof` + M4RunRequest + RunPlan binding พร้อมแล้ว
+> (test_p2_m4.py 47/47 · test_p2_m4_harness.py 33/33 — scorer provenance · single run_case boundary · proof recompute/coverage · marker load-bearing · cross-role swap · QueryProbe(text+vector)-ผูก-frozen · M4a exact pin)
+> harness ผลิต evidence ผ่าน **boundary เดียว** `run_case`/`run_m4_cases` (validate scorer + input ก่อน delegate) + `build_isolation_proof`/`build_oracle_proof`/`build_run_verdicts` + `M4RunReceipt` แยกที่ `run_receipt_sha256` อ้างถึง
 
 ## Gate ที่คงไว้
 - Data Owner sign-off **ไม่จำเป็นกับ M4a** (isolated synthetic mechanics) — แต่ M4a ติดป้าย non-decision และ **ห้ามส่งเข้า `decide_p2()` แทน M4b**

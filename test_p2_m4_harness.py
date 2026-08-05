@@ -1,12 +1,11 @@
 """
 Unit test ของ p2_m4_harness + public M4a gate — pure/offline
-one-shot sealed CaseTrace · real query text เข้า cross-encoder + bind frozen · validate ก่อน delegate ·
-run_meta ทับ verdict ไม่ได้ · verdict มาจาก proof · typed id
+scorer provenance (metadata==M4RunRequest) · single run_case boundary (trace private) ·
+IsolationProof/OracleProof derive verdict · marker load-bearing · real query · validate ก่อน delegate
 
     python test_p2_m4_harness.py
 """
 import copy
-import hashlib
 import io
 import sys
 
@@ -35,20 +34,19 @@ VEC1, VEC2 = [0.1, 0.2, 0.3], [0.4, 0.5, 0.6]
 QT1, QT2 = "คำถาม negation", "คำถาม table-row"
 
 
-class RecScorer:
-    """MockScorer ที่บันทึก query ที่ underlying ได้รับจริง"""
+class PinnedScorer:
+    """cross-encoder จำลองที่ประกาศ metadata ตรง M4RunRequest (pinned model จริง)"""
     def __init__(self, smap): self.smap = smap; self.queries = []
+    def metadata(self):
+        return {"kind": "pinned-cross-encoder", "model_name": RK.RERANKER_MODEL, "model_revision": "a" * 40,
+                "tokenizer_revision": "a" * 40, "model_file_manifest_sha256": _H, "inference_config": dict(IC)}
     def score(self, q, texts): self.queries.append(q); return [self.smap.get(t, 0.0) for t in texts]
 
 
-FROZEN = HN.build_frozen_manifest(
-    cases={"case-qc": HN.frozen_case(effective_role="qc", category="negation", query_text=QT1, query_vector=VEC1,
-                                     authorized_items=[("A", "ta")], sentinel_items=[("S", "ts")]),
-           "case-sales": HN.frozen_case(effective_role="sales", category="table-row", query_text=QT2, query_vector=VEC2,
-                                        authorized_items=[("B", "tb")], sentinel_items=[("S", "ts")])},
-    required_categories=["negation", "table-row"], evaluated_roles=["qc", "sales"])
-MAN = E.m4_case_manifest_sha256(FROZEN)
-check("frozen manifest valid", E.validate_m4_frozen_manifest(FROZEN) == [], E.validate_m4_frozen_manifest(FROZEN))
+class MockScorer:
+    """ไม่มี metadata() — ห้าม emit pinned evidence"""
+    def __init__(self, smap): self.smap = smap; self.queries = []
+    def score(self, q, texts): self.queries.append(q); return [self.smap.get(t, 0.0) for t in texts]
 
 
 def _plan(**over):
@@ -63,65 +61,107 @@ def _plan(**over):
          "image_digest": "sha256:" + "e" * 64, "inference_config": dict(IC)}
     p.update(over)
     return p
+
+
+FROZEN = HN.build_frozen_manifest(
+    cases={"case-qc": HN.frozen_case(effective_role="qc", category="negation", query_text=QT1, query_vector=VEC1,
+                                     authorized_items=[("A", "ta")], sentinel_items=[("S", "ts")]),
+           "case-sales": HN.frozen_case(effective_role="sales", category="table-row", query_text=QT2, query_vector=VEC2,
+                                        authorized_items=[("B", "tb")], sentinel_items=[("S", "ts")])},
+    required_categories=["negation", "table-row"], evaluated_roles=["qc", "sales"])
+MAN = E.m4_case_manifest_sha256(FROZEN)
 PLAN = _plan()
 ROOT = RP.run_manifest_sha256(PLAN)
 EXP = RP.m4_run_request(PLAN)
+check("frozen manifest valid", E.validate_m4_frozen_manifest(FROZEN) == [], E.validate_m4_frozen_manifest(FROZEN))
 
+INPUTS = [{"case_id": "case-qc", "query_text": QT1, "query_vector": VEC1, "candidates": [("A", "ta")],
+           "unfiltered_items": [("S", "ts"), ("A", "ta")], "sentinel_items": [("S", "ts")]},
+          {"case_id": "case-sales", "query_text": QT2, "query_vector": VEC2, "candidates": [("B", "tb")],
+           "unfiltered_items": [("S", "ts"), ("B", "tb")], "sentinel_items": [("S", "ts")]}]
 
-def _case(case_id, erole, category, qt, vec, auth):
-    tr = HN.score_case(query_text=qt, query_vector=vec, candidates=[auth],
-                       authorized_pairs=[HN.component(*auth)["pair_sha256"]], scorer=RecScorer({auth[1]: 2.0}))
-    return HN.build_case_record(case_id=case_id, effective_role=erole, category=category, selected_n=50,
-                                unfiltered_items=[("S", "ts"), auth], sentinel_items=[("S", "ts")], trace=tr)
-
-
-PER_CASE = [_case("case-qc", "qc", "negation", QT1, VEC1, ("A", "ta")),
-            _case("case-sales", "sales", "table-row", QT2, VEC2, ("B", "tb"))]
-VERDICTS = HN.build_verdicts(isolation="PASS", oracle="PASS", case_count=2, traced_count=2)
+SCORER = PinnedScorer({"ta": 2.0, "tb": 2.0})
+RECORDS, PROOF = HN.run_m4_cases(expected=EXP, frozen=FROZEN, scorer=SCORER, inputs=INPUTS, selected_n=50)
+ISO = HN.build_isolation_proof(project_uuid="proj-u", network_uuid="net-u", volume_uuid="vol-u",
+                               collection_uuid="coll-u", marker="m4-run-uuid")
+ORACLE = HN.build_oracle_proof(frozen=FROZEN, index_sha256=_H)
+VERDICTS = HN.build_run_verdicts(expected=EXP, isolation_proof=ISO, oracle_proof=ORACLE, case_records=RECORDS, frozen=FROZEN)
 RUN_META = {"m4_case_manifest_sha256": MAN, "run_id": "run-1", "run_manifest_sha256": ROOT,
-            "model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "model_file_manifest_sha256": _H,
-            "image_digest": "sha256:" + "e" * 64, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _H,
+            "image_digest": "sha256:" + "e" * 64, "retrieval_index_manifest_sha256": _H,
             "eval_set_sha256": _H, "corpus_manifest_sha256": _H, "selected_n": 50, "decision_eligible": False}
-EV = HN.assemble_evidence(PER_CASE, stage="preflight-n50", run_meta=RUN_META, verdicts=VERDICTS)
+EV = HN.assemble_evidence(RECORDS, stage="preflight-n50", run_meta=RUN_META, scorer_proof=PROOF,
+                          isolation_proof=ISO, oracle_proof=ORACLE, verdicts=VERDICTS)
 RC = HN.assemble_receipt(EV, run_manifest=ROOT, m4_case_manifest=MAN, expected={**EXP, "run_id": "run-1"},
                          argv=["python", "p2_m4_runner.py", "--preflight"], stdout=b"ok", stderr=b"",
-                         isolation_marker="m4-run-uuid", started_utc="2026-08-05T05:00:00+07:00",
+                         isolation_proof=ISO, started_utc="2026-08-05T05:00:00+07:00",
                          finished_utc="2026-08-05T05:03:00+07:00", exit_code=0)
 EV["run_receipt_sha256"] = E.m4_run_receipt_sha256(RC)
 
-check("harness bundle -> M4a gate ผ่าน", RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC) == [], RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC))
+check("run_m4_cases -> M4a gate ผ่าน", RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC) == [], RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC))
+check("VERDICTS derive = PASS", VERDICTS["status"] == "PASS" and VERDICTS["unauthorized_in_model_inputs"] == 0)
 
-# ── B2: real query text เข้า cross-encoder + bind frozen ──────────────────────
-_rec = RecScorer({"ta": 2.0})
-HN.score_case(query_text=QT1, query_vector=VEC1, candidates=[("A", "ta")], authorized_pairs=[HN.component("A", "ta")["pair_sha256"]], scorer=_rec)
-check("B2: underlying scorer ได้ query ของ case จริง (ไม่ใช่ 'm4')", _rec.queries == [QT1])
-check("B2: query_text_sha256 อยู่ใน evidence + ตรง frozen", EV["per_case"][0]["query_text_sha256"] == HN._text_hash(QT1))
-_qt = copy.deepcopy(PER_CASE); _qt[0]["query_text_sha256"] = HN._text_hash("query อื่น")
-_ev_qt = HN.assemble_evidence(_qt, stage="preflight-n50", run_meta=RUN_META, verdicts=VERDICTS)
-check("B2: เปลี่ยน query_text (คง vector) -> gate fail", RP.validate_m4_preflight_bundle(PLAN, FROZEN, {**_ev_qt, "run_receipt_sha256": EV["run_receipt_sha256"]}, RC) != [])
+# ── B1: scorer provenance — mock/no-metadata/wrong pin ห้าม emit pinned evidence ──────────────
+check("B1: mock (ไม่มี metadata) -> validate_scorer_metadata raise", raises(lambda: HN.validate_scorer_metadata(MockScorer({"ta": 2.0}), EXP), TypeError))
+check("B1: run_case ด้วย mock -> raise ก่อน delegate", raises(lambda: HN.run_case(expected=EXP, scorer=MockScorer({"ta": 2.0}), case_id="case-qc", frozen_case=FROZEN["cases"][HN._id_hash("case-qc")], query_text=QT1, query_vector=VEC1, candidates=[("A", "ta")], unfiltered_items=[("S", "ts"), ("A", "ta")], sentinel_items=[("S", "ts")], selected_n=50), TypeError))
+class _WrongRev(PinnedScorer):
+    def metadata(self): m = super().metadata(); m["model_revision"] = "f" * 40; return m
+check("B1: scorer revision ผิด -> raise", raises(lambda: HN.validate_scorer_metadata(_WrongRev({}), EXP), ValueError))
+class _WrongKind(PinnedScorer):
+    def metadata(self): m = super().metadata(); m["kind"] = "mock"; return m
+check("B1: scorer kind=mock -> raise", raises(lambda: HN.validate_scorer_metadata(_WrongKind({}), EXP), ValueError))
+class _WrongIC(PinnedScorer):
+    def metadata(self): m = super().metadata(); m["inference_config"] = {**IC, "device": "cuda"}; return m
+check("B1: inference_config ผิด -> raise", raises(lambda: HN.validate_scorer_metadata(_WrongIC({}), EXP), ValueError))
+class _WrongFM(PinnedScorer):
+    def metadata(self): m = super().metadata(); m["model_file_manifest_sha256"] = "9" * 64; return m
+check("B1: model_file_manifest ผิด -> raise", raises(lambda: HN.validate_scorer_metadata(_WrongFM({}), EXP), ValueError))
+check("B1: scorer_kind/pin ใน evidence มาจาก ScorerProof", EV["scorer_kind"] == "pinned-cross-encoder" and EV["model_revision"] == "a" * 40 and EV["inference_config"] == IC)
+check("B1: run_meta ใส่ model_revision (pin) -> raise (มาจาก ScorerProof เท่านั้น)", raises(lambda: HN.assemble_evidence(RECORDS, stage="preflight-n50", run_meta={**RUN_META, "model_revision": "a" * 40}, scorer_proof=PROOF, isolation_proof=ISO, oracle_proof=ORACLE, verdicts=VERDICTS), ValueError))
+check("B1: run_meta ใส่ status (verdict) -> raise", raises(lambda: HN.assemble_evidence(RECORDS, stage="preflight-n50", run_meta={**RUN_META, "status": "PASS"}, scorer_proof=PROOF, isolation_proof=ISO, oracle_proof=ORACLE, verdicts=VERDICTS), ValueError))
 
-# ── B1: run_meta ทับ verdict ไม่ได้ + verdict มาจาก proof ─────────────────────
-check("B1: run_meta มี key protected (status) -> raise", raises(lambda: HN.assemble_evidence(PER_CASE, stage="preflight-n50", run_meta={**RUN_META, "status": "PASS"}, verdicts=VERDICTS), ValueError))
-check("B1: run_meta ทับ per_case/raw -> raise", raises(lambda: HN.assemble_evidence(PER_CASE, stage="preflight-n50", run_meta={**RUN_META, "per_case": []}, verdicts=VERDICTS), ValueError))
-_fail_verd = HN.build_verdicts(isolation="FAIL", oracle="PASS", case_count=2, traced_count=2)
-_ev_fail = HN.assemble_evidence(PER_CASE, stage="preflight-n50", run_meta=RUN_META, verdicts=_fail_verd)
-check("B1: proof FAIL -> evidence status FAIL -> gate fail", _ev_fail["status"] == "FAIL" and _ev_fail["isolated_interlock"] == "FAIL"
-      and RP.validate_m4_preflight_bundle(PLAN, FROZEN, {**_ev_fail, "run_receipt_sha256": EV["run_receipt_sha256"]}, RC) != [])
+# ── B1: single boundary — CaseTrace/build_case_record ไม่ใช่ public seam ───────────────────────
+check("B1: ไม่มี public build_case_record/score_case (trace = private)", not hasattr(HN, "build_case_record") and not hasattr(HN, "score_case"))
+check("B1: underlying scorer ได้ query ของ case จริง (ไม่ใช่ 'm4')", SCORER.queries == [QT1, QT2])
+check("B1: query_text_sha256 ใน evidence ตรง frozen", EV["per_case"][0]["query_text_sha256"] == HN._text_hash(QT1))
 
-# ── M1: one-shot sealed CaseTrace (immutable, แก้ย้อนหลังไม่ได้) ───────────────
-_tr = HN.score_case(query_text=QT1, query_vector=VEC1, candidates=[("A", "ta")], authorized_pairs=[HN.component("A", "ta")["pair_sha256"]], scorer=RecScorer({"ta": 2.0}))
-check("M1: CaseTrace immutable (แก้ pairs ไม่ได้)", raises(lambda: setattr(_tr, "pairs", ("x",)), AttributeError))
-check("M1: build_case_record รับเฉพาะ CaseTrace (dict -> TypeError)", raises(lambda: HN.build_case_record(case_id="c", effective_role="qc", category="negation", selected_n=50, unfiltered_items=[], sentinel_items=[], trace={"pairs": []}), TypeError))
+# ── B2: verdict มาจาก proof + case records จริง (ไม่ใช่ string/count ลอย) ──────────────────────
+_bad_iso = {**ISO, "isolation_proof_sha256": "9" * 64}
+_v_iso = HN.build_run_verdicts(expected=EXP, isolation_proof=_bad_iso, oracle_proof=ORACLE, case_records=RECORDS, frozen=FROZEN)
+check("B2: isolation_proof recompute ไม่ตรง -> isolated_interlock FAIL + status FAIL", _v_iso["isolated_interlock"] == "FAIL" and _v_iso["status"] == "FAIL")
+_ev_iso = HN.assemble_evidence(RECORDS, stage="preflight-n50", run_meta=RUN_META, scorer_proof=PROOF, isolation_proof=_bad_iso, oracle_proof=ORACLE, verdicts=_v_iso)
+check("B2: tampered isolation_proof -> gate fail (recompute body)", RP.validate_m4_preflight_bundle(PLAN, FROZEN, {**_ev_iso, "run_receipt_sha256": EV["run_receipt_sha256"]}, RC) != [])
+_iso_dup = HN.build_isolation_proof(project_uuid="same", network_uuid="same", volume_uuid="vol-u", collection_uuid="coll-u", marker="m4-run-uuid")
+check("B2: UUID ไม่ distinct -> isolation_proof invalid", E.validate_m4_isolation_proof(_iso_dup) != [])
+# oracle coverage: oracle ที่ครอบแค่ case เดียว แต่ evidence มีสอง -> case_set mismatch
+_frozen1 = HN.build_frozen_manifest(cases={"case-qc": HN.frozen_case(effective_role="qc", category="negation", query_text=QT1, query_vector=VEC1, authorized_items=[("A", "ta")], sentinel_items=[("S", "ts")])}, required_categories=["negation"], evaluated_roles=["qc"])
+_oracle_partial = HN.build_oracle_proof(frozen=_frozen1, index_sha256=_H)
+check("B2: oracle case_set != frozen (coverage) -> oracle invalid", E.validate_m4_oracle_proof(_oracle_partial, MAN, _H, list(FROZEN["cases"])) != [])
 
-# ── M2/B1: validate ก่อน delegate — sentinel/NaN ไม่แตะ underlying ─────────────
-_r1 = RecScorer({"ts": 9.0})
-check("guard: sentinel เข้า score_case -> PermissionError ก่อน delegate", raises(lambda: HN.score_case(query_text=QT1, query_vector=VEC1, candidates=[("S", "ts")], authorized_pairs=[HN.component("A", "ta")["pair_sha256"]], scorer=_r1), PermissionError))
-check("guard: underlying scorer ไม่ถูกเรียก (sentinel)", _r1.queries == [])
-_r2 = RecScorer({"ta": 2.0})
-check("M2: query vector NaN -> ValueError ก่อน delegate", raises(lambda: HN.score_case(query_text=QT1, query_vector=[0.1, float("nan")], candidates=[("A", "ta")], authorized_pairs=[HN.component("A", "ta")["pair_sha256"]], scorer=_r2), ValueError))
-check("M2: underlying scorer ไม่ถูกเรียก (bad vector)", _r2.queries == [])
+# ── B2: marker load-bearing (proof ผูก marker เดียวกับ receipt) ────────────────────────────────
+_iso2 = HN.build_isolation_proof(project_uuid="proj-u", network_uuid="net-u", volume_uuid="vol-u", collection_uuid="coll-u", marker="OTHER-marker")
+_rc2 = HN.assemble_receipt(EV, run_manifest=ROOT, m4_case_manifest=MAN, expected={**EXP, "run_id": "run-1"}, argv=["python", "p2_m4_runner.py", "--preflight"], stdout=b"ok", stderr=b"", isolation_proof=_iso2, started_utc="2026-08-05T05:00:00+07:00", finished_utc="2026-08-05T05:03:00+07:00", exit_code=0)
+_ev2 = {**EV, "run_receipt_sha256": E.m4_run_receipt_sha256(_rc2)}
+check("B2: receipt marker != evidence isolation_proof.marker -> gate fail", any("marker" in e for e in RP.validate_m4_preflight_bundle(PLAN, FROZEN, _ev2, _rc2)))
 
-# ── M3 / misc ─────────────────────────────────────────────────────────────────
+# ── B2: sentinel/unauthorized ใน record -> verdict FAIL (derive จริง) ──────────────────────────
+_leak_rec = copy.deepcopy(RECORDS)
+_leak_rec[0]["model_input_pairs"] = [HN.component("S", "ts")["pair_sha256"]]
+_v_leak = HN.build_run_verdicts(expected=EXP, isolation_proof=ISO, oracle_proof=ORACLE, case_records=_leak_rec, frozen=FROZEN)
+check("B2: model เห็น sentinel -> sentinel_reached_model=True + status FAIL", _v_leak["sentinel_reached_model"] is True and _v_leak["status"] == "FAIL")
+
+# ── M2: whitespace/control-only query ไม่ถึง scorer ───────────────────────────────────────────
+_ws = PinnedScorer({"ta": 2.0})
+check("M2: query whitespace-only -> raise ก่อน delegate", raises(lambda: HN.run_case(expected=EXP, scorer=_ws, case_id="case-qc", frozen_case=FROZEN["cases"][HN._id_hash("case-qc")], query_text="   ", query_vector=VEC1, candidates=[("A", "ta")], unfiltered_items=[("S", "ts"), ("A", "ta")], sentinel_items=[("S", "ts")], selected_n=50), ValueError))
+check("M2: underlying scorer ไม่ถูกเรียก (whitespace query)", _ws.queries == [])
+_nan = PinnedScorer({"ta": 2.0})
+check("M2: query vector NaN -> raise ก่อน delegate", raises(lambda: HN.run_case(expected=EXP, scorer=_nan, case_id="case-qc", frozen_case=FROZEN["cases"][HN._id_hash("case-qc")], query_text=QT1, query_vector=[0.1, float("nan")], candidates=[("A", "ta")], unfiltered_items=[("S", "ts"), ("A", "ta")], sentinel_items=[("S", "ts")], selected_n=50), ValueError))
+check("M2: underlying scorer ไม่ถูกเรียก (bad vector)", _nan.queries == [])
+_sen = PinnedScorer({"ts": 9.0})
+check("guard: sentinel candidate เข้า run_case -> PermissionError", raises(lambda: HN.run_case(expected=EXP, scorer=_sen, case_id="case-qc", frozen_case=FROZEN["cases"][HN._id_hash("case-qc")], query_text=QT1, query_vector=VEC1, candidates=[("S", "ts")], unfiltered_items=[("S", "ts")], sentinel_items=[("S", "ts")], selected_n=50), PermissionError))
+check("guard: underlying scorer ไม่ถูกเรียก (sentinel)", _sen.queries == [])
+
+# ── M1: schema v5 + run bind ตรวจซ้ำ ──────────────────────────────────────────────────────────
+check("M1: evidence schema_version = p2-m4-v5", EV["schema_version"] == "p2-m4-v5" and E.M4_SCHEMA_VERSION == "p2-m4-v5")
 check("M3: component(1,'x') != component('1','x')", HN.component(1, "x")["pair_sha256"] != HN.component("1", "x")["pair_sha256"])
 check("M1: argv ambiguity", HN._argv_hash(["a b", "c"]) != HN._argv_hash(["a", "b c"]))
 check("M1: stdout ต้อง bytes", raises(lambda: HN._bytes_sha256("x"), TypeError))

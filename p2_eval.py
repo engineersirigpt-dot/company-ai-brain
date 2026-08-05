@@ -74,7 +74,7 @@ def _exact_zero_int(x) -> bool:
 M4_STAGE_PREFLIGHT = "preflight-n50"
 M4_STAGE_SELECTED = "selected-n"
 M4_STAGES = (M4_STAGE_PREFLIGHT, M4_STAGE_SELECTED)
-M4_SCHEMA_VERSION = "p2-m4-v4"           # v4: per_case[] authoritative + recompute-from-body + manifest binding
+M4_SCHEMA_VERSION = "p2-m4-v5"           # v5: v4 + query_text_sha256 + isolation/oracle proof binding (v4 ถูก reject ไม่ reinterpret)
 N_SET_M4 = (10, 20, 30, 50)
 
 
@@ -89,7 +89,14 @@ _M4_TOP_KEYS = frozenset({"schema_version", "status", "isolated_interlock", "ind
                           "decision_eligible", "m4_case_manifest_sha256", "per_case", "raw_evidence_sha256",
                           "model_revision", "tokenizer_revision", "image_digest", "model_file_manifest_sha256",
                           "inference_config", "retrieval_index_manifest_sha256", "run_id", "eval_set_sha256",
-                          "corpus_manifest_sha256", "run_manifest_sha256", "run_receipt_sha256"})
+                          "corpus_manifest_sha256", "run_manifest_sha256", "run_receipt_sha256",
+                          "isolation_proof", "oracle_proof"})
+# B2: run-level provenance proofs — evidence อ้าง digest, public gate recompute จาก body (ไม่ใช่ตรวจแค่คำว่า PASS)
+_M4_ISO_KEYS = frozenset({"project_uuid_sha256", "network_uuid_sha256", "volume_uuid_sha256",
+                          "collection_uuid_sha256", "marker_sha256", "isolation_proof_sha256"})
+_M4_ISO_BODY = ("project_uuid_sha256", "network_uuid_sha256", "volume_uuid_sha256", "collection_uuid_sha256", "marker_sha256")
+_M4_ORACLE_KEYS = frozenset({"frozen_manifest_sha256", "retrieval_index_manifest_sha256", "case_set_sha256", "oracle_proof_sha256"})
+_M4_ORACLE_BODY = ("frozen_manifest_sha256", "retrieval_index_manifest_sha256", "case_set_sha256")
 _M4_CASE_KEYS = frozenset({"case_id_sha256", "role_identity_sha256", "effective_role", "category", "selected_n",
                            "query_text_sha256", "query_vector_sha256", "unfiltered_query_vector_sha256",
                            "filtered_query_vector_sha256", "unfiltered_limit", "filtered_limit", "pair_components",
@@ -658,6 +665,54 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
     return errs
 
 
+def _m4_case_set_sha256(case_ids) -> str:
+    """canonical digest ของ exact frozen case set (sorted) — oracle ต้องครอบทุก case ที่ประกาศ"""
+    return hashlib.sha256(_canonical_json(sorted(case_ids))).hexdigest()
+
+
+def m4_isolation_proof_sha256(iso) -> str:
+    return hashlib.sha256(_canonical_json([iso.get(k) for k in _M4_ISO_BODY])).hexdigest()
+
+
+def m4_oracle_proof_sha256(oracle) -> str:
+    return hashlib.sha256(_canonical_json([oracle.get(k) for k in _M4_ORACLE_BODY])).hexdigest()
+
+
+def validate_m4_isolation_proof(iso) -> list:
+    """IsolationProof — fresh project/network/volume/collection UUID (distinct) + synthetic marker + recompute digest"""
+    if not isinstance(iso, dict):
+        return ["isolation_proof ต้องเป็น dict (IsolationProof)"]
+    errs = _extra_keys(iso, _M4_ISO_KEYS, "isolation_proof")
+    for k in _M4_ISO_KEYS:
+        if not _is_sha256(iso.get(k)):
+            errs.append(f"isolation_proof {k} ต้องเป็น sha256")
+    ids = [iso.get(k) for k in ("project_uuid_sha256", "network_uuid_sha256", "volume_uuid_sha256", "collection_uuid_sha256")]
+    if all(_is_sha256(x) for x in ids) and len(set(ids)) != 4:
+        errs.append("isolation_proof: project/network/volume/collection UUID ต้อง distinct (isolation จริง)")
+    if not errs and iso.get("isolation_proof_sha256") != m4_isolation_proof_sha256(iso):
+        errs.append("isolation_proof_sha256 != recompute จาก body")
+    return errs
+
+
+def validate_m4_oracle_proof(oracle, man_digest, index_sha, frozen_case_ids) -> list:
+    """OracleProof — independent oracle ผูก frozen manifest + retrieval index + exact case set + recompute digest"""
+    if not isinstance(oracle, dict):
+        return ["oracle_proof ต้องเป็น dict (OracleProof)"]
+    errs = _extra_keys(oracle, _M4_ORACLE_KEYS, "oracle_proof")
+    for k in _M4_ORACLE_KEYS:
+        if not _is_sha256(oracle.get(k)):
+            errs.append(f"oracle_proof {k} ต้องเป็น sha256")
+    if oracle.get("frozen_manifest_sha256") != man_digest:
+        errs.append("oracle_proof frozen_manifest_sha256 != frozen manifest (independent oracle ต้องผูก manifest เดียวกัน)")
+    if oracle.get("retrieval_index_manifest_sha256") != index_sha:
+        errs.append("oracle_proof retrieval_index_manifest_sha256 != M4RunRequest index")
+    if _is_sha256(oracle.get("case_set_sha256")) and oracle.get("case_set_sha256") != _m4_case_set_sha256(frozen_case_ids):
+        errs.append("oracle_proof case_set_sha256 != frozen case set (exact coverage)")
+    if not errs and oracle.get("oracle_proof_sha256") != m4_oracle_proof_sha256(oracle):
+        errs.append("oracle_proof_sha256 != recompute จาก body")
+    return errs
+
+
 def validate_m4_run_evidence(m4, frozen, expected, eval_hash, corpus_hash, run_manifest_sha256=None, require_stage=None) -> list:
     """
     real M4 run evidence v4 — **per_case[] เป็นหลักฐาน authoritative** (permission เป็น invariant ต่อ query/role):
@@ -717,6 +772,11 @@ def validate_m4_run_evidence(m4, frozen, expected, eval_hash, corpus_hash, run_m
     if frozen.get("m4_case_manifest_sha256") not in (None, man_digest):
         errs.append("frozen m4_case_manifest_sha256 ไม่ตรง cases (manifest ปนเปื้อน)")
     required = frozen.get("required_categories") or []
+
+    # B2: run-level proof binding — isolated_interlock/independent_oracle=PASS ต้องมาคู่ proof body ที่ recompute ตรง
+    errs += validate_m4_isolation_proof(m4.get("isolation_proof"))
+    errs += validate_m4_oracle_proof(m4.get("oracle_proof"), man_digest,
+                                     expected.get("retrieval_index_manifest_sha256"), list(frozen.get("cases") or {}))
 
     # B3: recompute raw_evidence_sha256 จาก per_case body
     pcs = m4.get("per_case")

@@ -50,6 +50,12 @@ _COMMIT = "b" * 40
 _IMG = "sha256:" + "c" * 64
 _FM = "d" * 64            # model file-manifest sha256
 _IDX = "e" * 64          # retrieval index manifest sha256
+_M4_ISO = {"project_uuid_sha256": _s("p"), "network_uuid_sha256": _s("n"), "volume_uuid_sha256": _s("v"),
+           "collection_uuid_sha256": _s("c"), "marker_sha256": _s("mk")}
+_M4_ISO["isolation_proof_sha256"] = E.m4_isolation_proof_sha256(_M4_ISO)
+_M4_ORACLE = {"frozen_manifest_sha256": M4_MAN_DIGEST, "retrieval_index_manifest_sha256": _IDX,
+              "case_set_sha256": E._m4_case_set_sha256([_M4_CASE])}
+_M4_ORACLE["oracle_proof_sha256"] = E.m4_oracle_proof_sha256(_M4_ORACLE)
 GATE_TAGS = ["sibling-hard-negative", "table-row", "negation", "current-superseded",
              "lexical-overlap", "multi-constraint"]
 KNOWN = {"qc", "admin", "sales", "hr"}
@@ -252,10 +258,11 @@ def build_bundle(plan):
               "unfiltered_topn_pairs": [_M4_PS, _M4_PA], "observed_sentinel_ranks": [[_M4_PS, 1]],
               "provider_pairs": [_M4_PA], "model_input_pairs": [_M4_PA], "rerank_output_pairs": [_M4_PA],
               "model_call_count": 1, "model_input_count": 1, "score_count": 1, "all_scores_finite": True, "status": "PASS"}]
-    m4 = {"schema_version": "p2-m4-v4", "status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
+    m4 = {"schema_version": E.M4_SCHEMA_VERSION, "status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
           "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0, "scorer_kind": "pinned-cross-encoder",
           "evidence_stage": "selected-n", "selected_n": seln, "selection_digest": sd,
           "m4_case_manifest_sha256": M4_MAN_DIGEST, "per_case": m4_pc,
+          "isolation_proof": _M4_ISO, "oracle_proof": _M4_ORACLE,
           "raw_evidence_sha256": hashlib.sha256(E._canonical_json(m4_pc)).hexdigest(),
           "model_revision": _COMMIT, "tokenizer_revision": _COMMIT, "model_file_manifest_sha256": _FM,
           "image_digest": _IMG, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _IDX,
