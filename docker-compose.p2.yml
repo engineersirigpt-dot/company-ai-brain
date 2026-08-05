@@ -1,12 +1,13 @@
-# P2 pinned reranker — compose (offline runtime)
+# P2 pinned reranker — compose (CPU-compatibility, offline runtime)
 # WRITE-ONLY — ยังไม่ build/run จน Codex review pinned-build ผ่าน
+# runtime target = CPU-compat (smoke/mechanics ทุกเครื่อง) ; CUDA/GPU evidence image = งานแยก
 #
 # ลำดับ (หลัง review เท่านั้น):
 #   1) build : docker compose -f docker-compose.p2.yml build \
 #                --build-arg PY_BASE=python@sha256:<digest> --build-arg MODEL_COMMIT=953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
 #   2) บันทึก image identity (local, ยังไม่ push — RepoDigests จะว่าง จึงห้ามใช้):
 #        docker build --iidfile p2_image.id -f Dockerfile.p2 .            # หรือ
-#        docker image inspect --format '{{.Id}}' company-ai-brain/p2-reranker:pinned   # -> sha256:<config digest>
+#        docker image inspect --format '{{.Id}}' company-ai-brain/p2-reranker:pinned-cpu   # -> sha256:<config digest>
 #      -> RunPlan.image_digest (ใช้ local image Id/config digest ; ห้ามใช้ tag :pinned เป็น digest)
 #      ถ้า push ไป registry ที่ควบคุมได้ ค่อยใช้ registry content digest แทน
 #   3) model-load smoke : docker compose -f docker-compose.p2.yml run --rm reranker python p2_model_smoke.py
@@ -21,7 +22,7 @@ services:
       args:
         # PY_BASE ต้องเป็น digest จริงตอน build (ไม่ใช่ tag ลอย)
         MODEL_COMMIT: "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
-    image: company-ai-brain/p2-reranker:pinned   # tag ภายใน; evidence ใช้ image **digest** ไม่ใช่ tag นี้
+    image: company-ai-brain/p2-reranker:pinned-cpu   # tag ภายใน; evidence ใช้ image **digest** ไม่ใช่ tag นี้
     environment:
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"

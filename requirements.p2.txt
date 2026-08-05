@@ -1,7 +1,10 @@
-# P2 reranker runtime deps — PIN แบบ exact (gotcha #6: model SHA อย่างเดียวไม่พอ)
-# ค่าเวอร์ชันด้านล่างเป็น baseline ที่เข้ากับ bge-reranker-v2-m3 — **ยืนยัน/แก้ให้ตรง CUDA ของ 4x4090 ก่อน build จริง**
-# torch: เลือก build ให้ตรง CUDA target (เช่น --index-url https://download.pytorch.org/whl/cu121) ตอน build
-torch==2.3.1
+# P2 reranker runtime deps — CPU-compatibility image (B1 = CPU-compat ก่อน)
+# pin exact ; torch เป็น CPU wheel (+cpu) จาก pytorch index (ใส่ผ่าน --extra-index-url ตอน pip download ใน Dockerfile)
+# M3: build wheelhouse ครั้งเดียวใน prep stage แล้ว runtime `pip install --no-index --find-links` จากชุดเดียวกัน
+# (เสริม: gen hash-locked ด้วย pip-compile --generate-hashes → --require-hashes ก่อน build evidence จริง)
+#
+# NOTE: CUDA/GPU evidence image เป็นงานแยก (torch==2.3.1 + cu12x + CUDA base) ตอนทำ timed latency run บน 4090
+torch==2.3.1+cpu
 transformers==4.41.2
 huggingface_hub==0.23.4
 safetensors==0.4.3

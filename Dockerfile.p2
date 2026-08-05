@@ -1,61 +1,64 @@
 # syntax=docker/dockerfile:1
 #
-# P2 pinned reranker image — BAAI/bge-reranker-v2-m3 @ 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+# P2 pinned reranker image (CPU-compatibility) — BAAI/bge-reranker-v2-m3 @ 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
 # ─────────────────────────────────────────────────────────────────────────────────────────
 # WRITE-ONLY artifact — **ยังไม่ build/run** จน Codex review pinned-build ผ่าน (FIX-BEFORE-RUN gates)
-# model-load smoke / real M4 / N-sweep = NO-GO จน review targeted ผ่าน
+# runtime target (B1) = **CPU-compatibility image**: พิสูจน์ fetch/verify/model-load smoke/mechanics
+#   ได้ทุกเครื่องไม่ต้องมี GPU — **latency/decision evidence จริงต้องทำ CUDA image แยก** (timed run บน 4x4090)
 #
-# โครง multi-stage (gotcha #1: build-time network แยกจาก runtime offline):
-#   fetch   = มี network → prefetch snapshot ตาม pinned SHA + verify contract + สร้าง file-manifest
-#   runtime = offline (HF_HUB_OFFLINE) → ใช้ snapshot จาก cache เท่านั้น
+# stages (gotcha #1 build-network vs runtime-offline ; #4 ไม่โหลด torch stack สองรอบ):
+#   prep    (network) = ติดตั้ง huggingface_hub เบา ๆ → fetch snapshot + verify + file-manifest
+#                       + `pip download` runtime deps เป็น **wheelhouse** (M3: freeze closure ที่นี่ครั้งเดียว)
+#   runtime (offline) = `pip install --no-index --find-links=/wheels` (ไม่มี network install; artifact set เดียวกับ prep)
 #
-# <<FILL-AT-BUILD>> = ค่าที่รู้ได้เฉพาะตอน build จริง (ห้ามเดาล่วงหน้า):
-#   - base image digest (gotcha #6/#7) : ใช้ python@sha256:... จริง ไม่ใช่ tag ลอย
-#   - torch/transformers/... versions   : ยืนยันให้ตรง CUDA ของ 4x4090 (ดู requirements.p2.txt)
-#   - image_digest (หลัง build)         : local image Id/config digest — `docker image inspect --format '{{.Id}}'`
-#                                         หรือ `docker build --iidfile` (ห้ามใช้ RepoDigests สำหรับ local image ที่ยังไม่ push)
+# <<FILL-AT-BUILD>> (รู้ได้เฉพาะตอน build จริง — ไม่เดา):
+#   PY_BASE                    = python:3.11-slim **pin ด้วย digest** (--build-arg PY_BASE=python@sha256:<digest>)
+#   model_file_manifest_sha256 = output ของ p2_fetch_model → RunPlan.model_file_manifest_sha256
+#   image_digest               = local image Id/config digest (`docker image inspect --format '{{.Id}}'` / `--iidfile`)
+#                                → RunPlan.image_digest (RepoDigests ว่างสำหรับ local image ที่ยังไม่ push — ห้ามใช้)
 
-# PY_BASE: <<FILL-AT-BUILD>> — B1 decision (ยังไม่ล็อก): CPU-compat vs CUDA/GPU evidence image
-#   ต้อง override เป็น **digest-pinned** base ตอน build จริง เช่น
-#   --build-arg PY_BASE=python@sha256:<digest>   (หรือ CUDA/PyTorch runtime base ที่ pin digest)
-#   ค่า default ด้านล่างเป็น tag ชั่วคราวให้ parse ได้เท่านั้น — ห้ามใช้ build evidence ด้วย tag ลอย
+# PY_BASE default = tag ชั่วคราวให้ parse ได้เท่านั้น ; build evidence จริงต้อง override เป็น digest-pinned base
 ARG PY_BASE=python:3.11-slim
 ARG MODEL_COMMIT=953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
 
-# ── Stage 1: fetch (network ON) ──────────────────────────────────────────────
-FROM ${PY_BASE} AS fetch
+# ── Stage 1: prep (network ON) — fetch model (เบา) + build wheelhouse ─────────
+FROM ${PY_BASE} AS prep
 ARG MODEL_COMMIT
-# B2: ส่ง build arg เข้า env ให้ p2_fetch_model assert == p2_pin.MODEL_COMMIT ก่อน fetch
-# (single source = p2_pin ; build arg ที่ไม่ตรง = build fail ทันที ไม่ใช่ control ปลอม)
+# B2: build arg → env ให้ p2_fetch_model assert == p2_pin.MODEL_COMMIT ก่อน fetch (single source)
 ENV HF_HOME=/opt/hf \
     HF_HUB_DISABLE_TELEMETRY=1 \
     P2_MANIFEST_OUT=/opt/model_file_manifest.sha256 \
-    P2_EXPECT_COMMIT=${MODEL_COMMIT}
+    P2_EXPECT_COMMIT=${MODEL_COMMIT} \
+    PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY requirements.p2.txt /app/
-# ห้าม fallback main: pip ล้มเหลว = build ล้มเหลว (gotcha #8)
-RUN pip install --no-cache-dir -r requirements.p2.txt
+# huggingface_hub เท่านั้นสำหรับ fetch (ไม่ลง torch ที่นี่ — #4) ; pip/fetch ล้ม = build ล้ม (#8)
+RUN pip install --no-cache-dir "huggingface_hub==0.23.4"
 COPY p2_pin.py p2_reranker.py p2_fetch_model.py /app/
 # prefetch snapshot @ pinned SHA + verify (6 files, real safetensors blob, resolved==pinned) + file-manifest
 RUN python p2_fetch_model.py
+# M3: freeze runtime dependency closure เป็น wheelhouse (torch CPU wheel + closure ทั้งหมด)
+RUN pip download --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements.p2.txt -d /wheels
 
 # ── Stage 2: runtime (OFFLINE) ───────────────────────────────────────────────
 FROM ${PY_BASE} AS runtime
 ENV HF_HOME=/opt/hf \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
-    HF_HUB_DISABLE_TELEMETRY=1
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY requirements.p2.txt /app/
-RUN pip install --no-cache-dir -r requirements.p2.txt
-# copy ทั้ง HF cache (snapshots/<SHA> + blobs) — รักษา layout/symlink ให้ _resolved_commit ผ่าน (gotcha #2/#3)
-COPY --from=fetch /opt/hf /opt/hf
-COPY --from=fetch /opt/model_file_manifest.sha256 /opt/model_file_manifest.sha256
-COPY p2_pin.py p2_reranker.py p2_model_smoke.py /app/
-# ยืนยันว่า cache offline resolve ได้ (ไม่โหลด weights — แค่ path/commit check) ตอน build; ไม่รัน benchmark
-# M2: ใช้ SystemExit ไม่ใช่ assert (assert ปิดได้ด้วย -O/PYTHONOPTIMIZE จึงไม่ fail-closed)
-COPY p2_verify_snapshot.py /app/
+COPY --from=prep /wheels /wheels
+# M3: ติดตั้งจาก wheelhouse เท่านั้น — ไม่มี network/index (artifact set เดียวกับที่ verify ใน prep)
+RUN pip install --no-index --find-links=/wheels -r requirements.p2.txt
+# copy ทั้ง HF cache (snapshots/<SHA> + blobs) — รักษา layout/symlink ให้ _resolved_commit ผ่าน (#2/#3)
+COPY --from=prep /opt/hf /opt/hf
+COPY --from=prep /opt/model_file_manifest.sha256 /opt/model_file_manifest.sha256
+COPY p2_pin.py p2_reranker.py p2_verify_snapshot.py p2_model_smoke.py /app/
+# M2: verify offline snapshot fail-closed ด้วย SystemExit (ไม่ใช่ assert) — ไม่โหลด weights/ไม่รัน benchmark
 RUN python p2_verify_snapshot.py
-# model-load smoke = ขั้น manual แยก (gotcha #9) — ไม่รันตอน build:
+# model-load smoke = ขั้น manual แยก (#9) — ไม่รันตอน build:
 #   docker compose -f docker-compose.p2.yml run --rm reranker python p2_model_smoke.py
-CMD ["python", "-c", "import p2_pin; print('p2 reranker image pinned', p2_pin.MODEL_COMMIT)"]
+CMD ["python", "-c", "import p2_pin; print('p2 reranker CPU-compat image pinned', p2_pin.MODEL_COMMIT)"]
