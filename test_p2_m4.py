@@ -35,16 +35,19 @@ CQC, CSA = _s("case-qc"), _s("case-sales")
 
 
 def comp(pid, txt): return {"point_id_sha256": pid, "rerank_text_sha256": txt, "pair_sha256": _pair(pid, txt)}
-def pcase(case_id, role, category, auth_pair, comps, n=10):
-    return {"case_id_sha256": case_id, "role_identity_sha256": role, "category": category, "selected_n": n,
-            "query_vector_sha256": _s("qv-" + case_id),
+def pcase(case_id, role, category, auth_pair, comps, n=10, erole="qc"):
+    qv = _s("qv-" + case_id)
+    return {"case_id_sha256": case_id, "role_identity_sha256": role, "effective_role": erole,
+            "category": category, "selected_n": n, "query_vector_sha256": qv,
+            "unfiltered_query_vector_sha256": qv, "filtered_query_vector_sha256": qv,
+            "unfiltered_limit": n, "filtered_limit": n,
             "pair_components": comps,
             "unfiltered_topn_pairs": [PS, auth_pair], "observed_sentinel_ranks": [[PS, 1]],
             "provider_pairs": [auth_pair], "model_input_pairs": [auth_pair], "rerank_output_pairs": [auth_pair],
             "model_call_count": 1, "model_input_count": 1, "score_count": 1, "all_scores_finite": True, "status": "PASS"}
 
 # single-case frozen + evidence (QC / negation)
-FROZEN1 = {"cases": {CQC: {"role_identity_sha256": QC, "category": "negation", "authorized_pairs": [PA], "sentinel_pairs": [PS]}},
+FROZEN1 = {"cases": {CQC: {"role_identity_sha256": QC, "effective_role": "qc", "category": "negation", "authorized_pairs": [PA], "sentinel_pairs": [PS]}},
            "required_categories": ["negation"], "evaluated_roles": ["qc"]}
 MAN1 = E.m4_case_manifest_sha256(FROZEN1)
 PC1 = [pcase(CQC, QC, "negation", PA, [comp(AID, ATX), comp(SID, STX)])]
@@ -83,18 +86,18 @@ check("B3: status != PASS (skip) -> error", any("status" in e for e in _mut1(lam
 check("B3: score_count != model_input_count -> error", any("score_count" in e for e in _mut1(lambda c: c.__setitem__("score_count", 3))))
 
 # ── B1 cross-role swap: aggregate ผ่านแต่ per-case จับได้ ⭐ ────────────────────
-FROZEN2 = {"cases": {CQC: {"role_identity_sha256": QC, "category": "negation", "authorized_pairs": [PA], "sentinel_pairs": [PS]},
-                     CSA: {"role_identity_sha256": SALES, "category": "table-row", "authorized_pairs": [PB], "sentinel_pairs": [PS]}},
+FROZEN2 = {"cases": {CQC: {"role_identity_sha256": QC, "effective_role": "qc", "category": "negation", "authorized_pairs": [PA], "sentinel_pairs": [PS]},
+                     CSA: {"role_identity_sha256": SALES, "effective_role": "sales", "category": "table-row", "authorized_pairs": [PB], "sentinel_pairs": [PS]}},
            "required_categories": ["negation", "table-row"], "evaluated_roles": ["qc", "sales"]}
 MAN2 = E.m4_case_manifest_sha256(FROZEN2)
 # QC ได้ผลของ SALES (PB) และ SALES ได้ผลของ QC (PA) — aggregate authorized/provider = {PA,PB} ตรงกัน แต่รั่วทั้งคู่
-PC_SWAP = [pcase(CQC, QC, "negation", PB, [comp(BID, BTX), comp(SID, STX)]),
-           pcase(CSA, SALES, "table-row", PA, [comp(AID, ATX), comp(SID, STX)])]
+PC_SWAP = [pcase(CQC, QC, "negation", PB, [comp(BID, BTX), comp(SID, STX)], erole="qc"),
+           pcase(CSA, SALES, "table-row", PA, [comp(AID, ATX), comp(SID, STX)], erole="sales")]
 check("B1 ⭐ cross-role swap -> error (per-case จับได้ แม้ aggregate subset ผ่าน)",
       any("provider ไม่ ⊆" in e for e in E.validate_m4_run_evidence(m4(PC_SWAP, MAN2, raw_evidence_sha256=_raw(PC_SWAP)), FROZEN2, _H, _H)))
 # correct 2-case (ครบ required categories) -> valid
-PC2 = [pcase(CQC, QC, "negation", PA, [comp(AID, ATX), comp(SID, STX)]),
-       pcase(CSA, SALES, "table-row", PB, [comp(BID, BTX), comp(SID, STX)])]
+PC2 = [pcase(CQC, QC, "negation", PA, [comp(AID, ATX), comp(SID, STX)], erole="qc"),
+       pcase(CSA, SALES, "table-row", PB, [comp(BID, BTX), comp(SID, STX)], erole="sales")]
 check("2-case ถูกต้อง (ครบ negation+table-row) -> valid", E.validate_m4_run_evidence(m4(PC2, MAN2, raw_evidence_sha256=_raw(PC2)), FROZEN2, _H, _H) == [], E.validate_m4_run_evidence(m4(PC2, MAN2, raw_evidence_sha256=_raw(PC2)), FROZEN2, _H, _H))
 
 # ── M2: category coverage + case set exact ────────────────────────────────────
@@ -109,15 +112,47 @@ _pcrole = copy.deepcopy(PC1); _pcrole[0]["role_identity_sha256"] = _s("evil")
 check("B2: role_identity ไม่ตรง frozen -> error", any("role_identity" in e for e in E.validate_m4_run_evidence(m4(_pcrole, MAN1, raw_evidence_sha256=_raw(_pcrole)), FROZEN1, _H, _H)))
 
 # ── M1/M3: stage contract ─────────────────────────────────────────────────────
-_PF = m4(PC1, MAN1, evidence_stage="preflight-n50", selected_n=50, selection_digest=None, decision_eligible=False)
-# preflight per_case selected_n ต้อง 50 ด้วย
-_pf_pc = copy.deepcopy(PC1); _pf_pc[0]["selected_n"] = 50
+# preflight: N=50 → per_case selected_n/limits ต้อง 50 ด้วย
+_pf_pc = [pcase(CQC, QC, "negation", PA, [comp(AID, ATX), comp(SID, STX)], n=50)]
 _PF = m4(_pf_pc, MAN1, evidence_stage="preflight-n50", selected_n=50, selection_digest=None, decision_eligible=False, raw_evidence_sha256=_raw(_pf_pc))
 check("M3: preflight standalone -> valid", E.validate_m4_run_evidence(_PF, FROZEN1, _H, _H) == [], E.validate_m4_run_evidence(_PF, FROZEN1, _H, _H))
 check("M1: preflight ใน decision path (require selected-n) -> error", any("evidence_stage" in e for e in E.validate_m4_run_evidence(_PF, FROZEN1, _H, _H, require_stage=E.M4_STAGE_SELECTED)))
 check("M3: preflight มี selection_digest -> error", any("selection_digest" in e for e in E.validate_m4_run_evidence(m4(_pf_pc, MAN1, evidence_stage="preflight-n50", selected_n=50, decision_eligible=False, raw_evidence_sha256=_raw(_pf_pc)), FROZEN1, _H, _H)))
 check("M3: selected-n ขาด selection_digest -> error", any("selection_digest" in e for e in E.validate_m4_run_evidence(m4(PC1, MAN1, selection_digest=None), FROZEN1, _H, _H)))
 check("M1: run_manifest binding ไม่ตรง -> error", any("run_manifest" in e for e in E.validate_m4_run_evidence(m4(PC1, MAN1, run_manifest_sha256=_H), FROZEN1, _H, _H, run_manifest_sha256="b" * 64)))
+
+# ── B1 (targeted): observed rank เท็จ (ไม่ตรงตำแหน่งจริงใน unfiltered) ──────────
+_rk = copy.deepcopy(PC1); _rk[0]["unfiltered_topn_pairs"] = [PA, PS]; _rk[0]["observed_sentinel_ranks"] = [[PS, 1]]
+check("B1: sentinel rank เท็จ (unfiltered[0]=authorized, อ้าง sentinel rank 1) -> error",
+      any("rank ไม่ตรงตำแหน่ง" in e for e in E.validate_m4_run_evidence(m4(_rk, MAN1, raw_evidence_sha256=_raw(_rk)), FROZEN1, _H, _H)))
+_dup = copy.deepcopy(PC1); _dup[0]["unfiltered_topn_pairs"] = [PS, PA, PS]
+check("B1: unfiltered_topn มี pair ซ้ำ -> error", any("ซ้ำ" in e for e in E.validate_m4_run_evidence(m4(_dup, MAN1, raw_evidence_sha256=_raw(_dup)), FROZEN1, _H, _H)))
+
+# ── B2 (targeted): evaluated_role ประกาศแต่ไม่มี case ─────────────────────────
+FROZEN_NOCASE = {"cases": {CQC: {"role_identity_sha256": QC, "effective_role": "qc", "category": "negation", "authorized_pairs": [PA], "sentinel_pairs": [PS]}},
+                 "required_categories": ["negation"], "evaluated_roles": ["qc", "sales"]}
+check("B2: frozen evaluated_role 'sales' ไม่มี case -> validate_m4_frozen_manifest error",
+      any("evaluated_roles ไม่ครบ" in e for e in E.validate_m4_frozen_manifest(FROZEN_NOCASE)))
+check("B2: run evidence กับ frozen role ไม่ครบ -> error (ไม่ผ่านผิด)",
+      E.validate_m4_run_evidence(m4(PC1, E.m4_case_manifest_sha256(FROZEN_NOCASE)), FROZEN_NOCASE, _H, _H) != [])
+
+# ── B3 (targeted): malformed frozen -> error list (ไม่ crash) ──────────────────
+FROZEN_BAD = {"cases": {CQC: {"role_identity_sha256": QC, "effective_role": "qc", "category": "negation", "authorized_pairs": [PA], "sentinel_pairs": [PS]}},
+              "required_categories": ["negation", None], "evaluated_roles": ["qc"]}
+check("B3: required_categories มี None -> error list (ไม่ TypeError crash)", E.validate_m4_frozen_manifest(FROZEN_BAD) != [])
+check("B3: run evidence กับ malformed frozen -> error list (fail-closed)", E.validate_m4_run_evidence(_M4, FROZEN_BAD, _H, _H) != [])
+check("B3: _safe_m4_manifest_digest(malformed) -> None (ไม่ crash)", E._safe_m4_manifest_digest(FROZEN_BAD) is None)
+
+# ── M1 (targeted): unknown/raw field ใน per_case ──────────────────────────────
+_raw_leak = copy.deepcopy(PC1); _raw_leak[0]["raw_text"] = "SECRET-QUERY"
+check("M1: per_case มี raw_text (raw/secret) -> error (exact hash-only schema)",
+      any("unknown/raw" in e for e in E.validate_m4_run_evidence(m4(_raw_leak, MAN1, raw_evidence_sha256=_raw(_raw_leak)), FROZEN1, _H, _H)))
+check("M1: top-level m4 มี unknown field -> error", any("unknown/raw" in e for e in E.validate_m4_run_evidence(m4(PC1, MAN1, secret="x"), FROZEN1, _H, _H)))
+
+# ── M2 (targeted): filtered query vector ไม่ตรง (คนละ probe) ───────────────────
+_qm = copy.deepcopy(PC1); _qm[0]["filtered_query_vector_sha256"] = _s("other")
+check("M2: filtered query vector != unfiltered -> error (same-query control)",
+      any("query vector" in e for e in E.validate_m4_run_evidence(m4(_qm, MAN1, raw_evidence_sha256=_raw(_qm)), FROZEN1, _H, _H)))
 
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

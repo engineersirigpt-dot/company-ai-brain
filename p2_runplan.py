@@ -594,11 +594,18 @@ def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
     if binding:
         return _not_eligible(binding)
 
-    # B2: frozen M4 case/visibility manifest ต้องผูกกับ RunPlan (digest) ก่อนเข้า evidence gate
+    # B2: frozen M4 manifest ต้อง valid + ผูก RunPlan (digest + evaluated_roles + required_categories)
     if not isinstance(m4_frozen_manifest, dict):
         return _not_eligible(["m4_frozen_manifest หาย/ผิดชนิด"])
-    if E.m4_case_manifest_sha256(m4_frozen_manifest) != plan["m4_case_manifest_sha256"]:
+    if E.validate_m4_frozen_manifest(m4_frozen_manifest):
+        return _not_eligible(["frozen M4 manifest invalid"])
+    fdig = E._safe_m4_manifest_digest(m4_frozen_manifest)
+    if fdig is None or fdig != plan["m4_case_manifest_sha256"]:
         return _not_eligible(["frozen M4 manifest digest != RunPlan.m4_case_manifest_sha256"])
+    if set(m4_frozen_manifest.get("evaluated_roles") or []) != set(plan["evaluated_roles"]):
+        return _not_eligible(["frozen evaluated_roles != RunPlan.evaluated_roles"])
+    if set(m4_frozen_manifest.get("required_categories") or []) != set(plan["required_categories"]):
+        return _not_eligible(["frozen required_categories != RunPlan.required_categories"])
 
     # evidence + signoff gate (labels/coverage/m4/canary/signoff) — ผูก root + frozen M4 manifest, ค่า gate/role จาก plan
     ev_errs = E.decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff,

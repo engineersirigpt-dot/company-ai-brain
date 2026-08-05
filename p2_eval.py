@@ -83,12 +83,95 @@ def _pair_sha256(point_id_sha256, text_sha256) -> str:
     return hashlib.sha256(f"{point_id_sha256}:{text_sha256}".encode("utf-8")).hexdigest()
 
 
+# exact hash-only schema (M1) — reject unknown/raw fields ทุกระดับ
+_M4_TOP_KEYS = frozenset({"schema_version", "status", "isolated_interlock", "independent_oracle", "sentinel_reached_model",
+                          "unauthorized_in_model_inputs", "scorer_kind", "evidence_stage", "selected_n", "selection_digest",
+                          "decision_eligible", "m4_case_manifest_sha256", "per_case", "raw_evidence_sha256",
+                          "model_revision", "tokenizer_revision", "image_digest", "model_file_manifest_sha256",
+                          "inference_config", "retrieval_index_manifest_sha256", "run_id", "eval_set_sha256",
+                          "corpus_manifest_sha256", "run_manifest_sha256"})
+_M4_CASE_KEYS = frozenset({"case_id_sha256", "role_identity_sha256", "effective_role", "category", "selected_n",
+                           "query_vector_sha256", "unfiltered_query_vector_sha256", "filtered_query_vector_sha256",
+                           "unfiltered_limit", "filtered_limit", "pair_components", "unfiltered_topn_pairs",
+                           "observed_sentinel_ranks", "provider_pairs", "model_input_pairs", "rerank_output_pairs",
+                           "model_call_count", "model_input_count", "score_count", "all_scores_finite", "status"})
+_M4_COMP_KEYS = frozenset({"point_id_sha256", "rerank_text_sha256", "pair_sha256"})
+_M4_FROZEN_KEYS = frozenset({"cases", "required_categories", "evaluated_roles", "m4_case_manifest_sha256"})
+_M4_FCASE_KEYS = frozenset({"role_identity_sha256", "effective_role", "category", "authorized_pairs", "sentinel_pairs"})
+
+
+def _extra_keys(d, allowed, tag) -> list:
+    if not isinstance(d, dict):
+        return [f"{tag}: ไม่ใช่ dict"]
+    extra = set(d) - allowed
+    return [f"{tag}: unknown/raw fields {sorted(extra)} (hash-only exact schema)"] if extra else []
+
+
+def validate_m4_frozen_manifest(frozen) -> list:
+    """
+    B2/B3/M1: ตรวจ frozen M4 case/visibility manifest **ก่อน hash** (fail-closed, ไม่ให้ crash) —
+    exact types/keys, sha256 case keys/pairs, non-blank/unique roles+categories, authorized/sentinel ไม่ว่าง+disjoint,
+    ทุก evaluated_role + required_category มี case (coverage), case-role set == evaluated_roles
+    """
+    if not isinstance(frozen, dict):
+        return ["frozen manifest ต้องเป็น dict"]
+    errs = _extra_keys(frozen, _M4_FROZEN_KEYS, "frozen")
+    req, roles, cases = frozen.get("required_categories"), frozen.get("evaluated_roles"), frozen.get("cases")
+    if not (isinstance(req, list) and req and all(_good_str(x) for x in req) and len(set(req)) == len(req)):
+        errs.append("frozen required_categories ต้องเป็น list ของ str ไม่ว่าง/ไม่ซ้ำ")
+        req = []
+    if not (isinstance(roles, list) and roles and all(_good_str(x) for x in roles) and len(set(roles)) == len(roles)):
+        errs.append("frozen evaluated_roles ต้องเป็น list ของ str ไม่ว่าง/ไม่ซ้ำ")
+        roles = []
+    if not isinstance(cases, dict) or not cases:
+        return errs + ["frozen cases ต้องเป็น dict ไม่ว่าง"]
+    seen_roles, seen_cats = set(), set()
+    for cid, fc in cases.items():
+        tag = f"frozen case[{cid!r}]"
+        if not _is_sha256(cid):
+            errs.append(f"{tag}: case_id key ต้องเป็น sha256")
+        errs += _extra_keys(fc, _M4_FCASE_KEYS, tag)
+        if not isinstance(fc, dict):
+            continue
+        if not _is_sha256(fc.get("role_identity_sha256")):
+            errs.append(f"{tag}: role_identity_sha256 ต้องเป็น sha256")
+        er, cat = fc.get("effective_role"), fc.get("category")
+        if not _good_str(er) or er not in roles:
+            errs.append(f"{tag}: effective_role ต้องเป็น str ใน evaluated_roles")
+        else:
+            seen_roles.add(er)
+        if not _good_str(cat) or cat not in req:
+            errs.append(f"{tag}: category ต้องเป็น str ใน required_categories")
+        else:
+            seen_cats.add(cat)
+        auth, sent = fc.get("authorized_pairs"), fc.get("sentinel_pairs")
+        if not _is_hash_list(auth):
+            errs.append(f"{tag}: authorized_pairs ต้องเป็น sha256 list ไม่ว่าง")
+        if not _is_hash_list(sent):
+            errs.append(f"{tag}: sentinel_pairs ต้องเป็น sha256 list ไม่ว่าง")
+        if _is_hash_list(auth) and _is_hash_list(sent) and (set(auth) & set(sent)):
+            errs.append(f"{tag}: authorized/sentinel pairs ปนกัน (ต้อง disjoint)")
+    if req and seen_cats != set(req):
+        errs.append(f"frozen required_categories ไม่ครบ case (missing={sorted(set(req) - seen_cats)})")
+    if roles and seen_roles != set(roles):
+        errs.append(f"frozen evaluated_roles ไม่ครบ case (missing={sorted(set(roles) - seen_roles)})")
+    return errs
+
+
 def m4_case_manifest_sha256(frozen: dict) -> str:
-    """digest ของ frozen M4 case/visibility manifest — bind เข้า RunPlan (B2)"""
+    """digest ของ frozen M4 case/visibility manifest — bind เข้า RunPlan (B2). เรียกหลัง validate_m4_frozen_manifest"""
     body = {"cases": frozen.get("cases"),
             "required_categories": sorted(frozen.get("required_categories", [])),
             "evaluated_roles": sorted(frozen.get("evaluated_roles", []))}
     return hashlib.sha256(_canonical_json(body)).hexdigest()
+
+
+def _safe_m4_manifest_digest(frozen):
+    """digest แบบไม่ crash (malformed → None) สำหรับ fail-closed gate"""
+    try:
+        return m4_case_manifest_sha256(frozen)
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_hash_list(x, allow_empty=False) -> bool:
@@ -432,6 +515,7 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
     tag, errs = f"m4 per_case[{i}]", []
     if not isinstance(c, dict):
         return [f"{tag}: ไม่ใช่ dict"]
+    errs += _extra_keys(c, _M4_CASE_KEYS, tag)   # M1: exact hash-only schema (reject raw/unknown)
     # B3 recompute: pair_sha256 = _pair_sha256(point_id, text) ; ทุก pair ต้อง derive จาก components
     comps, valid = c.get("pair_components"), set()
     if not isinstance(comps, list) or not comps:
@@ -441,6 +525,7 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
             if not isinstance(comp, dict):
                 errs.append(f"{tag}: pair_component ไม่ใช่ dict")
                 continue
+            errs += _extra_keys(comp, _M4_COMP_KEYS, f"{tag} component")
             pid, txt, pd = comp.get("point_id_sha256"), comp.get("rerank_text_sha256"), comp.get("pair_sha256")
             if not (_is_sha256(pid) and _is_sha256(txt) and _is_sha256(pd)):
                 errs.append(f"{tag}: pair_component ต้องเป็น sha256 ครบ")
@@ -466,10 +551,12 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
     if not _is_hash_list(exp_sent):
         errs.append(f"{tag}: frozen sentinel_pairs ว่าง")
         exp_sent = None
-    # identity/category ผูก frozen manifest (B2/M2)
+    # identity/role/category ผูก frozen manifest (B2)
     if isinstance(fc, dict):
         if c.get("role_identity_sha256") != fc.get("role_identity_sha256"):
             errs.append(f"{tag}: role_identity ไม่ตรง frozen manifest")
+        if c.get("effective_role") != fc.get("effective_role"):
+            errs.append(f"{tag}: effective_role ไม่ตรง frozen manifest")
         if c.get("category") != fc.get("category"):
             errs.append(f"{tag}: category ไม่ตรง frozen manifest")
     if c.get("category") not in required:
@@ -480,6 +567,12 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
         errs.append(f"{tag}: case_id_sha256 ต้อง sha256")
     if not _is_sha256(c.get("query_vector_sha256")):
         errs.append(f"{tag}: query_vector_sha256 ต้อง sha256")
+    # M2: same-query control — unfiltered/filtered call ต้องใช้ query vector + limit ชุดเดียว
+    qv = c.get("query_vector_sha256")
+    if c.get("unfiltered_query_vector_sha256") != qv or c.get("filtered_query_vector_sha256") != qv:
+        errs.append(f"{tag}: unfiltered/filtered query vector ไม่ตรง query_vector_sha256 (ต้อง probe เดียว)")
+    if c.get("unfiltered_limit") != top_n or c.get("filtered_limit") != top_n:
+        errs.append(f"{tag}: unfiltered/filtered limit ต้อง == selected_n")
     prov, minp, rer, unf = got["provider_pairs"], got["model_input_pairs"], got["rerank_output_pairs"], got["unfiltered_topn_pairs"]
     # within-case security invariants
     if prov is not None and exp_auth is not None and not _ms_subset(prov, exp_auth):
@@ -492,7 +585,14 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
         errs.append(f"{tag}: sentinel ถึง model_input (LEAK) — category {c.get('category')!r}")
     if exp_auth is not None and exp_sent is not None and not _ms_disjoint(exp_auth, exp_sent):
         errs.append(f"{tag}: authorized/sentinel oracle ปนกัน")
-    # B1 load-bearing: sentinel ⊆ unfiltered top-N + observed rank 1..N ครบทุก sentinel
+    # B1 load-bearing: unfiltered ordered ไม่ซ้ำ, len <= N ; sentinel ⊆ unfiltered ; observed rank == ตำแหน่งจริง (exact)
+    pos = {}
+    if unf is not None:
+        if len(unf) != len(set(unf)):
+            errs.append(f"{tag}: unfiltered_topn_pairs มี pair ซ้ำ")
+        if type(top_n) is int and len(unf) > top_n:
+            errs.append(f"{tag}: unfiltered_topn_pairs ยาวเกิน selected_n")
+        pos = {p: idx + 1 for idx, p in enumerate(unf)}
     if unf is not None and exp_sent is not None and not _ms_subset(exp_sent, unf):
         errs.append(f"{tag}: sentinel ไม่ติด unfiltered top-N (filter อาจไม่ load-bearing)")
     ranks = c.get("observed_sentinel_ranks")
@@ -505,12 +605,16 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
                 errs.append(f"{tag}: observed_sentinel_ranks ต้องเป็น [pair_sha256, int]")
                 ok = False
                 break
+            if r[0] in seen:
+                errs.append(f"{tag}: observed_sentinel_ranks มี pair ซ้ำ")
+                ok = False
+                break
             seen[r[0]] = r[1]
         if ok:
             if set(seen) != set(exp_sent):
-                errs.append(f"{tag}: observed_sentinel_ranks ไม่ครอบ sentinel ทุกตัว")
-            elif any(rk < 1 or rk > top_n for rk in seen.values()):
-                errs.append(f"{tag}: sentinel observed rank ต้อง 1..selected_n (ต้องแข่งติด top-N)")
+                errs.append(f"{tag}: observed_sentinel_ranks ไม่ครอบ sentinel ทุกตัว (exact)")
+            elif any(pos.get(p) != rk for p, rk in seen.items()):
+                errs.append(f"{tag}: sentinel rank ไม่ตรงตำแหน่งจริงใน unfiltered top-N (rank เท็จ)")
     # counts/finite/status (B3 ต่อ case)
     mcc, mic, scc = c.get("model_call_count"), c.get("model_input_count"), c.get("score_count")
     if type(mcc) is not int or mcc < 1:
@@ -541,9 +645,11 @@ def validate_m4_run_evidence(m4, frozen, eval_hash, corpus_hash, run_manifest_sh
     """
     if not isinstance(m4, dict):
         return ["m4 run evidence ต้องเป็น dict"]
-    if not isinstance(frozen, dict) or not isinstance(frozen.get("cases"), dict) or not frozen["cases"]:
-        return ["frozen M4 manifest (cases dict) จำเป็น — public gate ห้าม fail-open (expected=None)"]
-    errs = []
+    # B3/M1: validate frozen manifest ก่อน hash (fail-closed, ไม่ crash) — require frozen (ไม่มี fail-open)
+    ferrs = validate_m4_frozen_manifest(frozen)
+    if ferrs:
+        return ["frozen M4 manifest invalid (public gate ห้าม fail-open)"] + ferrs[:6]
+    errs = _extra_keys(m4, _M4_TOP_KEYS, "m4")       # M1: exact hash-only schema top-level
     if m4.get("schema_version") != M4_SCHEMA_VERSION:
         errs.append(f"m4 schema_version ต้องเป็น {M4_SCHEMA_VERSION}")
     for f in ("status", "isolated_interlock", "independent_oracle"):
@@ -574,16 +680,15 @@ def validate_m4_run_evidence(m4, frozen, eval_hash, corpus_hash, run_manifest_sh
         if not _is_sha256(m4.get("selection_digest")):
             errs.append("m4 selected-n ต้องมี selection_digest (sha256)")
 
-    # B2: frozen manifest binding (digest recompute + m4 อ้างตรง)
-    man_digest = m4_case_manifest_sha256(frozen)
+    # B2: frozen manifest binding (safe digest recompute + m4 อ้างตรง)
+    man_digest = _safe_m4_manifest_digest(frozen)
+    if man_digest is None:
+        return errs + ["frozen manifest canonicalize/hash ไม่ได้ (malformed)"]
     if m4.get("m4_case_manifest_sha256") != man_digest:
         errs.append("m4 m4_case_manifest_sha256 != frozen manifest (recompute)")
     if frozen.get("m4_case_manifest_sha256") not in (None, man_digest):
         errs.append("frozen m4_case_manifest_sha256 ไม่ตรง cases (manifest ปนเปื้อน)")
-    required = frozen.get("required_categories")
-    if not isinstance(required, list) or not required:
-        errs.append("frozen required_categories ว่าง")
-        required = []
+    required = frozen.get("required_categories") or []
 
     # B3: recompute raw_evidence_sha256 จาก per_case body
     pcs = m4.get("per_case")
@@ -598,8 +703,8 @@ def validate_m4_run_evidence(m4, frozen, eval_hash, corpus_hash, run_manifest_sh
     if recomputed is not None and m4.get("raw_evidence_sha256") != recomputed:
         errs.append("m4 raw_evidence_sha256 != recompute จาก per_case body")
 
-    # B1/M2: per-case authoritative + case set exact + category coverage
-    fcases, seen_ids, cats = frozen["cases"], [], set()
+    # B1/B2/M2: per-case authoritative + case set exact + category & role coverage
+    fcases, seen_ids, cats, ev_roles = frozen["cases"], [], set(), set()
     for i, c in enumerate(pcs):
         cid = c.get("case_id_sha256") if isinstance(c, dict) else None
         seen_ids.append(cid)
@@ -607,15 +712,21 @@ def validate_m4_run_evidence(m4, frozen, eval_hash, corpus_hash, run_manifest_sh
         if fc is None:
             errs.append(f"m4 per_case[{i}] case_id ไม่อยู่ frozen manifest")
         errs += _m4_case_errors(i, c, fc, required, sel_n)
-        if isinstance(c, dict) and isinstance(c.get("category"), str):
-            cats.add(c["category"])
+        if isinstance(c, dict):
+            if isinstance(c.get("category"), str):
+                cats.add(c["category"])
+            if isinstance(c.get("effective_role"), str):
+                ev_roles.add(c["effective_role"])
     if set(x for x in seen_ids if x is not None) != set(fcases):
         errs.append("m4 case set != frozen manifest (exact)")
     if len(seen_ids) != len(set(seen_ids)):
         errs.append("m4 per_case มี case_id ซ้ำ")
-    missing = set(required) - cats
-    if missing:
-        errs.append(f"m4 required category ไม่ครบ (missing={sorted(missing)})")
+    if set(required) - cats:
+        errs.append(f"m4 required category ไม่ครบ (missing={sorted(set(required) - cats)})")
+    # B2: ทุก evaluated_role ต้องมี case จริง (กัน manifest อ้าง role ที่ไม่เคยทดสอบ)
+    froles = set(frozen.get("evaluated_roles") or [])
+    if ev_roles != froles:
+        errs.append(f"m4 case roles != frozen evaluated_roles (case roles={sorted(ev_roles)} vs {sorted(froles)})")
 
     # pin/index/binding
     if not _is_hex_commit(m4.get("model_revision")):
