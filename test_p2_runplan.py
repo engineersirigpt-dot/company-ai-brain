@@ -88,6 +88,15 @@ check("contract version ผิด -> error", any("contract_version" in e for e i
 check("B1: threshold ขาด key -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={"candidate_recall": 0.95}))))
 check("B1: threshold ค่าไม่ใช่ number -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "min_delta_ndcg": "x"}))))
 check("B1: threshold latency budget <=0 -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "rerank_p95_ms": 0}))))
+# M2: threshold domain/relationship (reject ค่าที่หลุดโดเมนของ metric)
+check("M2: candidate_recall=0.0001 (นอก target) -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "candidate_recall": 0.0001}))))
+check("M2: candidate_hit != 1.0 -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "candidate_hit": 0.9}))))
+check("M2: ci_lower_min=-999 -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "ci_lower_min": -999}))))
+check("M2: noninferior_floor=-999 -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "noninferior_floor": -999}))))
+check("M2: hardneg_floor=-999 -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "hardneg_floor": -999}))))
+check("M2: latency budget เรียงผิด (rerank>total) -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "rerank_p95_ms": 3000}))))
+check("M2: noninferior_floor > ci_lower_min -> error", any("thresholds" in e for e in RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "noninferior_floor": 0.5}))))
+check("M2: min_delta_ndcg=0.99 (ในโดเมน) -> ยังผ่าน validate", RP.validate_run_plan(base_plan(thresholds={**RP.DEFAULT_THRESHOLDS, "min_delta_ndcg": 0.99})) == [])
 check("B1: gate_tags ว่าง -> error (reject empty frozen set)", any("gate_tags" in e for e in RP.validate_run_plan(base_plan(gate_tags=[]))))
 check("B1: evaluated_roles ว่าง -> error", any("evaluated_roles" in e for e in RP.validate_run_plan(base_plan(evaluated_roles=[]))))
 check("B4: model_commit abbreviated (7 hex) -> error", any("model_commit" in e for e in RP.validate_run_plan(base_plan(model_commit="b" * 7))))
@@ -211,7 +220,7 @@ def build_bundle(plan):
     dev = {"split": "dev", "run_manifest_sha256": root, "raw_result_digest": dev_raw, "by_n": by_n}
     seln = 10
     sd = RP.selection_digest(root, dev_raw, seln)
-    pq = [{"query_id": f"tq{i}", "intent_id": f"ti{i}", "challenge_tags": [GATE_TAGS[i % len(GATE_TAGS)]],
+    pq = [{"query_id": f"tq{i}", "intent_id": f"ti{i}", "role": "qc", "challenge_tags": [GATE_TAGS[i % len(GATE_TAGS)]],
            "arms": {"dense": {"ndcg@5": 0.5}, "rerank": {"ndcg@5": 0.9}, "fused": {"ndcg@5": 0.9}}} for i in range(50)]
     quality = {"split": "test", "run_manifest_sha256": root, "selection_digest": sd, "selected_n": seln,
                "raw_result_digest": RP.raw_digest(pq), "per_query": pq}
@@ -289,6 +298,28 @@ check("B3: m4/canary คนละ run_id -> NOT_DECISION_ELIGIBLE",
 check("B3: quality intent ไม่ครบ 50 -> NOT_DECISION_ELIGIBLE",
       decide(quality_evidence={**build_bundle(PLAN)["quality_evidence"], "per_query": build_bundle(PLAN)["quality_evidence"]["per_query"][:40]})["status"] == "NOT_DECISION_ELIGIBLE")
 check("B3: ไม่มี public decision_benchmark_manifest builder แล้ว", not hasattr(E, "decision_benchmark_manifest"))
+
+# ── M1: quality rows ต้องเป็นผลของ frozen eval queries จริง (join by query_id) ──
+def q_mut(mutate):
+    base = build_bundle(PLAN)["quality_evidence"]
+    pq = [dict(r) for r in base["per_query"]]
+    mutate(pq)
+    return {**base, "per_query": pq, "raw_result_digest": RP.raw_digest(pq)}   # digest self-consistent -> join เท่านั้นที่จับได้
+def _fake_all(pq):
+    for j, r in enumerate(pq):
+        r["query_id"] = f"fake{j}"
+check("M1: fabricated query IDs (digest self-consistent) -> NOT_DECISION_ELIGIBLE",
+      decide(quality_evidence=q_mut(_fake_all))["status"] == "NOT_DECISION_ELIGIBLE")
+check("M1: changed intent_id (query_id เดิม) -> NOT_DECISION_ELIGIBLE",
+      decide(quality_evidence=q_mut(lambda pq: pq[5].__setitem__("intent_id", "tiX")))["status"] == "NOT_DECISION_ELIGIBLE")
+check("M1: changed challenge_tags -> NOT_DECISION_ELIGIBLE",
+      decide(quality_evidence=q_mut(lambda pq: pq[5].__setitem__("challenge_tags", ["multi-constraint"] if pq[5]["challenge_tags"] != ["multi-constraint"] else ["negation"])))["status"] == "NOT_DECISION_ELIGIBLE")
+check("M1: changed role -> NOT_DECISION_ELIGIBLE",
+      decide(quality_evidence=q_mut(lambda pq: pq[5].__setitem__("role", "admin")))["status"] == "NOT_DECISION_ELIGIBLE")
+check("M1: unknown/extra query id -> NOT_DECISION_ELIGIBLE",
+      decide(quality_evidence=q_mut(lambda pq: pq[0].__setitem__("query_id", "tqX")))["status"] == "NOT_DECISION_ELIGIBLE")
+check("M1: missing query (49 rows) -> NOT_DECISION_ELIGIBLE",
+      decide(quality_evidence=q_mut(lambda pq: pq.pop()))["status"] == "NOT_DECISION_ELIGIBLE")
 
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

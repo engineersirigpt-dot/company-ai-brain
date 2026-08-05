@@ -1,7 +1,8 @@
 """
 P2 benchmark harness scaffolding — dense / rerank / fused_rrf บน candidate universe **เดียว** ต่อ query
-metrics แยกจาก permission (Codex guardrail). **output = mechanics-smoke UNAPPROVED เท่านั้น**
-ไม่ wire เข้า decision_benchmark_manifest จน B3.1 confirm — arm verdict/freeze ยัง NO-GO
+metrics แยกจาก permission (Codex guardrail). **output = mechanics-smoke UNAPPROVED / raw เท่านั้น**
+harness ไม่ประกาศ arm verdict/approval เอง — raw rows ต้องถูก join กับ frozen eval cases (by query_id)
+แล้วประกอบเป็น bound evidence ก่อนส่งเข้า `p2_runplan.decide_p2()` (public approval surface เดียว)
 
 pure/injectable: client (fake), embed_query, scorer (MockScorer) → test offline โดยไม่ต้อง Docker/model
 """

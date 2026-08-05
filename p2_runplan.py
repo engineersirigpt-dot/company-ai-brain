@@ -79,18 +79,31 @@ def _safe_digest(obj):
 
 # ── root RunManifest (immutable, pre-registered, authoritative) ────────────────
 def _valid_thresholds(th) -> bool:
-    """schema เป๊ะ + finite + range/sign — ค่าที่ hash ต้องเป็นค่าที่ตัดสินได้จริง (ไม่ใช่แค่ครบ key)"""
+    """
+    schema เป๊ะ + finite + **domain/relationship ของ metric** (ไม่ใช่แค่ +/-) — ค่าที่ hash ต้องมีความหมาย:
+    - CandidateRecall/Hit target = frozen P2 acceptance (0.95 / 1.0 exact) — ห้าม preregister ค่าที่อ่อนกว่า
+    - nDCG delta/CI/floor อยู่ในโดเมนของ metric ([-1,1]/[0,1]/[-1,0]) + noninferior_floor <= ci_lower_min
+    - latency budget positive + เรียง rrf <= rerank <= total
+    """
     if not isinstance(th, dict) or set(th) != set(DEFAULT_THRESHOLDS):
         return False
     if not all(_is_finite_number(v) for v in th.values()):
         return False
-    if not (0.0 < th["candidate_recall"] <= 1.0 and 0.0 < th["candidate_hit"] <= 1.0):
+    # frozen acceptance targets (P2) — lock exact กัน preregister policy ที่อ่อนกว่า
+    if th["candidate_recall"] != 0.95 or th["candidate_hit"] != 1.0:
         return False
+    # nDCG-delta knobs ต้องอยู่ในโดเมนของ metric (nDCG delta ∈ [-1,1])
     if not (0.0 <= th["min_delta_ndcg"] <= 1.0 and 0.0 <= th["fused_vs_rerank_min"] <= 1.0):
         return False
-    if th["noninferior_floor"] > 0.0 or th["hardneg_floor"] > 0.0:
+    if not (-1.0 <= th["ci_lower_min"] <= 1.0):
         return False
-    if not all(th[k] > 0 for k in ("rerank_p95_ms", "total_p95_ms", "rrf_p95_ms")):
+    if not (-1.0 <= th["noninferior_floor"] <= 0.0 and -1.0 <= th["hardneg_floor"] <= 0.0):
+        return False
+    if th["noninferior_floor"] > th["ci_lower_min"]:
+        return False
+    # latency budget (ms) — positive + เรียง rrf <= rerank <= total
+    rr, r, tot = th["rrf_p95_ms"], th["rerank_p95_ms"], th["total_p95_ms"]
+    if not (0 < rr <= r <= tot):
         return False
     return True
 
@@ -447,6 +460,35 @@ def _not_eligible(reasons) -> dict:
     return {"status": "NOT_DECISION_ELIGIBLE", "decision_eligible": False, "arm": None, "reasons": reasons}
 
 
+def _resolve_quality_rows(per_query, cases):
+    """
+    M1: join quality rows กับ frozen test cases ด้วย query_id — quality ต้องเป็นผลของ frozen eval queries จริง
+    บังคับ exact query-id set + intent_id/role/challenge_tags ตรง case เดิม (ไม่เชื่อ identity/tag จาก evidence)
+    คืน (resolved_rows | None, errors). analysis ใช้ identity/tags จาก frozen cases เท่านั้น
+    """
+    test_by_qid = {c["query_id"]: c for c in cases
+                   if isinstance(c, dict) and c.get("split") == "test" and isinstance(c.get("query_id"), str)}
+    row_qids = [r.get("query_id") for r in per_query]
+    if set(row_qids) != set(test_by_qid):
+        missing = sorted(set(test_by_qid) - set(row_qids))
+        extra = sorted(str(q) for q in set(row_qids) - set(test_by_qid))
+        return None, [f"quality query-id set != frozen test cases (missing={missing[:3]} extra={extra[:3]})"]
+    errs, resolved = [], []
+    for r in per_query:
+        c = test_by_qid[r["query_id"]]
+        if r.get("intent_id") != c.get("intent_id"):
+            errs.append(f"quality {r['query_id']}: intent_id ไม่ตรง frozen case")
+        if r.get("role") != c.get("role"):
+            errs.append(f"quality {r['query_id']}: role ไม่ตรง frozen case")
+        if set(r.get("challenge_tags") or []) != set(c.get("challenge_tags") or []):
+            errs.append(f"quality {r['query_id']}: challenge_tags ไม่ตรง frozen case")
+        resolved.append({"query_id": r["query_id"], "intent_id": c["intent_id"], "role": c.get("role"),
+                         "challenge_tags": list(c.get("challenge_tags") or []), "arms": r["arms"]})
+    if errs:
+        return None, errs
+    return resolved, []
+
+
 def _root_binding_errors(plan, cases, corpus, m4, canary, sel_digest) -> list:
     """
     B2/B4: root artifact/model digests ต้องตรง artifact จริง + evidence metadata จริง (ไม่ใช่แค่รู้ root hash)
@@ -519,12 +561,15 @@ def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
     q_errs = validate_quality_evidence(quality_evidence, root, ec, sel_digest, selected_n)
     if q_errs:
         return _not_eligible(["quality_evidence invalid"] + q_errs[:5])
-    pq = quality_evidence["per_query"]
+    # M1: quality rows ต้องเป็นผลของ frozen eval queries จริง (join by query_id, identity/tags จาก cases)
+    resolved, join_errs = _resolve_quality_rows(quality_evidence["per_query"], cases)
+    if join_errs:
+        return _not_eligible(["quality identity join"] + join_errs[:5])
     try:
-        rvd = paired_bootstrap(paired_deltas(pq, "rerank", "dense"), plan["resamples"], plan["seed"])
-        fvr = paired_bootstrap(paired_deltas(pq, "fused", "rerank"), plan["resamples"], plan["seed"])
-        hn_rerank = derive_hardneg_deltas(pq, "rerank", "dense", gate_tags)
-        hn_fused = derive_hardneg_deltas(pq, "fused", "rerank", gate_tags)
+        rvd = paired_bootstrap(paired_deltas(resolved, "rerank", "dense"), plan["resamples"], plan["seed"])
+        fvr = paired_bootstrap(paired_deltas(resolved, "fused", "rerank"), plan["resamples"], plan["seed"])
+        hn_rerank = derive_hardneg_deltas(resolved, "rerank", "dense", gate_tags)
+        hn_fused = derive_hardneg_deltas(resolved, "fused", "rerank", gate_tags)
     except ValueError as e:
         return _not_eligible([f"analysis: {e}"])
 
