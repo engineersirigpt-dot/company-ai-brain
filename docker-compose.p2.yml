@@ -1,0 +1,26 @@
+# P2 pinned reranker — compose (offline runtime)
+# WRITE-ONLY — ยังไม่ build/run จน Codex review pinned-build ผ่าน
+#
+# ลำดับ (หลัง review เท่านั้น):
+#   1) build : docker compose -f docker-compose.p2.yml build \
+#                --build-arg PY_BASE=python@sha256:<digest> --build-arg MODEL_COMMIT=953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+#   2) บันทึก image digest : docker inspect --format '{{index .RepoDigests 0}}' <image>  → RunPlan.image_digest
+#   3) model-load smoke : docker compose -f docker-compose.p2.yml run --rm reranker python p2_model_smoke.py
+#
+# ยังไม่มี service ของ real M4 / N-sweep / benchmark ในไฟล์นี้ (NO-GO จน smoke ผ่าน + gates ครบ)
+
+services:
+  reranker:
+    build:
+      context: .
+      dockerfile: Dockerfile.p2
+      args:
+        # PY_BASE ต้องเป็น digest จริงตอน build (ไม่ใช่ tag ลอย)
+        MODEL_COMMIT: "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
+    image: company-ai-brain/p2-reranker:pinned   # tag ภายใน; evidence ใช้ image **digest** ไม่ใช่ tag นี้
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    network_mode: "none"        # runtime ต้อง offline จริง — พิสูจน์ว่าใช้ snapshot จาก cache เท่านั้น
+    # ไม่มี command เริ่มอัตโนมัติ (ไม่รัน benchmark) — สั่ง smoke แบบ run --rm เท่านั้น
+    profiles: ["manual"]        # กัน `up` เผลอรัน; ต้อง --profile manual หรือ run --rm ตรง service

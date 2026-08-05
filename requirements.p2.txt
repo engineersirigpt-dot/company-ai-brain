@@ -1,0 +1,8 @@
+# P2 reranker runtime deps — PIN แบบ exact (gotcha #6: model SHA อย่างเดียวไม่พอ)
+# ค่าเวอร์ชันด้านล่างเป็น baseline ที่เข้ากับ bge-reranker-v2-m3 — **ยืนยัน/แก้ให้ตรง CUDA ของ 4x4090 ก่อน build จริง**
+# torch: เลือก build ให้ตรง CUDA target (เช่น --index-url https://download.pytorch.org/whl/cu121) ตอน build
+torch==2.3.1
+transformers==4.41.2
+huggingface_hub==0.23.4
+safetensors==0.4.3
+sentencepiece==0.2.0
