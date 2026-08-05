@@ -102,6 +102,12 @@ _M4_FCASE_KEYS = frozenset({"role_identity_sha256", "effective_role", "category"
 # M4 run request (frozen pin/image/index) — validate_m4_run_evidence เทียบ exact ทุก field (B2)
 _M4_EXPECTED_KEYS = ("model_revision", "tokenizer_revision", "model_file_manifest_sha256",
                      "image_digest", "inference_config", "retrieval_index_manifest_sha256")
+# M4RunReceipt (durable receipt — body-validated, hash-only, recompute digest จาก body)
+M4_RECEIPT_SCHEMA_VERSION = "p2-m4-receipt-v1"
+_M4_RECEIPT_KEYS = frozenset({"schema_version", "run_id", "run_manifest_sha256", "m4_case_manifest_sha256",
+                              "raw_evidence_sha256", "command_sha256", "started_utc", "finished_utc", "exit_code",
+                              "stdout_sha256", "stderr_sha256", "isolation_marker_sha256",
+                              "retrieval_index_manifest_sha256", "model_revision", "image_digest", "status"})
 
 
 def _extra_keys(d, allowed, tag) -> list:
@@ -764,6 +770,54 @@ def validate_m4_run_evidence(m4, frozen, expected, eval_hash, corpus_hash, run_m
         errs.append("m4 run_id != expected M4RunRequest")
     errs += _evidence_hash_binding(m4, eval_hash, corpus_hash, "m4")
     errs += _bind_run_manifest(m4, run_manifest_sha256, "m4")
+    return errs
+
+
+def m4_run_receipt_sha256(receipt) -> str:
+    """digest ของ M4RunReceipt — recompute จาก canonical body (M4Evidence.run_receipt_sha256 ต้องตรงค่านี้)"""
+    return hashlib.sha256(_canonical_json(receipt)).hexdigest()
+
+
+def validate_m4_run_receipt(receipt, run_manifest, m4_case_manifest, expected, evidence) -> list:
+    """
+    M4RunReceipt v1 — body-validated durable receipt (ไม่ใช่ SHA self-stamp), hash-only ไม่มี secret/raw text:
+    exact keys/types · status=PASS · exit_code=0 (exact int) · started/finished timestamp ISO+tz ·
+    bind run/root/request/frozen/evidence hashes ให้ตรงชุดเดียวกัน
+    """
+    if not isinstance(receipt, dict):
+        return ["m4 receipt ต้องเป็น dict"]
+    errs = _extra_keys(receipt, _M4_RECEIPT_KEYS, "m4 receipt")
+    if receipt.get("schema_version") != M4_RECEIPT_SCHEMA_VERSION:
+        errs.append(f"m4 receipt schema_version ต้องเป็น {M4_RECEIPT_SCHEMA_VERSION}")
+    if receipt.get("status") != "PASS":
+        errs.append("m4 receipt status != PASS")
+    if not _exact_zero_int(receipt.get("exit_code")):
+        errs.append("m4 receipt exit_code ต้อง 0 (exact int)")
+    for f in ("command_sha256", "stdout_sha256", "stderr_sha256", "isolation_marker_sha256"):
+        if not _is_sha256(receipt.get(f)):
+            errs.append(f"m4 receipt {f} ต้องเป็น sha256")
+    if not _valid_iso_tz(receipt.get("started_utc")):
+        errs.append("m4 receipt started_utc ต้องเป็น ISO-8601 + tz")
+    if not _valid_iso_tz(receipt.get("finished_utc")):
+        errs.append("m4 receipt finished_utc ต้องเป็น ISO-8601 + tz")
+    # bind ชุดเดียวกันกับ RunPlan/frozen/request/evidence
+    if not _good_str(receipt.get("run_id")) or receipt.get("run_id") != (evidence.get("run_id") if isinstance(evidence, dict) else None):
+        errs.append("m4 receipt run_id != evidence.run_id")
+    if receipt.get("run_manifest_sha256") != run_manifest:
+        errs.append("m4 receipt run_manifest_sha256 != root")
+    if receipt.get("m4_case_manifest_sha256") != m4_case_manifest:
+        errs.append("m4 receipt m4_case_manifest_sha256 != plan")
+    if not isinstance(evidence, dict) or receipt.get("raw_evidence_sha256") != evidence.get("raw_evidence_sha256"):
+        errs.append("m4 receipt raw_evidence_sha256 != evidence")
+    if not isinstance(expected, dict):
+        errs.append("m4 receipt: expected M4RunRequest จำเป็น")
+    else:
+        if receipt.get("model_revision") != expected.get("model_revision"):
+            errs.append("m4 receipt model_revision != M4RunRequest")
+        if receipt.get("image_digest") != expected.get("image_digest"):
+            errs.append("m4 receipt image_digest != M4RunRequest")
+        if receipt.get("retrieval_index_manifest_sha256") != expected.get("retrieval_index_manifest_sha256"):
+            errs.append("m4 receipt retrieval_index_manifest_sha256 != M4RunRequest")
     return errs
 
 

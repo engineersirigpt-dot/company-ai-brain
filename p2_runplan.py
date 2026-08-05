@@ -460,6 +460,53 @@ def latency_summary(lat_ev, run_manifest, expected_count, thr=DEFAULT_THRESHOLDS
     return out
 
 
+def m4_run_request(plan) -> dict:
+    """M4RunRequest (frozen pin/image/index) derive จาก **validated RunPlan** — helper เดียว reuse ทั้ง M4a + decide_p2"""
+    return {"model_revision": plan["model_commit"], "tokenizer_revision": plan["tokenizer_commit"],
+            "model_file_manifest_sha256": plan["model_file_manifest_sha256"], "image_digest": plan["image_digest"],
+            "inference_config": plan["inference_config"],
+            "retrieval_index_manifest_sha256": plan["artifact_digests"]["retrieval_index_manifest_sha256"]}
+
+
+def validate_m4_preflight_bundle(plan, frozen, evidence, receipt) -> list:
+    """
+    **public M4a gate** (trust anchor) — ปลด N-sweep ได้ก็ต่อเมื่อ evidence+receipt ผูกกับ **validated RunPlan** จริง:
+      1) validate_run_plan + recompute root (ไม่เชื่อ digest/pin ที่ caller ส่งมาลอย ๆ)
+      2) frozen manifest valid + digest/roles/categories == RunPlan
+      3) derive M4RunRequest จาก RunPlan (run_id freeze จาก receipt, compare exact)
+      4) validate receipt body + recompute receipt digest == evidence.run_receipt_sha256
+      5) validate_m4_run_evidence (require_stage=preflight-n50) ด้วย eval/corpus/index จาก RunPlan
+    คืน list ของ error (ว่าง = M4a PASS mechanics ; decision_eligible=False เสมอ)
+    """
+    perrs = validate_run_plan(plan)
+    if perrs:
+        return ["run_plan invalid"] + perrs
+    root = run_manifest_sha256(plan)
+    errs = []
+    if not isinstance(evidence, dict) or not isinstance(receipt, dict):
+        return ["evidence/receipt ต้องเป็น dict"]
+    ferrs = E.validate_m4_frozen_manifest(frozen)
+    if ferrs:
+        return ["frozen manifest invalid"] + ferrs[:5]
+    if E._safe_m4_manifest_digest(frozen) != plan["m4_case_manifest_sha256"]:
+        errs.append("frozen manifest digest != RunPlan.m4_case_manifest_sha256")
+    if set(frozen.get("evaluated_roles") or []) != set(plan["evaluated_roles"]):
+        errs.append("frozen evaluated_roles != RunPlan")
+    if set(frozen.get("required_categories") or []) != set(plan["required_categories"]):
+        errs.append("frozen required_categories != RunPlan")
+    # M4RunRequest จาก RunPlan + freeze run_id (จาก receipt) compare exact ใน public gate
+    expected = {**m4_run_request(plan), "run_id": receipt.get("run_id")}
+    eh = plan["artifact_digests"]["eval_set_sha256"]
+    ch = plan["artifact_digests"]["corpus_manifest_sha256"]
+    # receipt body validate + recompute digest bind
+    errs += E.validate_m4_run_receipt(receipt, root, plan["m4_case_manifest_sha256"], expected, evidence)
+    if E.m4_run_receipt_sha256(receipt) != evidence.get("run_receipt_sha256"):
+        errs.append("evidence.run_receipt_sha256 != recompute จาก receipt body")
+    # evidence: preflight, ผูก root + eval/corpus จาก RunPlan + exact M4RunRequest (รวม run_id)
+    errs += E.validate_m4_run_evidence(evidence, frozen, expected, eh, ch, root, require_stage=E.M4_STAGE_PREFLIGHT)
+    return errs
+
+
 # ── single fail-closed decision entry point (public approval surface เดียว) ────
 def _not_eligible(reasons) -> dict:
     return {"status": "NOT_DECISION_ELIGIBLE", "decision_eligible": False, "arm": None, "reasons": reasons}
@@ -607,11 +654,8 @@ def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
     if set(m4_frozen_manifest.get("required_categories") or []) != set(plan["required_categories"]):
         return _not_eligible(["frozen required_categories != RunPlan.required_categories"])
 
-    # B2: M4RunRequest (exact pin/image/index/inference_config) จาก RunPlan — bind M4 evidence กับ root จริง
-    m4_expected = {"model_revision": plan["model_commit"], "tokenizer_revision": plan["tokenizer_commit"],
-                   "model_file_manifest_sha256": plan["model_file_manifest_sha256"], "image_digest": plan["image_digest"],
-                   "inference_config": plan["inference_config"],
-                   "retrieval_index_manifest_sha256": plan["artifact_digests"]["retrieval_index_manifest_sha256"]}
+    # B2: M4RunRequest (exact pin/image/index/inference_config) derive จาก RunPlan (helper เดียวกับ M4a gate)
+    m4_expected = m4_run_request(plan)
     # evidence + signoff gate (labels/coverage/m4/canary/signoff) — ผูก root + frozen M4 manifest, ค่า gate/role จาก plan
     ev_errs = E.decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff,
                                          m4_evidence, canary_evidence, root, m4_frozen_manifest, m4_expected,

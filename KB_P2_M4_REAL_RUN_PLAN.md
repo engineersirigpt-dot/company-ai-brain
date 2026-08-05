@@ -80,8 +80,8 @@ auth/filter/oracle/index mismatch · partial query · exception · empty/vacuous
 canonical raw receipt ของ: seed manifest, index, oracle output, provider candidates, **spy trace (id+text hashes)**, model metadata, command/timestamps/exit, stdout/stderr hashes
 - summary อ้าง **raw-evidence digest/path** ไม่พึ่งไฟล์ gitignored ชุดเดียว
 
-### 11. Acceptance (M4 PASS ก็ต่อเมื่อครบ — validator `p2_eval.validate_m4_evidence` v3 บังคับแล้ว)
-- `isolated_interlock=PASS` · `independent_oracle=PASS` · `schema_version=p2-m4-v3`
+### 11. Acceptance (M4 PASS ก็ต่อเมื่อครบ — validator `p2_eval.validate_m4_run_evidence` v4 + `p2_runplan.validate_m4_preflight_bundle` บังคับแล้ว)
+- `isolated_interlock=PASS` · `independent_oracle=PASS` · `schema_version=p2-m4-v4`
 - **B1:** `sentinel_pairs ⊆ unfiltered_topn_pairs` (sentinel ติด unfiltered top-N) แล้ว `∩ model_input = ∅`
 - **B3:** `model_call_count>0` · `model_input_count>0` · `score_count==model_input_count` · `all_scores_finite=True` · `scorer_kind=pinned-cross-encoder` · `expected_case_count==completed_case_count>0` · `error_count==skip_count==0`
 - `unauthorized_in_model_inputs == 0` (exact int) · `sentinel_reached_model=False`
