@@ -494,15 +494,18 @@ def validate_m4_preflight_bundle(plan, frozen, evidence, receipt) -> list:
         errs.append("frozen evaluated_roles != RunPlan")
     if set(frozen.get("required_categories") or []) != set(plan["required_categories"]):
         errs.append("frozen required_categories != RunPlan")
-    # M4RunRequest จาก RunPlan + freeze run_id (จาก receipt) compare exact ใน public gate
-    expected = {**m4_run_request(plan), "run_id": receipt.get("run_id")}
+    # B2: M4RunRequest จาก RunPlan + run_id **จาก RunPlan** (ไม่ derive จาก receipt/evidence ที่กำลังตรวจ)
+    expected = {**m4_run_request(plan), "run_id": plan["run_id"]}
     eh = plan["artifact_digests"]["eval_set_sha256"]
     ch = plan["artifact_digests"]["corpus_manifest_sha256"]
-    # receipt body validate + recompute digest bind
-    errs += E.validate_m4_run_receipt(receipt, root, plan["m4_case_manifest_sha256"], expected, evidence)
-    if E.m4_run_receipt_sha256(receipt) != evidence.get("run_receipt_sha256"):
-        errs.append("evidence.run_receipt_sha256 != recompute จาก receipt body")
-    # evidence: preflight, ผูก root + eval/corpus จาก RunPlan + exact M4RunRequest (รวม run_id)
+    # B3: receipt body validate ก่อน ; hash เฉพาะเมื่อ structural ผ่าน (safe digest, ไม่ crash)
+    rerrs = E.validate_m4_run_receipt(receipt, root, plan["m4_case_manifest_sha256"], expected, evidence)
+    errs += rerrs
+    if not rerrs:
+        rdig = E._safe_m4_receipt_digest(receipt)
+        if rdig is None or rdig != evidence.get("run_receipt_sha256"):
+            errs.append("evidence.run_receipt_sha256 != recompute จาก receipt body")
+    # evidence: preflight, ผูก root + eval/corpus จาก RunPlan + exact M4RunRequest (รวม run_id จาก plan)
     errs += E.validate_m4_run_evidence(evidence, frozen, expected, eh, ch, root, require_stage=E.M4_STAGE_PREFLIGHT)
     return errs
 

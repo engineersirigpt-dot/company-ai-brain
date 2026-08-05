@@ -778,6 +778,14 @@ def m4_run_receipt_sha256(receipt) -> str:
     return hashlib.sha256(_canonical_json(receipt)).hexdigest()
 
 
+def _safe_m4_receipt_digest(receipt):
+    """B3: digest แบบไม่ crash (malformed body เช่น NaN → None) ให้ public gate fail-closed"""
+    try:
+        return m4_run_receipt_sha256(receipt)
+    except (TypeError, ValueError):
+        return None
+
+
 def validate_m4_run_receipt(receipt, run_manifest, m4_case_manifest, expected, evidence) -> list:
     """
     M4RunReceipt v1 — body-validated durable receipt (ไม่ใช่ SHA self-stamp), hash-only ไม่มี secret/raw text:
@@ -796,10 +804,16 @@ def validate_m4_run_receipt(receipt, run_manifest, m4_case_manifest, expected, e
     for f in ("command_sha256", "stdout_sha256", "stderr_sha256", "isolation_marker_sha256"):
         if not _is_sha256(receipt.get(f)):
             errs.append(f"m4 receipt {f} ต้องเป็น sha256")
-    if not _valid_iso_tz(receipt.get("started_utc")):
+    st_ok, fn_ok = _valid_iso_tz(receipt.get("started_utc")), _valid_iso_tz(receipt.get("finished_utc"))
+    if not st_ok:
         errs.append("m4 receipt started_utc ต้องเป็น ISO-8601 + tz")
-    if not _valid_iso_tz(receipt.get("finished_utc")):
+    if not fn_ok:
         errs.append("m4 receipt finished_utc ต้องเป็น ISO-8601 + tz")
+    if st_ok and fn_ok:   # M1: finished ต้องไม่ก่อน started
+        st = datetime.fromisoformat(receipt["started_utc"].replace("Z", "+00:00"))
+        fn = datetime.fromisoformat(receipt["finished_utc"].replace("Z", "+00:00"))
+        if fn < st:
+            errs.append("m4 receipt finished_utc < started_utc")
     # bind ชุดเดียวกันกับ RunPlan/frozen/request/evidence
     if not _good_str(receipt.get("run_id")) or receipt.get("run_id") != (evidence.get("run_id") if isinstance(evidence, dict) else None):
         errs.append("m4 receipt run_id != evidence.run_id")

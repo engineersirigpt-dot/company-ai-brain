@@ -1,7 +1,7 @@
 """
-Unit test ของ p2_m4_harness + public M4a gate (validate_m4_preflight_bundle) — pure/offline
-พิสูจน์ harness ผลิต evidence+receipt ที่ผ่าน gate จริง + gate เป็น trust anchor กับ validated RunPlan
-(เปลี่ยน evidence/frozen โดยคง RunPlan เดิม → gate ต้อง fail)
+Unit test ของ p2_m4_harness + public M4a gate — pure/offline
+model_input มาจาก **spy trace เท่านั้น** (sentinel ถูก guard ก่อนถึง underlying) · run_id จาก RunPlan ·
+receipt no-crash + timestamp order · typed identity · verdict ไม่ self-stamp
 
     python test_p2_m4_harness.py
 """
@@ -22,19 +22,28 @@ res = []
 def check(name, cond, detail=""):
     res.append(bool(cond))
     print(("PASS " if cond else "FAIL ") + name + ("" if cond else f"  :: {detail}"))
+def raises(fn, exc=Exception):
+    try:
+        fn(); return False
+    except exc:
+        return True
 
 
 _H = "a" * 64
 IC = {"model_name": RK.RERANKER_MODEL, "max_length": 512, "batch_size": 16, "device": "cpu", "dtype": "float32"}
+VEC1, VEC2 = [0.1, 0.2, 0.3], [0.4, 0.5, 0.6]
 
-# ── frozen seed (2 cases: qc/negation, sales/table-row) ────────────────────────
+
+class Counting:
+    def __init__(self): self.n = 0
+    def score(self, q, texts): self.n += 1; return [2.0] * len(texts)
+
+
 FROZEN = HN.build_frozen_manifest(
-    cases={
-        "case-qc": HN.frozen_case(effective_role="qc", category="negation", query_probe="q1",
-                                  authorized_items=[("A", "ta")], sentinel_items=[("S", "ts")]),
-        "case-sales": HN.frozen_case(effective_role="sales", category="table-row", query_probe="q2",
-                                     authorized_items=[("B", "tb")], sentinel_items=[("S", "ts")]),
-    },
+    cases={"case-qc": HN.frozen_case(effective_role="qc", category="negation", query_vector=VEC1,
+                                     authorized_items=[("A", "ta")], sentinel_items=[("S", "ts")]),
+           "case-sales": HN.frozen_case(effective_role="sales", category="table-row", query_vector=VEC2,
+                                        authorized_items=[("B", "tb")], sentinel_items=[("S", "ts")])},
     required_categories=["negation", "table-row"], evaluated_roles=["qc", "sales"])
 MAN = E.m4_case_manifest_sha256(FROZEN)
 check("frozen manifest valid", E.validate_m4_frozen_manifest(FROZEN) == [], E.validate_m4_frozen_manifest(FROZEN))
@@ -57,57 +66,70 @@ ROOT = RP.run_manifest_sha256(PLAN)
 EXP = RP.m4_run_request(PLAN)
 
 
-def _case_record(case_id, erole, category, qp, auth):
-    spy = HN.SpyScorer(RK.MockScorer({auth[1]: 2.0}))
-    spy.score(qp, [auth[1]])   # authorized text เข้า model จริง (1 call, 1 finite score)
-    return HN.build_case_record(case_id=case_id, effective_role=erole, category=category, query_probe=qp, selected_n=50,
-                                unfiltered=[("S", "ts"), auth], provider=[auth], model_input=[auth],
-                                rerank_output=[auth], sentinel_items=[("S", "ts")], spy=spy)
+def _case(case_id, erole, category, vec, auth):
+    scorer = HN.M4Scorer(RK.MockScorer({auth[1]: 2.0}), authorized_pairs=[HN.component(*auth)["pair_sha256"]])
+    scorer.score_candidates(vec, [auth])   # authorized candidate เข้า model จริง
+    return HN.build_case_record(case_id=case_id, effective_role=erole, category=category, query_vector=vec,
+                                selected_n=50, unfiltered_items=[("S", "ts"), auth], sentinel_items=[("S", "ts")], scorer=scorer)
 
 
-PER_CASE = [_case_record("case-qc", "qc", "negation", "q1", ("A", "ta")),
-            _case_record("case-sales", "sales", "table-row", "q2", ("B", "tb"))]
-RUN_META = {"m4_case_manifest_sha256": MAN, "run_id": "m4run", "run_manifest_sha256": ROOT,
+PER_CASE = [_case("case-qc", "qc", "negation", VEC1, ("A", "ta")),
+            _case("case-sales", "sales", "table-row", VEC2, ("B", "tb"))]
+VERDICTS = {"status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
+            "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0}
+RUN_META = {"m4_case_manifest_sha256": MAN, "run_id": "run-1", "run_manifest_sha256": ROOT,
             "model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "model_file_manifest_sha256": _H,
             "image_digest": "sha256:" + "e" * 64, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _H,
             "eval_set_sha256": _H, "corpus_manifest_sha256": _H, "selected_n": 50, "decision_eligible": False}
-EV = HN.assemble_evidence(PER_CASE, stage="preflight-n50", run_meta=RUN_META)
-RC = HN.assemble_receipt(EV, run_manifest=ROOT, m4_case_manifest=MAN, expected={**EXP, "run_id": "m4run"},
-                         argv=["python", "p2_m4_runner.py", "--preflight"], stdout=b"SMOKE", stderr=b"",
-                         isolation_marker="m4-run-uuid-xyz", started_utc="2026-08-05T05:00:00+07:00",
+EV = HN.assemble_evidence(PER_CASE, stage="preflight-n50", run_meta=RUN_META, verdicts=VERDICTS)
+RC = HN.assemble_receipt(EV, run_manifest=ROOT, m4_case_manifest=MAN, expected={**EXP, "run_id": "run-1"},
+                         argv=["python", "p2_m4_runner.py", "--preflight"], stdout=b"ok", stderr=b"",
+                         isolation_marker="m4-run-uuid", started_utc="2026-08-05T05:00:00+07:00",
                          finished_utc="2026-08-05T05:03:00+07:00", exit_code=0)
 EV["run_receipt_sha256"] = E.m4_run_receipt_sha256(RC)
 
-# ── harness → public M4a gate ─────────────────────────────────────────────────
-check("harness bundle -> validate_m4_preflight_bundle ผ่าน (M4a PASS mechanics)",
-      RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC) == [], RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC))
-check("assemble_evidence recompute raw digest จาก per_case body",
-      EV["raw_evidence_sha256"] == hashlib.sha256(E._canonical_json(PER_CASE)).hexdigest())
-check("run_receipt digest ผูก evidence", E.m4_run_receipt_sha256(RC) == EV["run_receipt_sha256"])
+check("harness bundle -> M4a gate ผ่าน", RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC) == [], RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, RC))
+check("model_input มาจาก spy trace (== provider)", EV["per_case"][0]["model_input_pairs"] == EV["per_case"][0]["provider_pairs"] and len(EV["per_case"][0]["model_input_pairs"]) == 1)
+check("raw_evidence recompute จาก body", EV["raw_evidence_sha256"] == hashlib.sha256(E._canonical_json(PER_CASE)).hexdigest())
 
-# ── trust anchor: เปลี่ยน evidence/frozen โดยคง RunPlan → gate fail ────────────
-_ev_pin = copy.deepcopy(EV); _ev_pin["model_revision"] = "f" * 40
-check("anchor: evidence pin != RunPlan (แม้ evidence self-consistent) -> fail",
-      RP.validate_m4_preflight_bundle(PLAN, FROZEN, _ev_pin, RC) != [])
-# เปลี่ยน frozen query hash → manifest digest เปลี่ยน → != RunPlan.m4_case_manifest_sha256
-_frz = copy.deepcopy(FROZEN)
-for _cid in _frz["cases"]:
-    _frz["cases"][_cid]["query_vector_sha256"] = "9" * 64
-check("anchor: frozen เปลี่ยน (digest != RunPlan) -> fail", RP.validate_m4_preflight_bundle(PLAN, _frz, EV, RC) != [])
-check("anchor: invalid RunPlan -> fail (validate_run_plan ก่อน)", RP.validate_m4_preflight_bundle(_plan(seed=None), FROZEN, EV, RC) != [])
+# ── B1 ⭐ sentinel ถึง boundary -> raise ก่อน underlying (mock call = 0) ────────
+_cnt = Counting()
+_sc = HN.M4Scorer(_cnt, authorized_pairs=[HN.component("A", "ta")["pair_sha256"]])
+check("B1 ⭐ sentinel เข้า score_candidates -> PermissionError", raises(lambda: _sc.score_candidates(VEC1, [("S", "ts")]), PermissionError))
+check("B1 ⭐ underlying scorer ไม่ถูกเรียก (call=0) + sentinel_reached", _cnt.n == 0 and _sc.sentinel_reached is True)
+check("B1: build_case_record ไม่รับ model_input จาก caller (derive จาก trace)", "model_input" not in HN.build_case_record.__code__.co_varnames)
 
-# ── receipt body validation ───────────────────────────────────────────────────
-check("receipt exit_code != 0 -> gate fail", RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, {**RC, "exit_code": 1}) != [])
-_rc2 = {**RC, "run_manifest_sha256": "b" * 64}
-check("receipt run_manifest != root -> fail", any("run_manifest" in e for e in E.validate_m4_run_receipt(_rc2, ROOT, MAN, {**EXP, "run_id": "m4run"}, EV)))
-check("receipt tampered body (digest mismatch) -> gate fail",
-      RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, {**RC, "isolation_marker_sha256": "c" * 64}) != [])
-check("receipt raw_evidence != evidence -> fail", any("raw_evidence" in e for e in E.validate_m4_run_receipt({**RC, "raw_evidence_sha256": "d" * 64}, ROOT, MAN, {**EXP, "run_id": "m4run"}, EV)))
+# ── B2: run_id จาก RunPlan (ไม่ circular) ─────────────────────────────────────
+check("B2: evidence run_id != plan.run_id -> gate fail", RP.validate_m4_preflight_bundle(PLAN, FROZEN, {**EV, "run_id": "other"}, RC) != [])
+# receipt+evidence เลือก run_id เดียวกันเองที่ไม่ใช่ plan.run_id -> fail
+_ev2 = {**EV, "run_id": "m4run"}
+_rc2 = HN.assemble_receipt(_ev2, run_manifest=ROOT, m4_case_manifest=MAN, expected={**EXP, "run_id": "m4run"},
+                           argv=["x"], stdout=b"", stderr=b"", isolation_marker="z",
+                           started_utc="2026-08-05T05:00:00+07:00", finished_utc="2026-08-05T05:01:00+07:00")
+_ev2["run_receipt_sha256"] = E.m4_run_receipt_sha256(_rc2)
+check("B2: receipt+evidence run_id เดียวกันแต่ != plan -> gate fail", RP.validate_m4_preflight_bundle(PLAN, FROZEN, _ev2, _rc2) != [])
 
-# ── SpyScorer derive counts จริง (ไม่ self-stamp) ──────────────────────────────
-_spy = HN.SpyScorer(RK.MockScorer({"x": 1.0, "y": 2.0}))
-_spy.score("q", ["x", "y"])
-check("SpyScorer จับ call/score จริง", _spy.calls == 1 and _spy.scores == [1.0, 2.0])
+# ── B3: malformed receipt (NaN) -> gate error list ไม่ crash ──────────────────
+_nan_rc = {**RC, "exit_code": float("nan")}
+check("B3: receipt NaN -> gate คืน error list (ไม่ crash)", isinstance(RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, _nan_rc), list) and RP.validate_m4_preflight_bundle(PLAN, FROZEN, EV, _nan_rc) != [])
+check("B3: _safe_m4_receipt_digest(NaN body) -> None", E._safe_m4_receipt_digest({**RC, "status": float("nan")}) is None)
+
+# ── M1: timestamp order + command/bytes ───────────────────────────────────────
+_rev_rc = {**RC, "started_utc": "2026-08-05T05:03:00+07:00", "finished_utc": "2026-08-05T05:00:00+07:00"}
+check("M1: finished < started -> receipt error", any("finished_utc <" in e for e in E.validate_m4_run_receipt(_rev_rc, ROOT, MAN, {**EXP, "run_id": "run-1"}, EV)))
+check("M1: argv ambiguity ['a b','c'] != ['a','b c']", HN._argv_hash(["a b", "c"]) != HN._argv_hash(["a", "b c"]))
+check("M1: stdout ต้องเป็น bytes (ไม่ auto-coerce)", raises(lambda: HN._bytes_sha256("not-bytes"), TypeError))
+
+# ── M2: verdict ไม่ self-stamp — assemble_evidence เอา verdict จากผล proof ─────
+_bad_verd = HN.assemble_evidence(PER_CASE, stage="preflight-n50", run_meta=RUN_META,
+                                 verdicts={**VERDICTS, "sentinel_reached_model": True})
+check("M2: verdict sentinel_reached_model=True -> gate fail (builder ไม่ปั้น PASS)",
+      RP.validate_m4_preflight_bundle(PLAN, FROZEN, {**_bad_verd, "run_receipt_sha256": EV["run_receipt_sha256"]}, RC) != [])
+
+# ── M3: typed identity ────────────────────────────────────────────────────────
+check("M3: component(1,'x') != component('1','x') (typed)", HN.component(1, "x")["pair_sha256"] != HN.component("1", "x")["pair_sha256"])
+check("M3: query vector NaN -> ValueError", raises(lambda: HN._vec_hash([0.1, float("nan")]), ValueError))
+check("M3: point_id ผิดชนิด -> TypeError", raises(lambda: HN.component({"bad": 1}, "x"), TypeError))
 
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)
