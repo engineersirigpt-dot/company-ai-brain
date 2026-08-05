@@ -229,7 +229,13 @@ def build_bundle(plan):
                "raw_latency_digest": RP.raw_digest(stages), "error_count": 0, "oom_count": 0, "warmup": 10, "stages": stages}
     m4 = {"status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
           "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0,
-          "unauthorized_sentinel_id_hashes": ["1" * 64], "model_input_id_hashes": ["2" * 64],
+          "model_invocation_count": 2, "evidence_stage": "selected-n",
+          "authorized_candidate_id_hashes": ["a" * 64, "b" * 64, "c" * 64],
+          "authorized_candidate_text_hashes": ["1" * 64, "2" * 64, "3" * 64],
+          "provider_candidate_id_hashes": ["a" * 64, "b" * 64],
+          "provider_candidate_text_hashes": ["1" * 64, "2" * 64],
+          "model_input_id_hashes": ["a" * 64], "model_input_text_hashes": ["1" * 64],
+          "unauthorized_sentinel_id_hashes": ["f" * 64], "unauthorized_sentinel_text_hashes": ["9" * 64],
           "model_revision": _COMMIT, "tokenizer_revision": _COMMIT, "model_file_manifest_sha256": _FM,
           "image_digest": _IMG, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _IDX,
           "selection_digest": sd, "run_manifest_sha256": root, "run_id": "runX",
@@ -270,6 +276,8 @@ check("B2: root corpus_manifest ไม่ตรง -> NOT_DECISION_ELIGIBLE",
       decide(plan=base_plan(artifact_digests={"eval_set_sha256": _EH, "corpus_manifest_sha256": "0" * 64, "retrieval_index_manifest_sha256": _IDX}))["status"] == "NOT_DECISION_ELIGIBLE")
 check("B2: m4 model_revision != root model_commit -> NOT_DECISION_ELIGIBLE",
       decide(m4_evidence={**build_bundle(PLAN)["m4_evidence"], "model_revision": "f" * 40})["status"] == "NOT_DECISION_ELIGIBLE")
+check("M1: decide_p2 กับ M4a (preflight-n50) -> NOT_DECISION_ELIGIBLE (ต้องเป็น M4b selected-n)",
+      decide(m4_evidence={**build_bundle(PLAN)["m4_evidence"], "evidence_stage": "preflight-n50"})["status"] == "NOT_DECISION_ELIGIBLE")
 check("B2: m4 model_file_manifest != root -> NOT_DECISION_ELIGIBLE",
       decide(m4_evidence={**build_bundle(PLAN)["m4_evidence"], "model_file_manifest_sha256": "0" * 64})["status"] == "NOT_DECISION_ELIGIBLE")
 check("B2: m4 inference_config != root -> NOT_DECISION_ELIGIBLE",

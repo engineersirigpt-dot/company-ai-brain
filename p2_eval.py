@@ -69,6 +69,20 @@ def _exact_zero_int(x) -> bool:
     return type(x) is int and x == 0
 
 
+# M4 evidence stages (M1): preflight (unlock N-sweep) vs selected-N (bind final decision)
+M4_STAGE_PREFLIGHT = "preflight-n50"
+M4_STAGE_SELECTED = "selected-n"
+M4_STAGES = (M4_STAGE_PREFLIGHT, M4_STAGE_SELECTED)
+
+
+def _is_hash_list(x, allow_empty=False) -> bool:
+    if not isinstance(x, list):
+        return False
+    if not x and not allow_empty:
+        return False
+    return all(_is_sha256(h) for h in x)
+
+
 def _effective_access(role: str):
     return P.EffectiveAccess(P.ServicePrincipal("p2-eval", (role,), True, "enforce"), role)
 
@@ -381,9 +395,19 @@ def _bind_run_manifest(ev, run_manifest_sha256, prefix) -> list:
     return []
 
 
-def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None) -> list:
-    """B3.1/B2/B4: real M4 evidence — exact PASS/int/hash + sentinel id hashes disjoint จาก model inputs
-    + (เมื่อ decision path) ผูกกับ root run_manifest_sha256 เดียวกัน"""
+_M4_HASH_SETS = ("authorized_candidate_id_hashes", "authorized_candidate_text_hashes",
+                 "provider_candidate_id_hashes", "provider_candidate_text_hashes",
+                 "model_input_id_hashes", "model_input_text_hashes",
+                 "unauthorized_sentinel_id_hashes", "unauthorized_sentinel_text_hashes")
+
+
+def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None, require_stage=None) -> list:
+    """
+    B3.1/B2/B4 + B1(vacuous)/B2(text)/M1(stage): real M4 evidence — พิสูจน์ authorized ถึง model, sentinel ไม่ถึง
+    - B1: model ถูกเรียกจริง (model_invocation_count > 0, model_input ไม่ว่าง) — กัน PASS โดยไม่เรียกโมเดล
+    - B2: id **และ text** hash sets — provider ⊆ authorized, model_input ⊆ provider, disjoint จาก sentinel (id+text)
+    - M1: evidence_stage (preflight-n50 / selected-n) ; decision path บังคับ selected-n
+    """
     if not isinstance(m4, dict):
         return ["m4_evidence ต้องเป็น validated dict summary"]
     errs = []
@@ -394,13 +418,53 @@ def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None) -
         errs.append("m4 sentinel_reached_model ต้องเป็น False (exact)")
     if not _exact_zero_int(m4.get("unauthorized_in_model_inputs")):
         errs.append("m4 unauthorized_in_model_inputs ต้องเป็น 0 (exact int, ไม่รับ 0.0/False)")
-    sids, mids = m4.get("unauthorized_sentinel_id_hashes"), m4.get("model_input_id_hashes")
-    if not isinstance(sids, list) or not sids or not all(_is_sha256(h) for h in sids):
-        errs.append("m4 unauthorized_sentinel_id_hashes ต้องเป็น list ของ sha256 (ไม่ว่าง)")
-    if not isinstance(mids, list) or not all(_is_sha256(h) for h in mids):
-        errs.append("m4 model_input_id_hashes ต้องเป็น list ของ sha256")
-    if isinstance(sids, list) and isinstance(mids, list) and (set(sids) & set(mids)):
-        errs.append("m4 sentinel id ปรากฏใน model_input_id_hashes (M4 FAIL — sentinel ถึง model)")
+    # B1: model ถูกเรียกจริง (กัน vacuous pass ตอน model_input ว่าง)
+    if type(m4.get("model_invocation_count")) is not int or m4.get("model_invocation_count", 0) < 1:
+        errs.append("m4 model_invocation_count ต้องเป็น positive int (model ถูกเรียกจริง)")
+    # M1: evidence stage
+    stage = m4.get("evidence_stage")
+    if stage not in M4_STAGES:
+        errs.append(f"m4 evidence_stage ต้องอยู่ใน {M4_STAGES}")
+    if require_stage is not None and stage != require_stage:
+        errs.append(f"m4 evidence_stage ต้องเป็น {require_stage!r} (ได้ {stage!r})")
+    # B2: id + text hash sets (non-empty) + ความสัมพันธ์ subset/disjoint
+    sets = {}
+    for name in _M4_HASH_SETS:
+        v = m4.get(name)
+        if not _is_hash_list(v):
+            errs.append(f"m4 {name} ต้องเป็น list ของ sha256 (ไม่ว่าง)")
+            sets[name] = None
+        else:
+            sets[name] = set(v)
+
+    def _pair(a, b):
+        return sets.get(a) is not None and sets.get(b) is not None
+
+    if _pair("provider_candidate_id_hashes", "authorized_candidate_id_hashes") \
+            and not sets["provider_candidate_id_hashes"] <= sets["authorized_candidate_id_hashes"]:
+        errs.append("m4 provider_candidate_id ไม่ ⊆ authorized oracle (provider คืน point นอกสิทธิ์)")
+    if _pair("provider_candidate_text_hashes", "authorized_candidate_text_hashes") \
+            and not sets["provider_candidate_text_hashes"] <= sets["authorized_candidate_text_hashes"]:
+        errs.append("m4 provider_candidate_text ไม่ ⊆ authorized oracle (text ถูกสลับ)")
+    if _pair("model_input_id_hashes", "provider_candidate_id_hashes") \
+            and not sets["model_input_id_hashes"] <= sets["provider_candidate_id_hashes"]:
+        errs.append("m4 model_input_id ไม่ ⊆ provider")
+    if _pair("model_input_text_hashes", "provider_candidate_text_hashes") \
+            and not sets["model_input_text_hashes"] <= sets["provider_candidate_text_hashes"]:
+        errs.append("m4 model_input_text ไม่ ⊆ provider (text ถูกสลับก่อนเข้า model)")
+    if _pair("model_input_id_hashes", "unauthorized_sentinel_id_hashes") \
+            and (sets["model_input_id_hashes"] & sets["unauthorized_sentinel_id_hashes"]):
+        errs.append("m4 sentinel id ปรากฏใน model_input (sentinel ถึง model)")
+    if _pair("model_input_text_hashes", "unauthorized_sentinel_text_hashes") \
+            and (sets["model_input_text_hashes"] & sets["unauthorized_sentinel_text_hashes"]):
+        errs.append("m4 sentinel text ปรากฏใน model_input (sentinel text ถึง model)")
+    if _pair("authorized_candidate_id_hashes", "unauthorized_sentinel_id_hashes") \
+            and (sets["authorized_candidate_id_hashes"] & sets["unauthorized_sentinel_id_hashes"]):
+        errs.append("m4 sentinel id ปนใน authorized oracle (oracle ปนเปื้อน)")
+    if _pair("authorized_candidate_text_hashes", "unauthorized_sentinel_text_hashes") \
+            and (sets["authorized_candidate_text_hashes"] & sets["unauthorized_sentinel_text_hashes"]):
+        errs.append("m4 sentinel text ปนใน authorized oracle")
+    # model pin + binding
     if not _is_hex_commit(m4.get("model_revision")):
         errs.append("m4 model_revision ต้องเป็น immutable commit (hex)")
     if not _is_hex_commit(m4.get("tokenizer_revision")):
@@ -458,7 +522,8 @@ def decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_t
         return errs
     eh = eval_hash if eval_hash is not None else eval_set_sha256(cases)
     ch = corpus_hash if corpus_hash is not None else corpus_manifest_sha256(corpus)
-    errs += validate_m4_evidence(m4_evidence, eh, ch, run_manifest_sha256)
+    # M1: decision path ใช้ **M4b (selected-n)** เท่านั้น — M4a preflight ห้ามแทน
+    errs += validate_m4_evidence(m4_evidence, eh, ch, run_manifest_sha256, require_stage=M4_STAGE_SELECTED)
     errs += validate_canary_evidence(canary_evidence, eh, ch, run_manifest_sha256)
     # B2/B4: M4 กับ canary ต้องมาจาก run/index/model/image เดียวกัน (กันประกอบข้าม run)
     if isinstance(m4_evidence, dict) and isinstance(canary_evidence, dict):

@@ -285,9 +285,16 @@ check("M1.1: signoff ครบถูกชนิด -> ผ่าน", E.validate
 # ── B3.1/B2: real M4 / canary evidence — exact int/hash + sentinel disjoint + cross-run ──
 _eh, _ch = E.eval_set_sha256([case()]), E.corpus_manifest_sha256(CORPUS)
 _H = "a" * 64
+# M4 evidence v2 (hash-only id+text): authorized ⊇ provider ⊇ model_input ; sentinel disjoint
 _m4 = {"status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
        "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0,
-       "unauthorized_sentinel_id_hashes": ["b" * 64], "model_input_id_hashes": ["c" * 64, "d" * 64],
+       "model_invocation_count": 3, "evidence_stage": "selected-n",
+       "authorized_candidate_id_hashes": ["a" * 64, "b" * 64, "c" * 64],
+       "authorized_candidate_text_hashes": ["1" * 64, "2" * 64, "3" * 64],
+       "provider_candidate_id_hashes": ["a" * 64, "b" * 64],
+       "provider_candidate_text_hashes": ["1" * 64, "2" * 64],
+       "model_input_id_hashes": ["a" * 64], "model_input_text_hashes": ["1" * 64],
+       "unauthorized_sentinel_id_hashes": ["f" * 64], "unauthorized_sentinel_text_hashes": ["9" * 64],
        "model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "image_digest": "sha256:" + "e" * 64,
        "retrieval_index_manifest_sha256": _H, "run_id": "run-1", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
 _can = {"status": "PASS", "leak_count": 0, "auth_status": "VERIFIED",
@@ -299,10 +306,22 @@ check("B3.1: m4 PASS + schema ครบ -> valid", E.validate_m4_evidence(_m4, _
 check("B3.1: m4 status=FAIL -> error", E.validate_m4_evidence({**_m4, "status": "FAIL"}, _eh, _ch) != [])
 check("B3.1: m4 sentinel_reached_model=True -> error", E.validate_m4_evidence({**_m4, "sentinel_reached_model": True}, _eh, _ch) != [])
 check("B2: m4 unauthorized_in_model_inputs=0.0 (float) -> error (exact int)", E.validate_m4_evidence({**_m4, "unauthorized_in_model_inputs": 0.0}, _eh, _ch) != [])
-check("B2: m4 sentinel id ปรากฏใน model_input -> error", E.validate_m4_evidence({**_m4, "model_input_id_hashes": ["b" * 64]}, _eh, _ch) != [])
 check("B2: m4 image_digest ไม่ใช่ sha256:<hex> -> error", E.validate_m4_evidence({**_m4, "image_digest": "d"}, _eh, _ch) != [])
 check("B2: m4 model_revision ไม่ใช่ commit -> error", E.validate_m4_evidence({**_m4, "model_revision": "main"}, _eh, _ch) != [])
 check("B3.1: m4 hash ไม่ตรง -> error", E.validate_m4_evidence(_m4, "x", _ch) != [])
+# B1 (vacuous pass): model ถูกเรียกจริง
+check("B1: m4 model_invocation_count=0 -> error", any("invocation" in e for e in E.validate_m4_evidence({**_m4, "model_invocation_count": 0}, _eh, _ch)))
+check("B1: m4 model_input_id_hashes ว่าง -> error (ไม่มี candidate เข้า model)", any("model_input_id_hashes" in e for e in E.validate_m4_evidence({**_m4, "model_input_id_hashes": []}, _eh, _ch)))
+# B2 (text proof + subset/disjoint)
+check("B2: provider_id ⊄ authorized -> error", any("provider_candidate_id" in e for e in E.validate_m4_evidence({**_m4, "provider_candidate_id_hashes": ["a" * 64, "e" * 64]}, _eh, _ch)))
+check("B2: model_input_text ⊄ provider (text ถูกสลับ) -> error", any("model_input_text" in e for e in E.validate_m4_evidence({**_m4, "model_input_text_hashes": ["7" * 64]}, _eh, _ch)))
+check("B2: sentinel text ปรากฏใน model_input -> error", any("sentinel text" in e for e in E.validate_m4_evidence({**_m4, "model_input_text_hashes": ["9" * 64]}, _eh, _ch)))
+check("B2: sentinel id ปรากฏใน model_input -> error", E.validate_m4_evidence({**_m4, "model_input_id_hashes": ["f" * 64]}, _eh, _ch) != [])
+check("B2: authorized oracle ปนเปื้อน sentinel id -> error", any("oracle" in e for e in E.validate_m4_evidence({**_m4, "authorized_candidate_id_hashes": ["a" * 64, "b" * 64, "c" * 64, "f" * 64]}, _eh, _ch)))
+# M1 (stage)
+check("M1: m4 evidence_stage ผิด -> error", any("evidence_stage" in e for e in E.validate_m4_evidence({**_m4, "evidence_stage": "bogus"}, _eh, _ch)))
+check("M1: preflight m4 ใน decision path (require selected-n) -> error", any("evidence_stage" in e for e in E.validate_m4_evidence({**_m4, "evidence_stage": E.M4_STAGE_PREFLIGHT}, _eh, _ch, require_stage=E.M4_STAGE_SELECTED)))
+check("M1: preflight m4 standalone (require_stage None) -> valid", E.validate_m4_evidence({**_m4, "evidence_stage": E.M4_STAGE_PREFLIGHT}, _eh, _ch) == [])
 check("B3.1: canary PASS + schema ครบ -> valid", E.validate_canary_evidence(_can, _eh, _ch) == [], E.validate_canary_evidence(_can, _eh, _ch))
 check("B3.1: canary leak>0 -> error", E.validate_canary_evidence({**_can, "leak_count": 99}, _eh, _ch) != [])
 check("B2: canary leak_count=0.0 -> error (exact int)", E.validate_canary_evidence({**_can, "leak_count": 0.0}, _eh, _ch) != [])
