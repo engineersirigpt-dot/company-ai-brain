@@ -151,15 +151,54 @@ def validate_extracted_evidence(evidence_dir):
     wm = ed / "wheelhouse.manifest.sha256"
     if wm.is_file():
         rows = [ln.split() for ln in wm.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
-        names = [r[-1] for r in rows if r]
-        if not names:
+        if not rows:
             errs.append("wheelhouse.manifest ว่าง")
-        elif len(set(names)) != len(names):
+        elif any(len(r) < 2 or not _HEX64.match(r[0]) for r in rows):
+            errs.append("wheelhouse.manifest แถวต้องเป็น '<64hex>  <wheel>'")
+        elif len({r[-1] for r in rows}) != len(rows):
             errs.append("wheelhouse.manifest มี filename ซ้ำ")
 
     if errs:
         return {}, errs
     return {"model_file_manifest_sha256": model_manifest, "evidence_file_sha256": file_hashes}, []
+
+
+_FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def validate_receipt(receipt) -> list:
+    """
+    post-build gate (Codex pass criteria) — receipt SUCCEEDED ต้องผ่านทุกข้อ (คืน [] = ผ่าน):
+    status/return_code, image_id + build_log_sha256 + model_file_manifest_sha256 เป็น digest ถูก format,
+    source_sha256 exact 9 keys, evidence_file_sha256 exact 3 keys ทุกค่า 64-hex, git_commit full SHA, platform amd64
+    """
+    if not isinstance(receipt, dict):
+        return ["receipt ไม่ใช่ dict"]
+    errs = []
+    if receipt.get("status") != "SUCCEEDED":
+        errs.append("status != SUCCEEDED")
+    if receipt.get("return_code") != 0:
+        errs.append("return_code != 0")
+    if not _IID.match(receipt.get("image_id", "") if isinstance(receipt.get("image_id"), str) else ""):
+        errs.append("image_id ต้องเป็น sha256:<64hex>")
+    blog = receipt.get("build_log_sha256")
+    if not (isinstance(blog, str) and _HEX64.match(blog)):
+        errs.append("build_log_sha256 ต้องเป็น 64-hex (ไม่ null)")
+    mfm = receipt.get("model_file_manifest_sha256")
+    if not (isinstance(mfm, str) and _HEX64.match(mfm)):
+        errs.append("model_file_manifest_sha256 ต้องเป็น 64-hex")
+    src = receipt.get("source_sha256")
+    if not isinstance(src, dict) or set(src) != set(SOURCE_FILES) or not all(isinstance(v, str) and _HEX64.match(v) for v in src.values()):
+        errs.append(f"source_sha256 ต้องมี exact {len(SOURCE_FILES)} keys เป็น 64-hex")
+    ev = receipt.get("evidence_file_sha256")
+    if not isinstance(ev, dict) or set(ev) != set(EVIDENCE_NAMES) or not all(isinstance(v, str) and _HEX64.match(v) for v in ev.values()):
+        errs.append("evidence_file_sha256 ต้องมี exact 3 keys เป็น 64-hex")
+    gc = receipt.get("git_commit")
+    if not (isinstance(gc, str) and _FULL_SHA.match(gc)):
+        errs.append("git_commit ต้องเป็น full 40-hex")
+    if receipt.get("platform") != PLATFORM:
+        errs.append("platform != linux/amd64")
+    return errs
 
 
 def _atomic_write_json(path: Path, obj: dict) -> None:
@@ -170,7 +209,7 @@ def _atomic_write_json(path: Path, obj: dict) -> None:
 
 
 def run_build(py_base, out_dir, *, runner, inspector, extractor, read_iid=None,
-              git_commit="", root: Path = REPO_ROOT) -> int:
+              git_commit="", git_dirty=False, root: Path = REPO_ROOT) -> int:
     """
     lifecycle เดียว fail-closed. return 0 = success (มี build_receipt SUCCEEDED เท่านั้น) ;
     rc อื่น = fail (มี build_failure stage-aware). seams inject ได้เพื่อ test โดยไม่ใช้ Docker
@@ -197,7 +236,8 @@ def run_build(py_base, out_dir, *, runner, inspector, extractor, read_iid=None,
 
     request = {"status": "PENDING", "py_base_digest": py_base, "platform": PLATFORM,
                "image_tag": IMAGE_TAG, "model_name": PIN.RERANKER_MODEL, "model_commit": PIN.MODEL_COMMIT,
-               "git_commit": git_commit, "source_sha256": src_map, "context_bytes": context_bytes(root)}
+               "git_commit": git_commit, "git_dirty": bool(git_dirty),
+               "source_sha256": src_map, "declared_context_bytes": context_bytes(root)}
     _atomic_write_json(req_path, request)
 
     try:
@@ -271,11 +311,14 @@ def _runner_with_log(log_path: Path):
     return _run
 
 
-def _git_commit() -> str:
+def _git_state():
+    """คืน (full commit SHA, dirty). commit ว่าง/ dirty=True → validate_receipt/review จับได้ (hardening #4)"""
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT)).decode().strip()
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT)).decode().strip()
+        dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=str(REPO_ROOT)).decode().strip())
+        return commit, dirty
     except Exception:
-        return ""
+        return "", False
 
 
 def resolve_out_dir(arg) -> Path:
@@ -304,9 +347,15 @@ def main() -> int:
     if out_dir.exists() and any(out_dir.iterdir()):
         print(f"BUILD REFUSED: run directory ไม่ว่าง (ห้ามทับ): {out_dir}", file=sys.stderr)
         return 2
+    commit, dirty = _git_state()
     rc = run_build(args.py_base, out_dir,
                    runner=_runner_with_log(out_dir / "build.log"),
-                   inspector=_docker_inspect, extractor=_docker_extract_evidence, git_commit=_git_commit())
+                   inspector=_docker_inspect, extractor=_docker_extract_evidence,
+                   git_commit=commit, git_dirty=dirty)
+    if rc == 0:
+        gate = validate_receipt(json.loads((out_dir / "build_receipt.json").read_text(encoding="utf-8")))
+        if gate:
+            print("WARNING: receipt ยังไม่ผ่าน post-build gate: " + "; ".join(gate), file=sys.stderr)
     print(("SUCCEEDED -> " if rc == 0 else f"FAILED (rc={rc}) -> ") + str(out_dir))
     return rc
 

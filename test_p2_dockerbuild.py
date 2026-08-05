@@ -98,6 +98,20 @@ check("B1: evidence extra key -> error", DB.validate_extracted_evidence(_ev_dir(
 check("B1: model manifest malformed hash -> error", any("64-hex" in e for e in DB.validate_extracted_evidence(_ev_dir({**_good_evidence(), "model_file_manifest.sha256": "zzz"}))[1]))
 check("B1: evidence empty file -> error", any("ว่าง" in e for e in DB.validate_extracted_evidence(_ev_dir({**_good_evidence(), "wheelhouse.freeze.txt": "   "}))[1]))
 check("B1: wheel manifest dup filename -> error", any("ซ้ำ" in e for e in DB.validate_extracted_evidence(_ev_dir({**_good_evidence(), "wheelhouse.manifest.sha256": "a" * 64 + "  x.whl\n" + "b" * 64 + "  x.whl\n"}))[1]))
+check("B1: wheel manifest แถวไม่มี hash -> error (hardening #2)", any("แถว" in e for e in DB.validate_extracted_evidence(_ev_dir({**_good_evidence(), "wheelhouse.manifest.sha256": "just-a-filename.whl\n"}))[1]))
+
+# ── post-build gate: validate_receipt (Codex pass criteria) ────────────────────
+_GOOD_RECEIPT = {"status": "SUCCEEDED", "return_code": 0, "image_id": _IID, "platform": "linux/amd64",
+                 "build_log_sha256": "e" * 64, "model_file_manifest_sha256": "d" * 64, "git_commit": "c" * 40,
+                 "source_sha256": {n: "a" * 64 for n in DB.SOURCE_FILES},
+                 "evidence_file_sha256": {n: "b" * 64 for n in DB.EVIDENCE_NAMES}}
+check("gate: valid receipt -> []", DB.validate_receipt(_GOOD_RECEIPT) == [], DB.validate_receipt(_GOOD_RECEIPT))
+check("gate: build_log_sha256 null -> error (hardening #1)", any("build_log" in e for e in DB.validate_receipt({**_GOOD_RECEIPT, "build_log_sha256": None})))
+check("gate: source_sha256 ขาด key -> error", any("source_sha256" in e for e in DB.validate_receipt({**_GOOD_RECEIPT, "source_sha256": {"Dockerfile.p2": "a" * 64}})))
+check("gate: evidence < 3 keys -> error", any("evidence_file_sha256" in e for e in DB.validate_receipt({**_GOOD_RECEIPT, "evidence_file_sha256": {"model_file_manifest.sha256": "b" * 64}})))
+check("gate: git_commit สั้น -> error (hardening #4)", any("git_commit" in e for e in DB.validate_receipt({**_GOOD_RECEIPT, "git_commit": "deadbeef"})))
+check("gate: status != SUCCEEDED -> error", DB.validate_receipt({**_GOOD_RECEIPT, "status": "FAILED"}) != [])
+check("gate: image_id malformed -> error", any("image_id" in e for e in DB.validate_receipt({**_GOOD_RECEIPT, "image_id": "nope"})))
 
 # ── M1: parsed model manifest != file hash ─────────────────────────────────────
 _parsed, _perr = DB.validate_extracted_evidence(_ev_dir(_good_evidence()))
@@ -109,9 +123,9 @@ with tempfile.TemporaryDirectory() as tmp:
     rc = _run(tmp)
     rcpt = _read(tmp, "build_receipt.json")
     check("SUCCESS -> rc0 + receipt SUCCEEDED + image_id", rc == 0 and rcpt and rcpt["status"] == "SUCCEEDED" and rcpt["image_id"] == _IID)
-    check("SUCCESS -> model_file_manifest_sha256(=d*64) + evidence_file_sha256 + context_bytes + build_log_sha256 + source_sha256",
-          rcpt["model_file_manifest_sha256"] == "d" * 64 and rcpt["evidence_file_sha256"] and "context_bytes" in rcpt
-          and "build_log_sha256" in rcpt and len(rcpt["source_sha256"]) == len(DB.SOURCE_FILES))
+    check("SUCCESS -> model_file_manifest_sha256(=d*64) + evidence_file_sha256 + declared_context_bytes + build_log_sha256 + source_sha256 + git_dirty",
+          rcpt["model_file_manifest_sha256"] == "d" * 64 and rcpt["evidence_file_sha256"] and "declared_context_bytes" in rcpt
+          and "build_log_sha256" in rcpt and "git_dirty" in rcpt and len(rcpt["source_sha256"]) == len(DB.SOURCE_FILES))
     check("SUCCESS -> ไม่มี build_failure", _read(tmp, "build_failure.json") is None)
 
 # ── B1 e2e: incomplete/None evidence -> EVIDENCE_INVALID, ไม่มี receipt ─────────
