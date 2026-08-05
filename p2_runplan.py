@@ -138,6 +138,11 @@ def validate_run_plan(plan) -> list:
         errs.append("gate_tags ต้องเป็น list ของ str ไม่ว่าง/ไม่ซ้ำ (frozen — reject empty)")
     if not _valid_str_list(plan.get("evaluated_roles")):
         errs.append("evaluated_roles ต้องเป็น list ของ str ไม่ว่าง/ไม่ซ้ำ (frozen)")
+    # B2: freeze M4 case/visibility manifest binding ใน root (กัน M4b รันคนละ case/role/visibility)
+    if not _is_sha256(plan.get("m4_case_manifest_sha256")):
+        errs.append("m4_case_manifest_sha256 ต้องเป็น sha256 (frozen M4 manifest binding)")
+    if not _valid_str_list(plan.get("required_categories")):
+        errs.append("required_categories ต้องเป็น list ของ str ไม่ว่าง/ไม่ซ้ำ (frozen)")
     ec = plan.get("expected_counts")
     if not isinstance(ec, dict) or any(type(ec.get(k)) is not int or ec.get(k, 0) < 1 for k in _COUNT_KEYS):
         errs.append(f"expected_counts ต้องมี {_COUNT_KEYS} เป็น positive int")
@@ -520,7 +525,7 @@ def _root_binding_errors(plan, cases, corpus, m4, canary, sel_digest) -> list:
 
 
 def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
-              m4_evidence, canary_evidence, signoff, cases, corpus, known_roles) -> dict:
+              m4_evidence, canary_evidence, signoff, cases, corpus, known_roles, m4_frozen_manifest) -> dict:
     """
     **decision entry point เดียว** — fail-closed + authoritative. คืน DECISION (approved) ก็ต่อเมื่อ:
       valid RunPlan → root/model digests ตรง artifact+evidence จริง → selected N (dev,∈N_SET) →
@@ -589,9 +594,15 @@ def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
     if binding:
         return _not_eligible(binding)
 
-    # evidence + signoff gate (labels/coverage/m4/canary/signoff) — ผูก root, ค่า gate/role จาก plan
+    # B2: frozen M4 case/visibility manifest ต้องผูกกับ RunPlan (digest) ก่อนเข้า evidence gate
+    if not isinstance(m4_frozen_manifest, dict):
+        return _not_eligible(["m4_frozen_manifest หาย/ผิดชนิด"])
+    if E.m4_case_manifest_sha256(m4_frozen_manifest) != plan["m4_case_manifest_sha256"]:
+        return _not_eligible(["frozen M4 manifest digest != RunPlan.m4_case_manifest_sha256"])
+
+    # evidence + signoff gate (labels/coverage/m4/canary/signoff) — ผูก root + frozen M4 manifest, ค่า gate/role จาก plan
     ev_errs = E.decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff,
-                                         m4_evidence, canary_evidence, root, eval_hash, corpus_hash)
+                                         m4_evidence, canary_evidence, root, m4_frozen_manifest, eval_hash, corpus_hash)
     if ev_errs:
         return _not_eligible([f"decision evidence gate ({len(ev_errs)}): {ev_errs[:3]}"])
 

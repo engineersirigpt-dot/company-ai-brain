@@ -74,8 +74,21 @@ def _exact_zero_int(x) -> bool:
 M4_STAGE_PREFLIGHT = "preflight-n50"
 M4_STAGE_SELECTED = "selected-n"
 M4_STAGES = (M4_STAGE_PREFLIGHT, M4_STAGE_SELECTED)
-M4_SCHEMA_VERSION = "p2-m4-v3"           # v3: point↔text pair digests + unfiltered control + counts
+M4_SCHEMA_VERSION = "p2-m4-v4"           # v4: per_case[] authoritative + recompute-from-body + manifest binding
 N_SET_M4 = (10, 20, 30, 50)
+
+
+def _pair_sha256(point_id_sha256, text_sha256) -> str:
+    """canonical pair formula (B3) — ต้อง recompute ตรงกับ pair_sha256 ที่ evidence อ้าง"""
+    return hashlib.sha256(f"{point_id_sha256}:{text_sha256}".encode("utf-8")).hexdigest()
+
+
+def m4_case_manifest_sha256(frozen: dict) -> str:
+    """digest ของ frozen M4 case/visibility manifest — bind เข้า RunPlan (B2)"""
+    body = {"cases": frozen.get("cases"),
+            "required_categories": sorted(frozen.get("required_categories", [])),
+            "evaluated_roles": sorted(frozen.get("evaluated_roles", []))}
+    return hashlib.sha256(_canonical_json(body)).hexdigest()
 
 
 def _is_hash_list(x, allow_empty=False) -> bool:
@@ -411,25 +424,125 @@ def _bind_run_manifest(ev, run_manifest_sha256, prefix) -> list:
     return []
 
 
-# pair digests ต่อ candidate = sha256(point_id_sha256:rerank_text_sha256) — ผูก point↔text เป็นคู่ (B2)
-_M4_PAIR_STAGES = ("authorized_pair_digests", "provider_pair_digests", "model_input_pair_digests",
-                   "rerank_output_pair_digests", "sentinel_pair_digests", "unfiltered_topn_pair_digests")
+_M4_PAIR_LISTS = ("provider_pairs", "model_input_pairs", "rerank_output_pairs", "unfiltered_topn_pairs")
 
 
-def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None, require_stage=None, expected=None) -> list:
+def _m4_case_errors(i, c, fc, required, top_n) -> list:
+    """B1 authoritative — ตรวจ security invariant **ภายใน case/role เดียว** (ก่อน aggregate)"""
+    tag, errs = f"m4 per_case[{i}]", []
+    if not isinstance(c, dict):
+        return [f"{tag}: ไม่ใช่ dict"]
+    # B3 recompute: pair_sha256 = _pair_sha256(point_id, text) ; ทุก pair ต้อง derive จาก components
+    comps, valid = c.get("pair_components"), set()
+    if not isinstance(comps, list) or not comps:
+        errs.append(f"{tag}: pair_components ว่าง/ผิดชนิด")
+    else:
+        for comp in comps:
+            if not isinstance(comp, dict):
+                errs.append(f"{tag}: pair_component ไม่ใช่ dict")
+                continue
+            pid, txt, pd = comp.get("point_id_sha256"), comp.get("rerank_text_sha256"), comp.get("pair_sha256")
+            if not (_is_sha256(pid) and _is_sha256(txt) and _is_sha256(pd)):
+                errs.append(f"{tag}: pair_component ต้องเป็น sha256 ครบ")
+            elif _pair_sha256(pid, txt) != pd:
+                errs.append(f"{tag}: pair_sha256 ไม่ตรงสูตร (point_id:text)")
+            else:
+                valid.add(pd)
+    got = {}
+    for name in _M4_PAIR_LISTS:
+        v = c.get(name)
+        if not _is_hash_list(v):
+            errs.append(f"{tag}: {name} ต้องเป็น sha256 pair list (ไม่ว่าง)")
+            got[name] = None
+        else:
+            if valid and any(p not in valid for p in v):
+                errs.append(f"{tag}: {name} มี pair ที่ไม่ได้ derive จาก pair_components")
+            got[name] = v
+    exp_auth = fc.get("authorized_pairs") if isinstance(fc, dict) else None
+    exp_sent = fc.get("sentinel_pairs") if isinstance(fc, dict) else None
+    if not _is_hash_list(exp_auth):
+        errs.append(f"{tag}: frozen authorized_pairs ว่าง")
+        exp_auth = None
+    if not _is_hash_list(exp_sent):
+        errs.append(f"{tag}: frozen sentinel_pairs ว่าง")
+        exp_sent = None
+    # identity/category ผูก frozen manifest (B2/M2)
+    if isinstance(fc, dict):
+        if c.get("role_identity_sha256") != fc.get("role_identity_sha256"):
+            errs.append(f"{tag}: role_identity ไม่ตรง frozen manifest")
+        if c.get("category") != fc.get("category"):
+            errs.append(f"{tag}: category ไม่ตรง frozen manifest")
+    if c.get("category") not in required:
+        errs.append(f"{tag}: category ไม่อยู่ใน required_categories")
+    if c.get("selected_n") != top_n:
+        errs.append(f"{tag}: selected_n ไม่ตรง top-level")
+    if not _is_sha256(c.get("case_id_sha256")):
+        errs.append(f"{tag}: case_id_sha256 ต้อง sha256")
+    if not _is_sha256(c.get("query_vector_sha256")):
+        errs.append(f"{tag}: query_vector_sha256 ต้อง sha256")
+    prov, minp, rer, unf = got["provider_pairs"], got["model_input_pairs"], got["rerank_output_pairs"], got["unfiltered_topn_pairs"]
+    # within-case security invariants
+    if prov is not None and exp_auth is not None and not _ms_subset(prov, exp_auth):
+        errs.append(f"{tag}: provider ไม่ ⊆ authorized (case นี้)")
+    if minp is not None and prov is not None and not _ms_subset(minp, prov):
+        errs.append(f"{tag}: model_input ไม่ ⊆ provider")
+    if rer is not None and minp is not None and not _ms_equal(rer, minp):
+        errs.append(f"{tag}: rerank ไม่ใช่ permutation ของ model_input")
+    if minp is not None and exp_sent is not None and not _ms_disjoint(minp, exp_sent):
+        errs.append(f"{tag}: sentinel ถึง model_input (LEAK) — category {c.get('category')!r}")
+    if exp_auth is not None and exp_sent is not None and not _ms_disjoint(exp_auth, exp_sent):
+        errs.append(f"{tag}: authorized/sentinel oracle ปนกัน")
+    # B1 load-bearing: sentinel ⊆ unfiltered top-N + observed rank 1..N ครบทุก sentinel
+    if unf is not None and exp_sent is not None and not _ms_subset(exp_sent, unf):
+        errs.append(f"{tag}: sentinel ไม่ติด unfiltered top-N (filter อาจไม่ load-bearing)")
+    ranks = c.get("observed_sentinel_ranks")
+    if not isinstance(ranks, list) or not ranks:
+        errs.append(f"{tag}: observed_sentinel_ranks ว่าง")
+    elif exp_sent is not None:
+        seen, ok = {}, True
+        for r in ranks:
+            if not (isinstance(r, list) and len(r) == 2 and _is_sha256(r[0]) and type(r[1]) is int):
+                errs.append(f"{tag}: observed_sentinel_ranks ต้องเป็น [pair_sha256, int]")
+                ok = False
+                break
+            seen[r[0]] = r[1]
+        if ok:
+            if set(seen) != set(exp_sent):
+                errs.append(f"{tag}: observed_sentinel_ranks ไม่ครอบ sentinel ทุกตัว")
+            elif any(rk < 1 or rk > top_n for rk in seen.values()):
+                errs.append(f"{tag}: sentinel observed rank ต้อง 1..selected_n (ต้องแข่งติด top-N)")
+    # counts/finite/status (B3 ต่อ case)
+    mcc, mic, scc = c.get("model_call_count"), c.get("model_input_count"), c.get("score_count")
+    if type(mcc) is not int or mcc < 1:
+        errs.append(f"{tag}: model_call_count ต้อง positive int")
+    if type(mic) is not int or mic < 1:
+        errs.append(f"{tag}: model_input_count ต้อง positive int")
+    if type(scc) is not int or type(mic) is not int or scc != mic:
+        errs.append(f"{tag}: score_count == model_input_count")
+    if minp is not None and type(mic) is int and len(minp) != mic:
+        errs.append(f"{tag}: model_input_count != len(model_input_pairs)")
+    if c.get("all_scores_finite") is not True:
+        errs.append(f"{tag}: all_scores_finite ต้อง True")
+    if c.get("status") != "PASS":
+        errs.append(f"{tag}: status != PASS (zero-skip)")
+    return errs
+
+
+def validate_m4_run_evidence(m4, frozen, eval_hash, corpus_hash, run_manifest_sha256=None, require_stage=None) -> list:
     """
-    real M4 evidence v3 — พิสูจน์ว่า permission filter เป็นด่านที่มีผลจริง (hash-only, ไม่มี raw text):
-    - B1 unfiltered control: sentinel ต้องติด **unfiltered top-N** (⊆) แล้วหายจาก provider/model → filter load-bearing
-    - B2 pair-bound: point↔text เป็น **pair digest** ; provider ⊆ authorized, model_input ⊆ provider,
-      rerank_output = permutation ของ model_input, disjoint จาก sentinel (multiset)
-    - B3 counts: model_call/input/score > 0, score_count == model_input_count, all_scores_finite,
-      expected==completed case count > 0, error/skip = 0, scorer_kind = pinned-cross-encoder
-    - M1/M3 stage: preflight-n50 (decision_eligible=False, selected_n=50, ไม่มี selection_digest) vs
-      selected-n (selected_n ∈ N_SET, มี selection_digest) ; decision path บังคับ selected-n
-    - expected (frozen run request) → เทียบ exact pin/image/index/case set (ไม่ใช่แค่ format)
+    real M4 run evidence v4 — **per_case[] เป็นหลักฐาน authoritative** (permission เป็น invariant ต่อ query/role):
+    - B1: subset/permutation/disjoint + unfiltered load-bearing ตรวจ **ภายในแต่ละ case** ก่อน aggregate
+    - B2: bind กับ frozen M4 case/visibility manifest (require frozen — ไม่มี fail-open) ; case/role/category exact
+    - B3: recompute raw_evidence_sha256 จาก per_case body + recompute pair_sha256 จาก components (ไม่ใช่ self-stamp)
+    - M2: per-case category + expected sentinel + observed rank ; required-category coverage ครบ zero missing case
+    - M1/M3: stage contract + pin/index/run_manifest binding
+    frozen = {cases:{case_id_sha256:{role_identity_sha256,category,authorized_pairs,sentinel_pairs}},
+              required_categories:[...], evaluated_roles:[...]}
     """
     if not isinstance(m4, dict):
-        return ["m4_evidence ต้องเป็น validated dict summary"]
+        return ["m4 run evidence ต้องเป็น dict"]
+    if not isinstance(frozen, dict) or not isinstance(frozen.get("cases"), dict) or not frozen["cases"]:
+        return ["frozen M4 manifest (cases dict) จำเป็น — public gate ห้าม fail-open (expected=None)"]
     errs = []
     if m4.get("schema_version") != M4_SCHEMA_VERSION:
         errs.append(f"m4 schema_version ต้องเป็น {M4_SCHEMA_VERSION}")
@@ -440,8 +553,9 @@ def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None, r
         errs.append("m4 sentinel_reached_model ต้องเป็น False (exact)")
     if not _exact_zero_int(m4.get("unauthorized_in_model_inputs")):
         errs.append("m4 unauthorized_in_model_inputs ต้องเป็น 0 (exact int)")
+    if m4.get("scorer_kind") != "pinned-cross-encoder":
+        errs.append("m4 scorer_kind ต้อง 'pinned-cross-encoder'")
 
-    # ── M1/M3: stage-specific contract ─────────────────────────────────────────
     stage, sel_n = m4.get("evidence_stage"), m4.get("selected_n")
     if stage not in M4_STAGES:
         errs.append(f"m4 evidence_stage ต้องอยู่ใน {M4_STAGES}")
@@ -460,59 +574,50 @@ def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None, r
         if not _is_sha256(m4.get("selection_digest")):
             errs.append("m4 selected-n ต้องมี selection_digest (sha256)")
 
-    # ── B3: case + model accounting (zero-skip, finite, runner-derived) ────────
-    ecc, ccc = m4.get("expected_case_count"), m4.get("completed_case_count")
-    if type(ecc) is not int or type(ccc) is not int or ecc != ccc or ecc < 1:
-        errs.append("m4 expected_case_count == completed_case_count > 0")
-    if not _exact_zero_int(m4.get("error_count")):
-        errs.append("m4 error_count ต้อง 0 (exact int)")
-    if not _exact_zero_int(m4.get("skip_count")):
-        errs.append("m4 skip_count ต้อง 0 (exact int)")
-    if not _is_hash_list(m4.get("case_id_hashes")):
-        errs.append("m4 case_id_hashes ต้องเป็น sha256 list (ไม่ว่าง)")
-    elif type(ccc) is int and len(m4["case_id_hashes"]) != ccc:
-        errs.append("m4 case_id_hashes count != completed_case_count")
-    mcc, mic, scc = m4.get("model_call_count"), m4.get("model_input_count"), m4.get("score_count")
-    if type(mcc) is not int or mcc < 1:
-        errs.append("m4 model_call_count ต้อง positive int (model ถูกเรียกจริง)")
-    if type(mic) is not int or mic < 1:
-        errs.append("m4 model_input_count ต้อง positive int")
-    if type(scc) is not int or type(mic) is not int or scc != mic:
-        errs.append("m4 score_count ต้อง == model_input_count")
-    if m4.get("all_scores_finite") is not True:
-        errs.append("m4 all_scores_finite ต้อง True (runner derive จาก score จริง)")
-    if m4.get("scorer_kind") != "pinned-cross-encoder":
-        errs.append("m4 scorer_kind ต้อง 'pinned-cross-encoder' (positive control)")
+    # B2: frozen manifest binding (digest recompute + m4 อ้างตรง)
+    man_digest = m4_case_manifest_sha256(frozen)
+    if m4.get("m4_case_manifest_sha256") != man_digest:
+        errs.append("m4 m4_case_manifest_sha256 != frozen manifest (recompute)")
+    if frozen.get("m4_case_manifest_sha256") not in (None, man_digest):
+        errs.append("frozen m4_case_manifest_sha256 ไม่ตรง cases (manifest ปนเปื้อน)")
+    required = frozen.get("required_categories")
+    if not isinstance(required, list) or not required:
+        errs.append("frozen required_categories ว่าง")
+        required = []
 
-    # ── B2/B1: pair-bound digests + subset/permutation/disjoint + unfiltered control ──
-    pairs = {}
-    for name in _M4_PAIR_STAGES:
-        v = m4.get(name)
-        if not _is_hash_list(v):
-            errs.append(f"m4 {name} ต้องเป็น sha256 pair list (ไม่ว่าง)")
-            pairs[name] = None
-        else:
-            pairs[name] = v
+    # B3: recompute raw_evidence_sha256 จาก per_case body
+    pcs = m4.get("per_case")
+    if not isinstance(pcs, list) or not pcs:
+        errs.append("m4 per_case ว่าง/ไม่ใช่ list")
+        pcs = []
+    try:
+        recomputed = hashlib.sha256(_canonical_json(pcs)).hexdigest()
+    except (ValueError, TypeError):
+        recomputed = None
+        errs.append("m4 per_case ไม่ canonicalizable")
+    if recomputed is not None and m4.get("raw_evidence_sha256") != recomputed:
+        errs.append("m4 raw_evidence_sha256 != recompute จาก per_case body")
 
-    def _have(*ns):
-        return all(pairs.get(n) is not None for n in ns)
+    # B1/M2: per-case authoritative + case set exact + category coverage
+    fcases, seen_ids, cats = frozen["cases"], [], set()
+    for i, c in enumerate(pcs):
+        cid = c.get("case_id_sha256") if isinstance(c, dict) else None
+        seen_ids.append(cid)
+        fc = fcases.get(cid) if isinstance(cid, str) else None
+        if fc is None:
+            errs.append(f"m4 per_case[{i}] case_id ไม่อยู่ frozen manifest")
+        errs += _m4_case_errors(i, c, fc, required, sel_n)
+        if isinstance(c, dict) and isinstance(c.get("category"), str):
+            cats.add(c["category"])
+    if set(x for x in seen_ids if x is not None) != set(fcases):
+        errs.append("m4 case set != frozen manifest (exact)")
+    if len(seen_ids) != len(set(seen_ids)):
+        errs.append("m4 per_case มี case_id ซ้ำ")
+    missing = set(required) - cats
+    if missing:
+        errs.append(f"m4 required category ไม่ครบ (missing={sorted(missing)})")
 
-    if _have("provider_pair_digests", "authorized_pair_digests") and not _ms_subset(pairs["provider_pair_digests"], pairs["authorized_pair_digests"]):
-        errs.append("m4 provider pairs ไม่ ⊆ authorized oracle (point↔text ไม่ตรง / นอกสิทธิ์)")
-    if _have("model_input_pair_digests", "provider_pair_digests") and not _ms_subset(pairs["model_input_pair_digests"], pairs["provider_pair_digests"]):
-        errs.append("m4 model_input pairs ไม่ ⊆ provider")
-    if _have("rerank_output_pair_digests", "model_input_pair_digests") and not _ms_equal(pairs["rerank_output_pair_digests"], pairs["model_input_pair_digests"]):
-        errs.append("m4 rerank_output ไม่ใช่ permutation ของ model_input")
-    if _have("model_input_pair_digests", "sentinel_pair_digests") and not _ms_disjoint(pairs["model_input_pair_digests"], pairs["sentinel_pair_digests"]):
-        errs.append("m4 sentinel pair ปรากฏใน model_input (sentinel ถึง model)")
-    if _have("authorized_pair_digests", "sentinel_pair_digests") and not _ms_disjoint(pairs["authorized_pair_digests"], pairs["sentinel_pair_digests"]):
-        errs.append("m4 sentinel pair ปนใน authorized oracle (oracle ปนเปื้อน)")
-    if _have("sentinel_pair_digests", "unfiltered_topn_pair_digests") and not _ms_subset(pairs["sentinel_pair_digests"], pairs["unfiltered_topn_pair_digests"]):
-        errs.append("m4 sentinel ไม่ติด unfiltered top-N (B1: ยังพิสูจน์ไม่ได้ว่า filter ช่วยจริง)")
-    if pairs.get("model_input_pair_digests") is not None and type(mic) is int and len(pairs["model_input_pair_digests"]) != mic:
-        errs.append("m4 model_input_count != len(model_input_pair_digests)")
-
-    # ── pin + durable binding ──────────────────────────────────────────────────
+    # pin/index/binding
     if not _is_hex_commit(m4.get("model_revision")):
         errs.append("m4 model_revision ต้องเป็น immutable commit (hex)")
     if not _is_hex_commit(m4.get("tokenizer_revision")):
@@ -521,20 +626,6 @@ def validate_m4_evidence(m4, eval_hash, corpus_hash, run_manifest_sha256=None, r
         errs.append("m4 image_digest ต้องเป็น sha256:<64hex>")
     if not _is_sha256(m4.get("model_file_manifest_sha256")):
         errs.append("m4 model_file_manifest_sha256 ต้องเป็น sha256")
-    if not _is_sha256(m4.get("raw_evidence_sha256")):
-        errs.append("m4 raw_evidence_sha256 ต้องเป็น sha256 (durable evidence digest)")
-
-    # ── M3: exact compare กับ frozen run request (ไม่ใช่แค่ format) ─────────────
-    if expected is not None:
-        for k in ("model_revision", "tokenizer_revision", "model_file_manifest_sha256",
-                  "image_digest", "retrieval_index_manifest_sha256"):
-            if m4.get(k) != expected.get(k):
-                errs.append(f"m4 {k} != expected (frozen run request)")
-        exp_cases = expected.get("case_id_hashes")
-        if exp_cases is not None and isinstance(m4.get("case_id_hashes"), list) \
-                and Counter(m4["case_id_hashes"]) != Counter(exp_cases):
-            errs.append("m4 case_id_hashes != expected frozen manifest (exact)")
-
     errs += _evidence_hash_binding(m4, eval_hash, corpus_hash, "m4")
     errs += _bind_run_manifest(m4, run_manifest_sha256, "m4")
     return errs
@@ -575,10 +666,10 @@ def validate_canary_evidence(canary, eval_hash, corpus_hash, run_manifest_sha256
 
 def decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff,
                              m4_evidence, canary_evidence, run_manifest_sha256,
-                             eval_hash=None, corpus_hash=None) -> list:
+                             m4_frozen, eval_hash=None, corpus_hash=None) -> list:
     """
     B3/B3.1/B4: **evidence+signoff gate (คืน error list เท่านั้น — ไม่ประกาศ approved เอง)**.
-    `run_manifest_sha256` เป็น required (ไม่มี default None) → M4/canary ต้องผูก root เสมอ.
+    `run_manifest_sha256` + `m4_frozen` (frozen M4 case/visibility manifest) เป็น required → ไม่มี fail-open.
     เจ้าเดียวที่ประกาศ approved=True คือ `p2_runplan.decide_p2()` หลังผ่านทุกด่าน (N/quality/latency/hard-neg)
     """
     errs = decision_benchmark_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff)
@@ -586,8 +677,8 @@ def decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_t
         return errs
     eh = eval_hash if eval_hash is not None else eval_set_sha256(cases)
     ch = corpus_hash if corpus_hash is not None else corpus_manifest_sha256(corpus)
-    # M1: decision path ใช้ **M4b (selected-n)** เท่านั้น — M4a preflight ห้ามแทน
-    errs += validate_m4_evidence(m4_evidence, eh, ch, run_manifest_sha256, require_stage=M4_STAGE_SELECTED)
+    # M1: decision path ใช้ **M4b (selected-n)** ผูก frozen manifest — M4a preflight ห้ามแทน
+    errs += validate_m4_run_evidence(m4_evidence, m4_frozen, eh, ch, run_manifest_sha256, require_stage=M4_STAGE_SELECTED)
     errs += validate_canary_evidence(canary_evidence, eh, ch, run_manifest_sha256)
     # B2/B4: M4 กับ canary ต้องมาจาก run/index/model/image เดียวกัน (กันประกอบข้าม run)
     if isinstance(m4_evidence, dict) and isinstance(canary_evidence, dict):

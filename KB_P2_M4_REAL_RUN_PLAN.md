@@ -23,9 +23,9 @@
 ## 12 หัวข้อที่ล็อก (ต้องครบก่อนขอ GO run)
 
 ### 1. Isolation interlock (fail-closed)
-- Qdrant = **fresh project/network/volume/port/collection + run marker** ของตัวเอง
-- runner **reject** prod URL, prod collection, `:6333`, และ config/env ไม่ครบ — ต่างแค่ชื่อ collection **ไม่พอ**
-- ต้องมี `isolation_interlock=PASS` จาก positive assertion (ping collection ว่าง + run marker ตรง) ไม่ใช่แค่ไม่ error
+- Qdrant = **fresh compose project / internal network ID / fresh volume / collection UUID+name + synthetic run marker** ของตัวเอง
+- interlock **allow exact** ชุดข้างต้น + reject known **production endpoint/collection** เป็น defense — **port ไม่ใช่ trust signal** (ดูหัวข้อ 7: endpoint isolated ที่ถูกต้องคือ `qdrant:6333`)
+- ต้องมี `isolated_interlock=PASS` จาก positive assertion (ping collection ว่าง + run marker ตรง) ไม่ใช่แค่ไม่ error
 
 ### 2. Synthetic-only corpus
 - freeze **seed manifest**: point ID, payload ACL, vector/index metadata, **text hash** (ห้าม raw text)
@@ -92,31 +92,28 @@ canonical raw receipt ของ: seed manifest, index, oracle output, provider c
 - **export evidence ก่อน teardown** · ระบุ collection UUID/volume/network ที่ลบ
 - เก็บเฉพาะ evidence ที่ **ไม่มี secret/raw text**
 
-## Evidence schema (M4Evidence **v3** — pair-bound, hash-only) ที่ validator บังคับแล้ว
+## Evidence schema (M4Evidence **v4** — per_case authoritative) ที่ validator บังคับแล้ว
 ```
-schema_version = p2-m4-v3
-status / isolated_interlock / independent_oracle = PASS · sentinel_reached_model = false
-evidence_stage ∈ {preflight-n50, selected-n}
-# case + model accounting (B3, runner-derived)
-expected_case_count == completed_case_count > 0 · error_count = skip_count = 0 · case_id_hashes[]
-model_call_count > 0 · model_input_count > 0 · score_count == model_input_count
-all_scores_finite = true · scorer_kind = pinned-cross-encoder · unauthorized_in_model_inputs = 0
-# pair digests = sha256(point_id_sha256 : rerank_text_sha256) — ordered/multiset (B2)
-authorized_pair_digests      (จาก oracle+manifest matrix)
-provider_pair_digests        (หลัง Qdrant/filter+postcondition)
-model_input_pair_digests     (spy ก่อน real cross-encoder ; len == model_input_count)
-rerank_output_pair_digests   (== permutation ของ model_input)
-sentinel_pair_digests        (⊆ unfiltered_topn ; ∩ model_input = ∅)
-unfiltered_topn_pair_digests (raw unfiltered query — B1)
+schema_version = p2-m4-v4 · status/isolated_interlock/independent_oracle = PASS · scorer_kind = pinned-cross-encoder
+evidence_stage ∈ {preflight-n50, selected-n} · sentinel_reached_model = false · unauthorized_in_model_inputs = 0
+m4_case_manifest_sha256   ← ต้อง == RunPlan.m4_case_manifest_sha256 (frozen binding, B2)
+raw_evidence_sha256       ← recompute จาก canonical(per_case) (B3, ไม่ใช่ self-stamp)
+per_case[]:               ← **หลักฐาน authoritative** (security invariant ตรวจต่อ case/role — B1)
+  case_id_sha256 · role_identity_sha256 · category · selected_n · query_vector_sha256
+  pair_components[{point_id_sha256, rerank_text_sha256, pair_sha256}]  ← recompute pair (B3)
+  unfiltered_topn_pairs[]  (raw unfiltered query) · observed_sentinel_ranks[[pair, rank≤N]]  (B1/M2)
+  provider_pairs[] ⊆ authorized(frozen) · model_input_pairs[] ⊆ provider · rerank_output_pairs = permutation(model_input)
+  model_input ∩ sentinel(frozen) = ∅ · sentinel ⊆ unfiltered_topn
+  model_call_count/model_input_count/score_count > 0 (score==input) · all_scores_finite · status = PASS
 # pin + durable binding
 model_revision / tokenizer_revision (commit) · image_digest · model_file_manifest_sha256
-run_id · retrieval_index_manifest_sha256 · raw_evidence_sha256 · eval/corpus hash
-run_manifest_sha256 (decision path) · selection_digest (M4b เท่านั้น)
-# stage-specific: preflight → decision_eligible=false, selected_n=50, ไม่มี selection_digest
-#                 selected-n → selected_n ∈ N_SET, มี selection_digest
-# expected (frozen run request) → เทียบ exact pin/image/index/case set
+run_id · retrieval_index_manifest_sha256 · eval/corpus hash · run_manifest_sha256 (decision) · selection_digest (M4b)
+# frozen M4 manifest (จาก fixture/oracle — expected_visible_roles matrix, M2):
+#   cases{case_id: {role_identity_sha256, category, authorized_pairs[], sentinel_pairs[]}}
+#   required_categories[] · evaluated_roles[]  → digest = m4_case_manifest_sha256 (ผูกเข้า RunPlan)
+# validator: exact case set == frozen · required-category coverage ครบ · zero missing case
 ```
-> validator `validate_m4_evidence` v3 พร้อมแล้ว (test_p2.py 203/203) — harness เพียงผลิต evidence ตาม schema นี้
+> validator `validate_m4_run_evidence` v4 + RunPlan binding พร้อมแล้ว (test_p2_m4.py 24/24 รวม cross-role swap) — harness เพียงผลิต evidence ตาม schema นี้
 
 ## Gate ที่คงไว้
 - Data Owner sign-off **ไม่จำเป็นกับ M4a** (isolated synthetic mechanics) — แต่ M4a ติดป้าย non-decision และ **ห้ามส่งเข้า `decide_p2()` แทน M4b**

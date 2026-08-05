@@ -257,9 +257,9 @@ check("B3: artifact_manifest_unapproved approved=False (smoke)",
 check("B3: ไม่มี public decision_benchmark_manifest (approved=True builder) แล้ว",
       not hasattr(E, "decision_benchmark_manifest"))
 check("B3: decision_evidence_errors ไม่มี signoff -> error list (ไม่ approve)",
-      len(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], None, "m4", "canary", "a" * 64)) > 0)
+      len(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], None, "m4", "canary", "a" * 64, {})) > 0)
 check("B3: decision_evidence_errors คืน list เสมอ (ไม่มี approved=True self-stamp)",
-      isinstance(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs, None, "canary", "a" * 64), list))
+      isinstance(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs, None, "canary", "a" * 64, {}), list))
 
 # ── M1: combined gate malformed artifacts -> controlled (ไม่ crash) ────────────
 def _no_crash(fn):
@@ -285,63 +285,12 @@ check("M1.1: signoff ครบถูกชนิด -> ผ่าน", E.validate
 # ── B3.1/B2: real M4 / canary evidence — exact int/hash + sentinel disjoint + cross-run ──
 _eh, _ch = E.eval_set_sha256([case()]), E.corpus_manifest_sha256(CORPUS)
 _H = "a" * 64
-# M4 evidence v3 (point↔text pair digests): authorized ⊇ provider ⊇ model_input=rerank ; sentinel ⊆ unfiltered, disjoint
-_m4 = {"schema_version": "p2-m4-v3", "status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
-       "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0,
-       "evidence_stage": "selected-n", "selected_n": 10, "selection_digest": "d" * 64,
-       "expected_case_count": 1, "completed_case_count": 1, "error_count": 0, "skip_count": 0, "case_id_hashes": ["e" * 64],
-       "model_call_count": 1, "model_input_count": 1, "score_count": 1, "all_scores_finite": True, "scorer_kind": "pinned-cross-encoder",
-       "authorized_pair_digests": ["a" * 64, "b" * 64, "c" * 64], "provider_pair_digests": ["a" * 64, "b" * 64],
-       "model_input_pair_digests": ["a" * 64], "rerank_output_pair_digests": ["a" * 64],
-       "sentinel_pair_digests": ["f" * 64], "unfiltered_topn_pair_digests": ["f" * 64, "a" * 64, "b" * 64],
-       "model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "image_digest": "sha256:" + "e" * 64,
-       "model_file_manifest_sha256": _H, "raw_evidence_sha256": _H,
-       "retrieval_index_manifest_sha256": _H, "run_id": "run-1", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
-_m4pf = {**_m4, "evidence_stage": "preflight-n50", "selected_n": 50, "selection_digest": None, "decision_eligible": False}
+# M4 evidence v4 (per-case authoritative) tests อยู่ที่ test_p2_m4.py
 _can = {"status": "PASS", "leak_count": 0, "auth_status": "VERIFIED",
         "arm_status": {"dense": "PASS", "rerank": "PASS", "fused": "PASS"},
         "arm_error_counts": {"dense": 0, "rerank": 0, "fused": 0},
         "expected_query_count": 50, "actual_query_count": 50,
         "retrieval_index_manifest_sha256": _H, "run_id": "run-1", "eval_set_sha256": _eh, "corpus_manifest_sha256": _ch}
-check("m4 v3 PASS + schema ครบ -> valid", E.validate_m4_evidence(_m4, _eh, _ch) == [], E.validate_m4_evidence(_m4, _eh, _ch))
-check("m4 schema_version ผิด -> error", any("schema_version" in e for e in E.validate_m4_evidence({**_m4, "schema_version": "old"}, _eh, _ch)))
-check("m4 status=FAIL -> error", E.validate_m4_evidence({**_m4, "status": "FAIL"}, _eh, _ch) != [])
-check("m4 sentinel_reached_model=True -> error", E.validate_m4_evidence({**_m4, "sentinel_reached_model": True}, _eh, _ch) != [])
-check("m4 unauthorized_in_model_inputs=0.0 -> error (exact int)", E.validate_m4_evidence({**_m4, "unauthorized_in_model_inputs": 0.0}, _eh, _ch) != [])
-check("m4 image_digest/model_revision ผิด -> error", E.validate_m4_evidence({**_m4, "image_digest": "d"}, _eh, _ch) != [] and E.validate_m4_evidence({**_m4, "model_revision": "main"}, _eh, _ch) != [])
-check("m4 eval hash ไม่ตรง -> error", E.validate_m4_evidence(_m4, "x", _ch) != [])
-# B1 unfiltered relevance control
-check("B1: sentinel ไม่ติด unfiltered top-N -> error (filter อาจไม่ load-bearing)", any("unfiltered" in e for e in E.validate_m4_evidence({**_m4, "unfiltered_topn_pair_digests": ["a" * 64, "b" * 64]}, _eh, _ch)))
-# B3 counts / finite / zero-skip
-check("B3: model_call_count=0 -> error", any("model_call_count" in e for e in E.validate_m4_evidence({**_m4, "model_call_count": 0}, _eh, _ch)))
-check("B3: score_count != model_input_count -> error", any("score_count" in e for e in E.validate_m4_evidence({**_m4, "score_count": 5}, _eh, _ch)))
-check("B3: all_scores_finite ไม่ True -> error", any("all_scores_finite" in e for e in E.validate_m4_evidence({**_m4, "all_scores_finite": "yes"}, _eh, _ch)))
-check("B3: expected != completed case count -> error", any("case_count" in e for e in E.validate_m4_evidence({**_m4, "completed_case_count": 2}, _eh, _ch)))
-check("B3: error_count != 0 -> error", any("error_count" in e for e in E.validate_m4_evidence({**_m4, "error_count": 1}, _eh, _ch)))
-check("B3: scorer_kind ผิด -> error", any("scorer_kind" in e for e in E.validate_m4_evidence({**_m4, "scorer_kind": "mock"}, _eh, _ch)))
-check("B3: model_input ว่าง -> error", any("model_input" in e for e in E.validate_m4_evidence({**_m4, "model_input_pair_digests": [], "model_input_count": 0}, _eh, _ch)))
-# B2 pair-bound: subset / permutation / disjoint
-check("B2: provider ⊄ authorized -> error", any("provider pairs" in e for e in E.validate_m4_evidence({**_m4, "provider_pair_digests": ["a" * 64, "9" * 64]}, _eh, _ch)))
-check("B2: model_input ⊄ provider -> error", any("model_input pairs" in e for e in E.validate_m4_evidence({**_m4, "model_input_pair_digests": ["c" * 64]}, _eh, _ch)))
-check("B2: rerank ไม่ใช่ permutation ของ model_input -> error", any("permutation" in e for e in E.validate_m4_evidence({**_m4, "rerank_output_pair_digests": ["b" * 64]}, _eh, _ch)))
-check("B2: sentinel pair ปรากฏใน model_input -> error", E.validate_m4_evidence({**_m4, "model_input_pair_digests": ["f" * 64]}, _eh, _ch) != [])
-check("B2: sentinel pair ปนใน authorized oracle -> error", any("authorized oracle" in e for e in E.validate_m4_evidence({**_m4, "authorized_pair_digests": ["a" * 64, "b" * 64, "c" * 64, "f" * 64]}, _eh, _ch)))
-check("B2: model_input_count != len(pairs) -> error", any("model_input_count" in e for e in E.validate_m4_evidence({**_m4, "model_input_count": 2}, _eh, _ch)))
-# M1/M3 stage contract
-check("M1: evidence_stage ผิด -> error", any("evidence_stage" in e for e in E.validate_m4_evidence({**_m4, "evidence_stage": "bogus"}, _eh, _ch)))
-check("M1: preflight ใน decision path (require selected-n) -> error", any("evidence_stage" in e for e in E.validate_m4_evidence(_m4pf, _eh, _ch, require_stage=E.M4_STAGE_SELECTED)))
-check("M3: preflight standalone -> valid (decision_eligible=False, N=50, ไม่มี selection_digest)", E.validate_m4_evidence(_m4pf, _eh, _ch) == [], E.validate_m4_evidence(_m4pf, _eh, _ch))
-check("M3: preflight มี selection_digest -> error", any("selection_digest" in e for e in E.validate_m4_evidence({**_m4pf, "selection_digest": "d" * 64}, _eh, _ch)))
-check("M3: preflight decision_eligible=True -> error", any("decision_eligible" in e for e in E.validate_m4_evidence({**_m4pf, "decision_eligible": True}, _eh, _ch)))
-check("M3: selected-n ขาด selection_digest -> error", any("selection_digest" in e for e in E.validate_m4_evidence({**_m4, "selection_digest": None}, _eh, _ch)))
-check("M3: selected_n นอก N_SET -> error", any("selected_n" in e for e in E.validate_m4_evidence({**_m4, "selected_n": 7}, _eh, _ch)))
-check("M3: raw_evidence_sha256 หาย -> error", any("raw_evidence" in e for e in E.validate_m4_evidence({**_m4, "raw_evidence_sha256": "x"}, _eh, _ch)))
-# M3 exact compare กับ frozen run request
-_exp = {"model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "model_file_manifest_sha256": _H,
-        "image_digest": "sha256:" + "e" * 64, "retrieval_index_manifest_sha256": _H, "case_id_hashes": ["e" * 64]}
-check("M3: expected ตรง -> valid", E.validate_m4_evidence(_m4, _eh, _ch, expected=_exp) == [], E.validate_m4_evidence(_m4, _eh, _ch, expected=_exp))
-check("M3: expected model_revision ไม่ตรง -> error", any("expected" in e for e in E.validate_m4_evidence(_m4, _eh, _ch, expected={**_exp, "model_revision": "f" * 40})))
-check("M3: expected case set ไม่ตรง -> error", any("frozen manifest" in e for e in E.validate_m4_evidence(_m4, _eh, _ch, expected={**_exp, "case_id_hashes": ["9" * 64]})))
 check("B3.1: canary PASS + schema ครบ -> valid", E.validate_canary_evidence(_can, _eh, _ch) == [], E.validate_canary_evidence(_can, _eh, _ch))
 check("B3.1: canary leak>0 -> error", E.validate_canary_evidence({**_can, "leak_count": 99}, _eh, _ch) != [])
 check("B2: canary leak_count=0.0 -> error (exact int)", E.validate_canary_evidence({**_can, "leak_count": 0.0}, _eh, _ch) != [])
@@ -349,16 +298,8 @@ check("B3.1: canary auth UNVERIFIED -> error", E.validate_canary_evidence({**_ca
 check("B3.1: canary arm ขาด -> error", E.validate_canary_evidence({**_can, "arm_status": {"dense": "PASS"}}, _eh, _ch) != [])
 check("B2: canary arm_error_counts != 0 -> error", E.validate_canary_evidence({**_can, "arm_error_counts": {"dense": 1, "rerank": 0, "fused": 0}}, _eh, _ch) != [])
 check("B2: canary expected != actual query count -> error", E.validate_canary_evidence({**_can, "actual_query_count": 49}, _eh, _ch) != [])
-# B2 cross-run binding: m4/canary คนละ run -> decision manifest ปฏิเสธ (ผ่าน probe ไม่ได้เพราะ arm_eligibility ก่อน — ตรวจ validator ตรง)
-check("B2: cross-run — run_id ต่างกันตรวจได้ (unit)", _m4["run_id"] == _can["run_id"])
-
-# ── B4: root run_manifest binding (evidence ต้องอ้าง run_manifest_sha256 เดียวกัน) ──
-_m4b = {**_m4, "run_manifest_sha256": _H}
+# ── B4: root run_manifest binding (canary evidence ต้องอ้าง run_manifest_sha256 เดียวกัน) ──
 _canb = {**_can, "run_manifest_sha256": _H, "model_revision": "a" * 40, "image_digest": "sha256:" + "e" * 64}
-check("B4: m4 bound run_manifest ตรง -> valid", E.validate_m4_evidence(_m4b, _eh, _ch, _H) == [], E.validate_m4_evidence(_m4b, _eh, _ch, _H))
-check("B4: m4 run_manifest ไม่ตรง root -> error", any("run_manifest" in e for e in E.validate_m4_evidence(_m4b, _eh, _ch, "b" * 64)))
-check("B4: m4 ไม่มี run_manifest field (bound) -> error", any("run_manifest" in e for e in E.validate_m4_evidence(_m4, _eh, _ch, _H)))
-check("B4: m4 unbound (run_manifest=None) -> ข้าม binding (backward-compat)", E.validate_m4_evidence(_m4, _eh, _ch) == [])
 check("B4: canary bound (มี model/image + run_manifest) -> valid", E.validate_canary_evidence(_canb, _eh, _ch, _H) == [], E.validate_canary_evidence(_canb, _eh, _ch, _H))
 check("B4: canary bound ขาด model_revision -> error", any("model_revision" in e for e in E.validate_canary_evidence({**_canb, "model_revision": None}, _eh, _ch, _H)))
 check("B4: canary bound ขาด image_digest -> error", any("image_digest" in e for e in E.validate_canary_evidence({**_canb, "image_digest": "x"}, _eh, _ch, _H)))

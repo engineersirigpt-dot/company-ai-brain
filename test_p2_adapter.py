@@ -84,6 +84,7 @@ PLAN = {"run_id": "r", "benchmark_contract_version": RP.BENCHMARK_CONTRACT_VERSI
         "n_set": [10, 20, 30, 50], "seed": 1, "resamples": 10000, "primary_metric": "ndcg@5",
         "intent_grouping": "intent_id", "thresholds": dict(RP.DEFAULT_THRESHOLDS),
         "gate_tags": list(TAGS), "evaluated_roles": ["qc"],
+        "m4_case_manifest_sha256": "a" * 64, "required_categories": ["negation"],
         "expected_counts": {"dev_intents": 1, "dev_queries": 1, "test_intents": 3, "test_queries": 3},
         "artifact_digests": {"eval_set_sha256": _H, "corpus_manifest_sha256": _H, "retrieval_index_manifest_sha256": _H},
         "model_commit": "b" * 40, "tokenizer_commit": "b" * 40, "model_file_manifest_sha256": _H,

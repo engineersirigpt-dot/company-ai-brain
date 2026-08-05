@@ -10,6 +10,7 @@ Codex re-review acceptance (6aef5f9):
 
     python test_p2_runplan.py
 """
+import hashlib
 import io
 import sys
 
@@ -19,6 +20,17 @@ if hasattr(sys.stdout, "buffer"):
 import p2_runplan as RP
 import p2_eval as E
 import p2_reranker as RK
+
+
+# ── frozen M4 case/visibility manifest + v4 evidence pieces (shared) ────────────
+def _s(x): return hashlib.sha256(x.encode()).hexdigest()
+_M4_AID, _M4_ATX = _s("mA"), _s("mtA"); _M4_PA = E._pair_sha256(_M4_AID, _M4_ATX)
+_M4_SID, _M4_STX = _s("mS"), _s("mtS"); _M4_PS = E._pair_sha256(_M4_SID, _M4_STX)
+_M4_CASE, _M4_ROLE = _s("m4-case-qc"), _s("m4-qc")
+M4_FROZEN = {"cases": {_M4_CASE: {"role_identity_sha256": _M4_ROLE, "category": "negation",
+                                  "authorized_pairs": [_M4_PA], "sentinel_pairs": [_M4_PS]}},
+             "required_categories": ["negation"], "evaluated_roles": ["qc"]}
+M4_MAN_DIGEST = E.m4_case_manifest_sha256(M4_FROZEN)
 
 res = []
 def check(name, cond, detail=""):
@@ -66,6 +78,7 @@ def base_plan(**over):
         "primary_metric": "ndcg@5", "intent_grouping": "intent_id",
         "thresholds": dict(RP.DEFAULT_THRESHOLDS),
         "gate_tags": list(GATE_TAGS), "evaluated_roles": ["qc"],
+        "m4_case_manifest_sha256": M4_MAN_DIGEST, "required_categories": ["negation"],
         "expected_counts": {"dev_intents": 1, "dev_queries": 1, "test_intents": 50, "test_queries": 50},
         "artifact_digests": {"eval_set_sha256": _EH, "corpus_manifest_sha256": _CH, "retrieval_index_manifest_sha256": _IDX},
         "model_commit": _COMMIT, "tokenizer_commit": _COMMIT,
@@ -227,18 +240,21 @@ def build_bundle(plan):
     stages = {"candidate_retrieval": [10] * 60, "rerank": [100] * 60, "rrf": [1] * 60, "total": [150] * 60}
     latency = {"run_manifest_sha256": root, "selection_digest": sd, "selected_n": seln,
                "raw_latency_digest": RP.raw_digest(stages), "error_count": 0, "oom_count": 0, "warmup": 10, "stages": stages}
-    m4 = {"schema_version": "p2-m4-v3", "status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
-          "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0,
+    m4_pc = [{"case_id_sha256": _M4_CASE, "role_identity_sha256": _M4_ROLE, "category": "negation", "selected_n": seln,
+              "query_vector_sha256": _s("m4-qv"),
+              "pair_components": [{"point_id_sha256": _M4_AID, "rerank_text_sha256": _M4_ATX, "pair_sha256": _M4_PA},
+                                  {"point_id_sha256": _M4_SID, "rerank_text_sha256": _M4_STX, "pair_sha256": _M4_PS}],
+              "unfiltered_topn_pairs": [_M4_PS, _M4_PA], "observed_sentinel_ranks": [[_M4_PS, 1]],
+              "provider_pairs": [_M4_PA], "model_input_pairs": [_M4_PA], "rerank_output_pairs": [_M4_PA],
+              "model_call_count": 1, "model_input_count": 1, "score_count": 1, "all_scores_finite": True, "status": "PASS"}]
+    m4 = {"schema_version": "p2-m4-v4", "status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
+          "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0, "scorer_kind": "pinned-cross-encoder",
           "evidence_stage": "selected-n", "selected_n": seln, "selection_digest": sd,
-          "expected_case_count": 1, "completed_case_count": 1, "error_count": 0, "skip_count": 0, "case_id_hashes": ["e" * 64],
-          "model_call_count": 1, "model_input_count": 1, "score_count": 1, "all_scores_finite": True, "scorer_kind": "pinned-cross-encoder",
-          "authorized_pair_digests": ["a" * 64, "b" * 64, "c" * 64], "provider_pair_digests": ["a" * 64, "b" * 64],
-          "model_input_pair_digests": ["a" * 64], "rerank_output_pair_digests": ["a" * 64],
-          "sentinel_pair_digests": ["f" * 64], "unfiltered_topn_pair_digests": ["f" * 64, "a" * 64, "b" * 64],
+          "m4_case_manifest_sha256": M4_MAN_DIGEST, "per_case": m4_pc,
+          "raw_evidence_sha256": hashlib.sha256(E._canonical_json(m4_pc)).hexdigest(),
           "model_revision": _COMMIT, "tokenizer_revision": _COMMIT, "model_file_manifest_sha256": _FM,
           "image_digest": _IMG, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _IDX,
-          "raw_evidence_sha256": _EH, "run_manifest_sha256": root, "run_id": "runX",
-          "eval_set_sha256": _EH, "corpus_manifest_sha256": _CH}
+          "run_manifest_sha256": root, "run_id": "runX", "eval_set_sha256": _EH, "corpus_manifest_sha256": _CH}
     can = {"status": "PASS", "leak_count": 0, "auth_status": "VERIFIED",
            "arm_status": {"dense": "PASS", "rerank": "PASS", "fused": "PASS"},
            "arm_error_counts": {"dense": 0, "rerank": 0, "fused": 0},
@@ -256,7 +272,7 @@ def decide(plan=None, **override):
     p = plan if plan is not None else PLAN
     b = build_bundle(p)
     b.update(override)
-    return RP.decide_p2(plan=p, cases=CASES, corpus=CORPUS, known_roles=KNOWN, **b)
+    return RP.decide_p2(plan=p, cases=CASES, corpus=CORPUS, known_roles=KNOWN, m4_frozen_manifest=M4_FROZEN, **b)
 
 # ── decide_p2: happy path (bundle ครบ) -> DECISION ─────────────────────────────
 _d = decide()
@@ -292,7 +308,7 @@ check("B4: latency raw digest ผิด -> NOT_DECISION_ELIGIBLE",
 
 # ── B3: fail-closed ต่อ partial/invalid bundle (ไม่มีเส้นทางคืน arm) ────────────
 check("B3: invalid plan -> NOT_DECISION_ELIGIBLE",
-      RP.decide_p2(plan=base_plan(seed=None), cases=CASES, corpus=CORPUS, known_roles=KNOWN, **build_bundle(PLAN))["status"] == "NOT_DECISION_ELIGIBLE")
+      RP.decide_p2(plan=base_plan(seed=None), cases=CASES, corpus=CORPUS, known_roles=KNOWN, m4_frozen_manifest=M4_FROZEN, **build_bundle(PLAN))["status"] == "NOT_DECISION_ELIGIBLE")
 check("B3: signoff หาย -> NOT_DECISION_ELIGIBLE + arm=None", decide(signoff=None)["decision_eligible"] is False and decide(signoff=None)["arm"] is None)
 check("B3: dev recall ต่ำทุก N -> NOT_DECISION_ELIGIBLE",
       decide(dev_evidence={**build_bundle(PLAN)["dev_evidence"], "by_n": {n: {"point_recall": 0.5, "doc_recall": 0.5, "candidate_hit": 0.5, "completed_queries": 1, "completed_intents": 1} for n in (10, 20, 30, 50)}, "raw_result_digest": RP.raw_digest({n: {"point_recall": 0.5, "doc_recall": 0.5, "candidate_hit": 0.5, "completed_queries": 1, "completed_intents": 1} for n in (10, 20, 30, 50)})})["status"] == "NOT_DECISION_ELIGIBLE")
