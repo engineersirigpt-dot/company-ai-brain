@@ -3,8 +3,9 @@
 # runtime target = CPU-compat (smoke/mechanics ทุกเครื่อง) ; CUDA/GPU evidence image = งานแยก
 #
 # ลำดับ (หลัง review เท่านั้น):
-#   1) build : docker compose -f docker-compose.p2.yml build \
-#                --build-arg PY_BASE=python@sha256:<digest> --build-arg MODEL_COMMIT=953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+#   1) build ผ่าน wrapper (fail-closed base digest + platform + build manifest):
+#        python p2_docker_build.py --py-base python@sha256:<linux/amd64 digest จริง>
+#      (wrapper ล็อก --platform linux/amd64, ปฏิเสธ tag ลอย/sentinel, เขียน p2_build_manifest.json + p2_image.id)
 #   2) บันทึก image identity (local, ยังไม่ push — RepoDigests จะว่าง จึงห้ามใช้):
 #        docker build --iidfile p2_image.id -f Dockerfile.p2 .            # หรือ
 #        docker image inspect --format '{{.Id}}' company-ai-brain/p2-reranker:pinned-cpu   # -> sha256:<config digest>
@@ -16,11 +17,13 @@
 
 services:
   reranker:
+    platform: linux/amd64        # B2: ล็อก platform กัน multi-arch index เลือก child image ต่างเครื่อง
     build:
       context: .
       dockerfile: Dockerfile.p2
+      platforms: ["linux/amd64"]
       args:
-        # PY_BASE ต้องเป็น digest จริงตอน build (ไม่ใช่ tag ลอย)
+        # PY_BASE ต้อง inject เป็น digest จริงผ่าน p2_docker_build.py (default = sentinel zeros ที่ pull ไม่ได้)
         MODEL_COMMIT: "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
     image: company-ai-brain/p2-reranker:pinned-cpu   # tag ภายใน; evidence ใช้ image **digest** ไม่ใช่ tag นี้
     environment:

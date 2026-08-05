@@ -79,18 +79,41 @@ def build_quality_evidence(raw_ranking, cases, run_manifest, sel_digest, selecte
             "raw_result_digest": RP.raw_digest(rows), "per_query": rows}
 
 
+def _coerce_n_key(k) -> int:
+    """
+    M3: normalize N key แบบไม่กลืนข้อมูลเงียบ — รับเฉพาะ **positive int (ไม่ใช่ bool)** หรือ
+    **canonical decimal string ที่ round-trip exact** ; reject float/whitespace/sign/exponent/leading-zero/bool
+    (กัน int(10.5)->10 truncate และ "010"/" 10"/"1e1" ที่ค่าไม่ตรงตัวอักษร)
+    """
+    if type(k) is int:                                   # bool ถูกกัน (type(True) is bool ไม่ใช่ int)
+        n = k
+    elif isinstance(k, str) and k.isascii() and k.isdigit():
+        n = int(k)
+        if str(n) != k:                                  # reject leading zeros / non-canonical
+            raise ValueError(f"by_n key ไม่ canonical (round-trip ไม่ตรง): {k!r}")
+    else:
+        raise ValueError(f"by_n key ต้องเป็น positive int หรือ canonical decimal string: {k!r}")
+    if n <= 0:
+        raise ValueError(f"by_n key ต้อง positive: {k!r}")
+    return n
+
+
 def build_dev_evidence(raw_by_n, run_manifest) -> dict:
     """
     dev_evidence ผูก root — raw_by_n = {N:{point_recall,doc_recall,candidate_hit,completed_queries,completed_intents}}
-    normalize key เป็น int ; raw_result_digest = recompute (decide_p2/validate_dev_evidence ตรวจ N_SET/count เอง)
+    normalize key แบบ fail-closed (M3) + reject normalized-key collision ; raw_result_digest = recompute
+    (decide_p2/validate_dev_evidence ตรวจ N_SET/count/finite เอง)
     """
     if not isinstance(raw_by_n, dict):
         raise ValueError("raw_by_n ต้องเป็น dict")
     by_n = {}
     for k, v in raw_by_n.items():
-        if type(k) is bool or not isinstance(v, dict):
-            raise ValueError(f"raw_by_n key/value ผิดชนิด: {k!r}")
-        by_n[int(k)] = dict(v)
+        if not isinstance(v, dict):
+            raise ValueError(f"raw_by_n value ต้องเป็น dict: {k!r}")
+        n = _coerce_n_key(k)
+        if n in by_n:
+            raise ValueError(f"by_n normalized-key collision ที่ N={n} (เช่น {{10, '10'}})")
+        by_n[n] = dict(v)
     return {"split": "dev", "run_manifest_sha256": run_manifest,
             "raw_result_digest": RP.raw_digest(by_n), "by_n": by_n}
 

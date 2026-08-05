@@ -1,0 +1,13 @@
+# P2 build context = allowlist (BuildKit reads <dockerfile>.dockerignore)
+# ignore ทุกอย่างก่อน แล้วเปิดเฉพาะไฟล์ที่ Dockerfile.p2 COPY จริง
+# กัน raw corpus (info/ ~5.5GB), .git (~5GB), .venv (~1.6GB), qdrant_storage/, parsed_output/,
+# tmp/, api_keys.p5b.json ฯลฯ หลุดเข้า build context (data egress + build ช้า)
+# ห้ามใช้ blacklist รายโฟลเดอร์ — ไฟล์ใหม่จะหลุดเข้ามาอีก
+*
+!Dockerfile.p2
+!requirements.p2.txt
+!p2_pin.py
+!p2_reranker.py
+!p2_fetch_model.py
+!p2_verify_snapshot.py
+!p2_model_smoke.py

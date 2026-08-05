@@ -21,13 +21,17 @@ MANIFEST_OUT = os.environ.get("P2_MANIFEST_OUT", "/opt/model_file_manifest.sha25
 
 def _assert_expected_commit() -> None:
     """
-    B2: p2_pin = single source of truth. ถ้า build ส่ง `P2_EXPECT_COMMIT` (จาก --build-arg MODEL_COMMIT)
-    มาแต่ไม่ตรง p2_pin → fail ก่อน network fetch (กัน build arg เป็น control ปลอมที่ไม่มีผล)
+    B2/M1: p2_pin = single source of truth. `P2_EXPECT_COMMIT` (จาก --build-arg MODEL_COMMIT):
+    - ไม่ตั้ง (None) → ใช้ p2_pin ต่อได้
+    - ตั้งมาแล้ว (แม้ "" / whitespace / malformed) → **ต้อง == p2_pin.MODEL_COMMIT เป๊ะ** มิฉะนั้น SystemExit
+      (แยก None ออกจาก empty — blank build arg ต้อง fail-closed ไม่ใช่ถูกมองเป็น "ไม่ตั้ง")
     """
     expect = os.environ.get("P2_EXPECT_COMMIT")
-    if expect and expect != PIN.MODEL_COMMIT:
+    if expect is None:
+        return
+    if expect != PIN.MODEL_COMMIT:
         raise SystemExit(f"FAIL build MODEL_COMMIT {expect!r} != p2_pin.MODEL_COMMIT {PIN.MODEL_COMMIT!r} "
-                         f"(single source of truth — แก้ p2_pin.py หรือ build arg ให้ตรง)")
+                         f"(single source of truth — blank/malformed ก็ไม่ผ่าน ; แก้ให้ตรง)")
 
 
 def fetch_and_verify() -> dict:

@@ -12,13 +12,15 @@
 #   runtime (offline) = `pip install --no-index --find-links=/wheels` (ไม่มี network install; artifact set เดียวกับ prep)
 #
 # <<FILL-AT-BUILD>> (รู้ได้เฉพาะตอน build จริง — ไม่เดา):
-#   PY_BASE                    = python:3.11-slim **pin ด้วย digest** (--build-arg PY_BASE=python@sha256:<digest>)
+#   PY_BASE                    = python:3.11-slim **pin ด้วย digest + platform** — build ผ่าน p2_docker_build.py
+#                                (`--platform linux/amd64` + reject ค่าที่ไม่ใช่ digest) แล้วบันทึกลง p2_build_manifest.json
 #   model_file_manifest_sha256 = output ของ p2_fetch_model → RunPlan.model_file_manifest_sha256
 #   image_digest               = local image Id/config digest (`docker image inspect --format '{{.Id}}'` / `--iidfile`)
 #                                → RunPlan.image_digest (RepoDigests ว่างสำหรับ local image ที่ยังไม่ push — ห้ามใช้)
 
-# PY_BASE default = tag ชั่วคราวให้ parse ได้เท่านั้น ; build evidence จริงต้อง override เป็น digest-pinned base
-ARG PY_BASE=python:3.11-slim
+# B2: PY_BASE default = **sentinel digest ที่ pull ไม่ได้** (64 zeros) — build โดยไม่ inject digest จริง = fail ที่ FROM
+#     (ไม่เปิด floating tag) ; build จริงต้องผ่าน p2_docker_build.py ที่บังคับ digest จริง + ล็อก linux/amd64
+ARG PY_BASE=python@sha256:0000000000000000000000000000000000000000000000000000000000000000
 ARG MODEL_COMMIT=953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
 
 # ── Stage 1: prep (network ON) — fetch model (เบา) + build wheelhouse ─────────
@@ -37,9 +39,11 @@ RUN pip install --no-cache-dir "huggingface_hub==0.23.4"
 COPY p2_pin.py p2_reranker.py p2_fetch_model.py /app/
 # prefetch snapshot @ pinned SHA + verify (6 files, real safetensors blob, resolved==pinned) + file-manifest
 RUN python p2_fetch_model.py
-# M3: freeze runtime dependency closure เป็น wheelhouse (torch CPU wheel + closure ทั้งหมด)
-RUN pip download --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-    -r requirements.p2.txt -d /wheels
+# M3/M2: freeze runtime dependency closure เป็น wheelhouse — binary-only (fail ถ้ามี sdist)
+# + บันทึก wheel filename+sha256 เป็น build evidence (reproducibility ของ CPU-compat build)
+RUN pip download --no-cache-dir --only-binary=:all: --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements.p2.txt -d /wheels \
+ && (cd /wheels && sha256sum * > /opt/wheelhouse.manifest.sha256)
 
 # ── Stage 2: runtime (OFFLINE) ───────────────────────────────────────────────
 FROM ${PY_BASE} AS runtime
@@ -52,10 +56,13 @@ WORKDIR /app
 COPY requirements.p2.txt /app/
 COPY --from=prep /wheels /wheels
 # M3: ติดตั้งจาก wheelhouse เท่านั้น — ไม่มี network/index (artifact set เดียวกับที่ verify ใน prep)
-RUN pip install --no-index --find-links=/wheels -r requirements.p2.txt
+RUN pip install --no-index --find-links=/wheels -r requirements.p2.txt \
+ && pip freeze > /opt/wheelhouse.freeze.txt
 # copy ทั้ง HF cache (snapshots/<SHA> + blobs) — รักษา layout/symlink ให้ _resolved_commit ผ่าน (#2/#3)
 COPY --from=prep /opt/hf /opt/hf
 COPY --from=prep /opt/model_file_manifest.sha256 /opt/model_file_manifest.sha256
+# M2: wheel manifest (filename+sha256) เป็น build evidence ของ dependency closure
+COPY --from=prep /opt/wheelhouse.manifest.sha256 /opt/wheelhouse.manifest.sha256
 COPY p2_pin.py p2_reranker.py p2_verify_snapshot.py p2_model_smoke.py /app/
 # M2: verify offline snapshot fail-closed ด้วย SystemExit (ไม่ใช่ assert) — ไม่โหลด weights/ไม่รัน benchmark
 RUN python p2_verify_snapshot.py
