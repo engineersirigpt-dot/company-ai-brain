@@ -28,8 +28,10 @@ _M4_AID, _M4_ATX = _s("mA"), _s("mtA"); _M4_PA = E._pair_sha256(_M4_AID, _M4_ATX
 _M4_SID, _M4_STX = _s("mS"), _s("mtS"); _M4_PS = E._pair_sha256(_M4_SID, _M4_STX)
 _M4_CASE, _M4_ROLE = _s("m4-case-qc"), _s("m4-qc")
 _M4_QV = _s("m4-qv")
+_M4_QT = _s("m4-qt")
 M4_FROZEN = {"cases": {_M4_CASE: {"role_identity_sha256": _M4_ROLE, "effective_role": "qc", "category": "negation",
-                                  "query_vector_sha256": _M4_QV, "authorized_pairs": [_M4_PA], "sentinel_pairs": [_M4_PS]}},
+                                  "query_text_sha256": _M4_QT, "query_vector_sha256": _M4_QV,
+                                  "authorized_pairs": [_M4_PA], "sentinel_pairs": [_M4_PS]}},
              "required_categories": ["negation"], "evaluated_roles": ["qc"]}
 M4_MAN_DIGEST = E.m4_case_manifest_sha256(M4_FROZEN)
 
@@ -242,7 +244,7 @@ def build_bundle(plan):
     latency = {"run_manifest_sha256": root, "selection_digest": sd, "selected_n": seln,
                "raw_latency_digest": RP.raw_digest(stages), "error_count": 0, "oom_count": 0, "warmup": 10, "stages": stages}
     m4_pc = [{"case_id_sha256": _M4_CASE, "role_identity_sha256": _M4_ROLE, "effective_role": "qc",
-              "category": "negation", "selected_n": seln, "query_vector_sha256": _M4_QV,
+              "category": "negation", "selected_n": seln, "query_text_sha256": _M4_QT, "query_vector_sha256": _M4_QV,
               "unfiltered_query_vector_sha256": _M4_QV, "filtered_query_vector_sha256": _M4_QV,
               "unfiltered_limit": seln, "filtered_limit": seln,
               "pair_components": [{"point_id_sha256": _M4_AID, "rerank_text_sha256": _M4_ATX, "pair_sha256": _M4_PA},

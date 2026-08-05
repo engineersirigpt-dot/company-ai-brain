@@ -32,19 +32,21 @@ SID, STX = _s("S"), _s("tS"); PS = _pair(SID, STX)
 QC, SALES = _s("qc"), _s("sales")
 CQC, CSA = _s("case-qc"), _s("case-sales")
 QVC, QVS = _s("qv-" + CQC), _s("qv-" + CSA)
+QTC, QTS = _s("qt-" + CQC), _s("qt-" + CSA)
 IC = {"model_name": "BAAI/bge-reranker-v2-m3", "max_length": 512, "batch_size": 16, "device": "cpu", "dtype": "float32"}
 EXP = {"model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "model_file_manifest_sha256": _H,
        "image_digest": "sha256:" + "e" * 64, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _H}
 
 
 def comp(pid, txt): return {"point_id_sha256": pid, "rerank_text_sha256": txt, "pair_sha256": _pair(pid, txt)}
-def fcase(role, erole, category, auth, sent, qv):
+def fcase(role, erole, category, auth, sent, qv, qt):
     return {"role_identity_sha256": role, "effective_role": erole, "category": category,
-            "query_vector_sha256": qv, "authorized_pairs": auth, "sentinel_pairs": sent}
-def pcase(case_id, role, category, auth_pair, comps, n=10, erole="qc", qv=None):
+            "query_text_sha256": qt, "query_vector_sha256": qv, "authorized_pairs": auth, "sentinel_pairs": sent}
+def pcase(case_id, role, category, auth_pair, comps, n=10, erole="qc", qv=None, qt=None):
     qv = qv or _s("qv-" + case_id)
+    qt = qt or _s("qt-" + case_id)
     return {"case_id_sha256": case_id, "role_identity_sha256": role, "effective_role": erole,
-            "category": category, "selected_n": n, "query_vector_sha256": qv,
+            "category": category, "selected_n": n, "query_text_sha256": qt, "query_vector_sha256": qv,
             "unfiltered_query_vector_sha256": qv, "filtered_query_vector_sha256": qv,
             "unfiltered_limit": n, "filtered_limit": n, "pair_components": comps,
             "unfiltered_topn_pairs": [PS, auth_pair], "observed_sentinel_ranks": [[PS, 1]],
@@ -64,7 +66,7 @@ def V(m4d, frozen, **kw):
     return E.validate_m4_run_evidence(m4d, frozen, kw.pop("expected", EXP), _H, _H, **kw)
 
 
-FROZEN1 = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC)},
+FROZEN1 = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC, QTC)},
            "required_categories": ["negation"], "evaluated_roles": ["qc"]}
 MAN1 = E.m4_case_manifest_sha256(FROZEN1)
 PC1 = [pcase(CQC, QC, "negation", PA, [comp(AID, ATX), comp(SID, STX)])]
@@ -96,8 +98,8 @@ check("B3: status != PASS -> error", any("status" in e for e in _mut1(lambda c: 
 check("B3: score_count != model_input_count -> error", any("score_count" in e for e in _mut1(lambda c: c.__setitem__("score_count", 3))))
 
 # ── B1 ⭐ cross-role swap: aggregate ผ่านแต่ per-case จับได้ ────────────────────
-FROZEN2 = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC),
-                     CSA: fcase(SALES, "sales", "table-row", [PB], [PS], QVS)},
+FROZEN2 = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC, QTC),
+                     CSA: fcase(SALES, "sales", "table-row", [PB], [PS], QVS, QTS)},
            "required_categories": ["negation", "table-row"], "evaluated_roles": ["qc", "sales"]}
 MAN2 = E.m4_case_manifest_sha256(FROZEN2)
 PC_SWAP = [pcase(CQC, QC, "negation", PB, [comp(BID, BTX), comp(SID, STX)], erole="qc"),
@@ -112,6 +114,10 @@ check("2-case ถูกต้อง -> valid", V(m4(PC2, MAN2, raw_evidence_sha2
 _qp = copy.deepcopy(PC1)
 _qp[0]["query_vector_sha256"] = _qp[0]["unfiltered_query_vector_sha256"] = _qp[0]["filtered_query_vector_sha256"] = "9" * 64
 check("B1: QueryProbe เปลี่ยนทั้งสาม (ไม่ตรง frozen) -> error", any("frozen QueryProbe" in e for e in V(m4(_qp, MAN1, raw_evidence_sha256=_raw(_qp)), FROZEN1)))
+_qt = copy.deepcopy(PC1); _qt[0]["query_text_sha256"] = "9" * 64
+check("B2: query_text_sha256 ไม่ตรง frozen (คง vector) -> error", any("query_text_sha256" in e for e in V(m4(_qt, MAN1, raw_evidence_sha256=_raw(_qt)), FROZEN1)))
+_qtf = copy.deepcopy(PC1); _qtf[0]["query_text_sha256"] = "not-a-hash"
+check("B2: query_text_sha256 format ผิด -> error", any("query_text_sha256" in e for e in V(m4(_qtf, MAN1, raw_evidence_sha256=_raw(_qtf)), FROZEN1)))
 check("M2: filtered query vector != unfiltered -> error", any("query vector" in e for e in _mut1(lambda c: c.__setitem__("filtered_query_vector_sha256", _s("other")))))
 
 # ── B2: exact M4RunRequest (M4a/M4b) ──────────────────────────────────────────
@@ -122,18 +128,18 @@ check("B2: m4 ไม่มี inference_config (missing) -> error", any("inferen
 
 # ── B2: frozen binding + role coverage ────────────────────────────────────────
 check("B2: m4_case_manifest_sha256 != frozen -> error", any("m4_case_manifest_sha256" in e for e in V(m4(PC1, "0" * 64), FROZEN1)))
-FROZEN_NOCASE = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC)},
+FROZEN_NOCASE = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC, QTC)},
                  "required_categories": ["negation"], "evaluated_roles": ["qc", "sales"]}
 check("B2: evaluated_role 'sales' ไม่มี case -> frozen manifest error", any("evaluated_roles ไม่ครบ" in e for e in E.validate_m4_frozen_manifest(FROZEN_NOCASE)))
 check("B2: run evidence กับ frozen role ไม่ครบ -> error", V(m4(PC1, E.m4_case_manifest_sha256(FROZEN_NOCASE)), FROZEN_NOCASE) != [])
 
 # ── B3/M2: malformed frozen -> error list ไม่ crash ───────────────────────────
-FROZEN_BAD = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC)}, "required_categories": ["negation", None], "evaluated_roles": ["qc"]}
+FROZEN_BAD = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC, QTC)}, "required_categories": ["negation", None], "evaluated_roles": ["qc"]}
 check("B3: required_categories มี None -> error (ไม่ crash)", E.validate_m4_frozen_manifest(FROZEN_BAD) != [])
 check("B3: run evidence กับ malformed frozen -> error (fail-closed)", V(_M4, FROZEN_BAD) != [])
 check("B3: _safe_m4_manifest_digest(malformed) -> None", E._safe_m4_manifest_digest(FROZEN_BAD) is None)
 check("M2: mixed-type unknown keys -> error list (ไม่ TypeError)", E.validate_m4_frozen_manifest({None: 1, 5: 2, "cases": {}}) != [])
-check("B2: frozen authorized_pairs ซ้ำ -> error", any("ซ้ำ" in e for e in E.validate_m4_frozen_manifest({"cases": {CQC: fcase(QC, "qc", "negation", [PA, PA], [PS], QVC)}, "required_categories": ["negation"], "evaluated_roles": ["qc"]})))
+check("B2: frozen authorized_pairs ซ้ำ -> error", any("ซ้ำ" in e for e in E.validate_m4_frozen_manifest({"cases": {CQC: fcase(QC, "qc", "negation", [PA, PA], [PS], QVC, QTC)}, "required_categories": ["negation"], "evaluated_roles": ["qc"]})))
 
 # ── M1: exact hash-only (reject raw/unknown) ──────────────────────────────────
 _leak = copy.deepcopy(PC1); _leak[0]["raw_text"] = "SECRET-QUERY"

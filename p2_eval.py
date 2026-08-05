@@ -91,14 +91,15 @@ _M4_TOP_KEYS = frozenset({"schema_version", "status", "isolated_interlock", "ind
                           "inference_config", "retrieval_index_manifest_sha256", "run_id", "eval_set_sha256",
                           "corpus_manifest_sha256", "run_manifest_sha256", "run_receipt_sha256"})
 _M4_CASE_KEYS = frozenset({"case_id_sha256", "role_identity_sha256", "effective_role", "category", "selected_n",
-                           "query_vector_sha256", "unfiltered_query_vector_sha256", "filtered_query_vector_sha256",
-                           "unfiltered_limit", "filtered_limit", "pair_components", "unfiltered_topn_pairs",
-                           "observed_sentinel_ranks", "provider_pairs", "model_input_pairs", "rerank_output_pairs",
-                           "model_call_count", "model_input_count", "score_count", "all_scores_finite", "status"})
+                           "query_text_sha256", "query_vector_sha256", "unfiltered_query_vector_sha256",
+                           "filtered_query_vector_sha256", "unfiltered_limit", "filtered_limit", "pair_components",
+                           "unfiltered_topn_pairs", "observed_sentinel_ranks", "provider_pairs", "model_input_pairs",
+                           "rerank_output_pairs", "model_call_count", "model_input_count", "score_count",
+                           "all_scores_finite", "status"})
 _M4_COMP_KEYS = frozenset({"point_id_sha256", "rerank_text_sha256", "pair_sha256"})
 _M4_FROZEN_KEYS = frozenset({"cases", "required_categories", "evaluated_roles", "m4_case_manifest_sha256"})
-_M4_FCASE_KEYS = frozenset({"role_identity_sha256", "effective_role", "category", "query_vector_sha256",
-                            "authorized_pairs", "sentinel_pairs"})
+_M4_FCASE_KEYS = frozenset({"role_identity_sha256", "effective_role", "category", "query_text_sha256",
+                            "query_vector_sha256", "authorized_pairs", "sentinel_pairs"})
 # M4 run request (frozen pin/image/index) — validate_m4_run_evidence เทียบ exact ทุก field (B2)
 _M4_EXPECTED_KEYS = ("model_revision", "tokenizer_revision", "model_file_manifest_sha256",
                      "image_digest", "inference_config", "retrieval_index_manifest_sha256")
@@ -155,6 +156,8 @@ def validate_m4_frozen_manifest(frozen) -> list:
             errs.append(f"{tag}: category ต้องเป็น str ใน required_categories")
         else:
             seen_cats.add(cat)
+        if not _is_sha256(fc.get("query_text_sha256")):
+            errs.append(f"{tag}: query_text_sha256 ต้องเป็น sha256 (frozen QueryProbe)")
         if not _is_sha256(fc.get("query_vector_sha256")):
             errs.append(f"{tag}: query_vector_sha256 ต้องเป็น sha256 (frozen QueryProbe, B1)")
         auth, sent = fc.get("authorized_pairs"), fc.get("sentinel_pairs")
@@ -576,6 +579,8 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
             errs.append(f"{tag}: effective_role ไม่ตรง frozen manifest")
         if c.get("category") != fc.get("category"):
             errs.append(f"{tag}: category ไม่ตรง frozen manifest")
+        if c.get("query_text_sha256") != fc.get("query_text_sha256"):
+            errs.append(f"{tag}: query_text_sha256 ไม่ตรง frozen QueryProbe (query text ที่เข้า cross-encoder)")
         if c.get("query_vector_sha256") != fc.get("query_vector_sha256"):
             errs.append(f"{tag}: query_vector_sha256 ไม่ตรง frozen QueryProbe (เลือก vector หลังเห็นผลไม่ได้)")
     if c.get("category") not in required:
@@ -584,6 +589,8 @@ def _m4_case_errors(i, c, fc, required, top_n) -> list:
         errs.append(f"{tag}: selected_n ไม่ตรง top-level")
     if not _is_sha256(c.get("case_id_sha256")):
         errs.append(f"{tag}: case_id_sha256 ต้อง sha256")
+    if not _is_sha256(c.get("query_text_sha256")):
+        errs.append(f"{tag}: query_text_sha256 ต้อง sha256")
     if not _is_sha256(c.get("query_vector_sha256")):
         errs.append(f"{tag}: query_vector_sha256 ต้อง sha256")
     # M2: same-query control — unfiltered/filtered call ต้องใช้ query vector + limit ชุดเดียว
