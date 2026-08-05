@@ -251,13 +251,15 @@ check("validate_signoff: decision != approved -> error", any("decision" in e for
 check("decision_benchmark: <50 test intents -> error แม้ signoff ตรง",
       len(E.decision_benchmark_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs)) > 0)
 
-# ── B3: single decision entry point ; mechanics-smoke แยกชัด ───────────────────
+# ── B3: single approval surface = decide_p2 เท่านั้น ; mechanics-smoke แยกชัด ───
 check("B3: artifact_manifest_unapproved approved=False (smoke)",
       E.artifact_manifest_unapproved([case()], CORPUS, KNOWN).get("approved") is False)
-check("B3: decision_benchmark_manifest ไม่มี signoff -> ValueError (bypass ไม่ได้)",
-      raises(lambda: E.decision_benchmark_manifest([case()], CORPUS, KNOWN, ["qc"], ["direct"], None, "m4", "canary")))
-check("B3: decision_benchmark_manifest ขาด m4 evidence -> ValueError",
-      raises(lambda: E.decision_benchmark_manifest([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs, None, "canary")))
+check("B3: ไม่มี public decision_benchmark_manifest (approved=True builder) แล้ว",
+      not hasattr(E, "decision_benchmark_manifest"))
+check("B3: decision_evidence_errors ไม่มี signoff -> error list (ไม่ approve)",
+      len(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], None, "m4", "canary", "a" * 64)) > 0)
+check("B3: decision_evidence_errors คืน list เสมอ (ไม่มี approved=True self-stamp)",
+      isinstance(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs, None, "canary", "a" * 64), list))
 
 # ── M1: combined gate malformed artifacts -> controlled (ไม่ crash) ────────────
 def _no_crash(fn):

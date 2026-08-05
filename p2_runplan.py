@@ -2,17 +2,16 @@
 P2 run plan + decision analysis (M1) — pure/offline, pre-register ก่อนเห็นผลโมเดล
 ให้ real runner (Slice 2) เพียงเติม observations จาก Qdrant/model — ลด post-hoc decision + rerun
 
-Contract (fail-closed ต่อ evidence ที่ไม่ครบ/ไม่ pre-register):
-- **root RunManifest** immutable: contract version, split/counts, N set {10,20,30,50}, seed, resamples,
-  metrics/thresholds, eval/corpus/index digests, **model+tokenizer commit (full), model file-manifest,
-  image digest, inference config** → run_manifest_sha256 (ผูกทุก evidence เข้ากับ run เดียว)
-- select_n: **บน dev เท่านั้น** + ผูก run_manifest + N ต้องอยู่ใน N_SET ที่ pre-register + metric finite [0,1]
-  + completed==expected ; เลือก N ต่ำสุดที่ CandidateRecall@N (point+doc) >= 0.95 และ CandidateHit@N = 1.00
-- paired analysis: intent-set ต้องครบ/เท่ากันทุก arm (ห้ามตัด intent เงียบ) ; nDCG@5 ทุกค่า finite
-- paired_bootstrap: 95% CI ของ ΔnDCG@5 ระดับ intent (10,000 resamples, fixed seed)
-- decide_arm: rerank/fused eligibility + **ต้องมี hard-negative evidence ครบ gate categories** (ไม่ vacuous)
-- latency: stage set/warm-up/count ต้องครบเท่ากันทุก stage + error/OOM=0 + digest ก่อนถือ within budget
-- decide_p2: **entry point เดียว fail-closed** — คืน NOT_DECISION_ELIGIBLE ถ้า bundle ไม่ครบ, arm verdict เมื่อครบ
+Contract (fail-closed ; ค่าที่ hash ใน RunPlan คือค่า **บังคับจริง** ตอนตัดสิน):
+- **root RunManifest** immutable + hashed: contract version, split/counts, N set {10,20,30,50}, seed,
+  resamples, primary metric, intent grouping, **thresholds (schema+range), frozen gate_tags, evaluated_roles**,
+  eval/corpus/index digests, **full model+tokenizer commit, model file-manifest, image digest, inference config**
+- decide_p2 ใช้ threshold/gate/role จาก plan เท่านั้น (ไม่มี override ผ่าน argument)
+- root artifact/model digests ถูก **เทียบกับ artifact จริง + evidence metadata จริง** ก่อน analysis
+- select_n → **SelectionManifest digest** (root + dev-result digest + selected N) ที่ quality/latency/M4/canary ต้องอ้าง
+- raw digests ถูก **recompute จาก evidence body** (ไม่ใช่ตรวจแค่ 64-hex)
+- hard-negative deltas ถูก **derive จาก per-query rows** ที่ผูกไว้ (ไม่รับ naked dict)
+- **decide_p2 = public approval surface เดียว** ที่คืน approved=True ; ทุก bundle ไม่ครบ → NOT_DECISION_ELIGIBLE
 """
 from __future__ import annotations
 import hashlib
@@ -61,7 +60,45 @@ def _exact_zero_int(x) -> bool:
     return type(x) is int and x == 0
 
 
-# ── root RunManifest (immutable, pre-registered) ───────────────────────────────
+def _canonical(obj) -> bytes:
+    return json.dumps(obj, sort_keys=True, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+def raw_digest(obj) -> str:
+    """canonical sha256 ของ evidence body — ให้ recompute เทียบ payload ได้ (ไม่ใช่แค่ตรวจ 64-hex)"""
+    return hashlib.sha256(_canonical(obj)).hexdigest()
+
+
+def _safe_digest(obj):
+    """recompute digest แบบไม่ crash — body ที่ canonicalize ไม่ได้ (NaN/mixed-key/surrogate) คืน None"""
+    try:
+        return raw_digest(obj)
+    except (TypeError, ValueError):
+        return None
+
+
+# ── root RunManifest (immutable, pre-registered, authoritative) ────────────────
+def _valid_thresholds(th) -> bool:
+    """schema เป๊ะ + finite + range/sign — ค่าที่ hash ต้องเป็นค่าที่ตัดสินได้จริง (ไม่ใช่แค่ครบ key)"""
+    if not isinstance(th, dict) or set(th) != set(DEFAULT_THRESHOLDS):
+        return False
+    if not all(_is_finite_number(v) for v in th.values()):
+        return False
+    if not (0.0 < th["candidate_recall"] <= 1.0 and 0.0 < th["candidate_hit"] <= 1.0):
+        return False
+    if not (0.0 <= th["min_delta_ndcg"] <= 1.0 and 0.0 <= th["fused_vs_rerank_min"] <= 1.0):
+        return False
+    if th["noninferior_floor"] > 0.0 or th["hardneg_floor"] > 0.0:
+        return False
+    if not all(th[k] > 0 for k in ("rerank_p95_ms", "total_p95_ms", "rrf_p95_ms")):
+        return False
+    return True
+
+
+def _valid_str_list(x) -> bool:
+    return isinstance(x, list) and len(x) >= 1 and all(E._good_str(s) for s in x) and len(set(x)) == len(x)
+
+
 def validate_run_plan(plan) -> list:
     """คืน list ของ error (ว่าง = valid). root manifest ต้อง pre-register + hash ทุก field ก่อนรัน model"""
     if not isinstance(plan, dict):
@@ -81,9 +118,13 @@ def validate_run_plan(plan) -> list:
         errs.append("primary_metric ต้องเป็น ndcg@5")
     if plan.get("intent_grouping") != "intent_id":
         errs.append("intent_grouping ต้องเป็น intent_id (ไม่นับ paraphrase แยก)")
-    th = plan.get("thresholds")
-    if not isinstance(th, dict) or any(k not in th for k in DEFAULT_THRESHOLDS):
-        errs.append("thresholds ไม่ครบ")
+    # B1: threshold schema+range เป็น authoritative + gate_tags/evaluated_roles frozen ใน plan
+    if not _valid_thresholds(plan.get("thresholds")):
+        errs.append("thresholds ต้องครบ schema + finite + ช่วง/เครื่องหมายถูกต้อง")
+    if not _valid_str_list(plan.get("gate_tags")):
+        errs.append("gate_tags ต้องเป็น list ของ str ไม่ว่าง/ไม่ซ้ำ (frozen — reject empty)")
+    if not _valid_str_list(plan.get("evaluated_roles")):
+        errs.append("evaluated_roles ต้องเป็น list ของ str ไม่ว่าง/ไม่ซ้ำ (frozen)")
     ec = plan.get("expected_counts")
     if not isinstance(ec, dict) or any(type(ec.get(k)) is not int or ec.get(k, 0) < 1 for k in _COUNT_KEYS):
         errs.append(f"expected_counts ต้องมี {_COUNT_KEYS} เป็น positive int")
@@ -115,19 +156,16 @@ def validate_run_plan(plan) -> list:
     return errs
 
 
-def _canonical(obj) -> bytes:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("utf-8")
-
-
 def run_manifest_sha256(plan) -> str:
     if validate_run_plan(plan):
         raise ValueError("run_plan ยัง invalid — สร้าง manifest hash ไม่ได้")
     return hashlib.sha256(_canonical(plan)).hexdigest()
 
 
-# ── N selection (dev เท่านั้น, ผูก root, N ∈ N_SET) ────────────────────────────
+# ── N selection (dev เท่านั้น, ผูก root, N ∈ N_SET, exact int keys) ─────────────
 def validate_dev_evidence(dev_ev, run_manifest, expected_counts, thresholds=DEFAULT_THRESHOLDS) -> list:
-    """dev N-sweep evidence ต้องผูก run เดียวกัน, split=dev, N ครบ N_SET, metric finite [0,1], count==expected"""
+    """dev N-sweep evidence ต้องผูก run เดียวกัน, split=dev, N keys == N_SET (int ทั้งหมด), metric finite [0,1],
+    count==expected, raw_result_digest == recompute จาก by_n"""
     if not isinstance(dev_ev, dict):
         return ["dev_evidence ต้องเป็น dict"]
     errs = []
@@ -135,14 +173,18 @@ def validate_dev_evidence(dev_ev, run_manifest, expected_counts, thresholds=DEFA
         errs.append("dev_evidence split ต้องเป็น 'dev'")
     if dev_ev.get("run_manifest_sha256") != run_manifest:
         errs.append("dev_evidence run_manifest_sha256 ไม่ตรง root")
-    if not _is_sha256(dev_ev.get("raw_result_digest")):
-        errs.append("dev_evidence raw_result_digest ต้องเป็น sha256")
     by_n = dev_ev.get("by_n")
     if not isinstance(by_n, dict):
         errs.append("dev_evidence by_n ต้องเป็น dict")
         return errs
-    if {k for k in by_n if type(k) is int} != set(N_SET):
-        errs.append(f"dev_evidence by_n ต้องมี N = {N_SET} ครบ (exact int keys)")
+    # M1: exact key set — reject key เช่น "10"/False/extra
+    if not (all(type(k) is int for k in by_n) and set(by_n) == set(N_SET)):
+        errs.append(f"dev_evidence by_n keys ต้อง == {N_SET} (int ทั้งหมด, ไม่มี extra/สตริง)")
+    exp = _safe_digest(by_n)
+    if exp is None:
+        errs.append("dev_evidence by_n ไม่ canonicalizable (malformed)")
+    elif dev_ev.get("raw_result_digest") != exp:
+        errs.append("dev_evidence raw_result_digest ไม่ตรง recompute จาก by_n")
     exp_q, exp_i = expected_counts.get("dev_queries"), expected_counts.get("dev_intents")
     for k in sorted(kk for kk in by_n if type(kk) is int):
         d, tag = by_n[k], f"dev N={k}"
@@ -161,8 +203,8 @@ def validate_dev_evidence(dev_ev, run_manifest, expected_counts, thresholds=DEFA
 
 def select_n(dev_ev, run_manifest, expected_counts, thresholds=DEFAULT_THRESHOLDS) -> dict:
     """
-    เลือก N ต่ำสุด **ใน N_SET** ที่ผ่าน CandidateRecall (point+doc>=0.95) และ CandidateHit=1.00 บน dev
-    reject (ValueError) ถ้า dev_evidence ไม่ผูก root/ไม่ครบ N_SET/metric ไม่ finite/count ไม่ตรง
+    เลือก N ต่ำสุด **ใน N_SET** ที่ผ่าน CandidateRecall (point+doc>=recall) และ CandidateHit=hit บน dev
+    reject (ValueError) ถ้า dev_evidence ไม่ผูก root/ไม่ครบ N_SET/metric ไม่ finite/count/digest ไม่ตรง
     """
     errs = validate_dev_evidence(dev_ev, run_manifest, expected_counts, thresholds)
     if errs:
@@ -177,11 +219,19 @@ def select_n(dev_ev, run_manifest, expected_counts, thresholds=DEFAULT_THRESHOLD
     return {"selected_n": None, "status": "CANDIDATE_GENERATION_LIMITED"}
 
 
+def selection_digest(run_manifest, dev_raw_result_digest, selected_n) -> str:
+    """SelectionManifest digest — ผูกผล test/latency/M4/canary เข้ากับ N ที่เลือกจาก dev เท่านั้น"""
+    return raw_digest({"run_manifest_sha256": run_manifest,
+                       "dev_raw_result_digest": dev_raw_result_digest, "selected_n": selected_n})
+
+
 # ── quality evidence + paired bootstrap CI (intent-level) ──────────────────────
-def validate_quality_evidence(q_ev, run_manifest, expected_counts) -> list:
+def validate_quality_evidence(q_ev, run_manifest, expected_counts,
+                              sel_digest=None, selected_n=None) -> list:
     """
-    test quality evidence — ผูก root, split=test, ทุก case มี arms ครบ {dense,rerank,fused}
-    ที่ nDCG@5 finite [0,1] ; query_id ไม่ซ้ำ ; intent/query count == expected (ห้ามหาย/เกิน)
+    test quality evidence — ผูก root + (ถ้ามี) selection digest/selected_n, split=test,
+    ทุก case มี arms ครบ {dense,rerank,fused} finite [0,1] + challenge_tags (ไว้ derive hard-neg) ;
+    query_id ไม่ซ้ำ ; intent/query count == expected ; raw_result_digest == recompute จาก per_query
     """
     if not isinstance(q_ev, dict):
         return ["quality_evidence ต้องเป็น dict"]
@@ -190,12 +240,19 @@ def validate_quality_evidence(q_ev, run_manifest, expected_counts) -> list:
         errs.append("quality_evidence split ต้องเป็น 'test'")
     if q_ev.get("run_manifest_sha256") != run_manifest:
         errs.append("quality_evidence run_manifest_sha256 ไม่ตรง root")
-    if not _is_sha256(q_ev.get("raw_result_digest")):
-        errs.append("quality_evidence raw_result_digest ต้องเป็น sha256")
+    if sel_digest is not None and q_ev.get("selection_digest") != sel_digest:
+        errs.append("quality_evidence selection_digest ไม่ตรง N ที่เลือก")
+    if selected_n is not None and q_ev.get("selected_n") != selected_n:
+        errs.append("quality_evidence selected_n ไม่ตรง N ที่เลือก")
     pq = q_ev.get("per_query")
     if not isinstance(pq, list) or not pq:
         errs.append("quality_evidence per_query ว่าง/ไม่ใช่ list")
         return errs
+    exp = _safe_digest(pq)
+    if exp is None:
+        errs.append("quality_evidence per_query ไม่ canonicalizable (malformed)")
+    elif q_ev.get("raw_result_digest") != exp:
+        errs.append("quality_evidence raw_result_digest ไม่ตรง recompute จาก per_query")
     seen_qid, intents = set(), set()
     for i, row in enumerate(pq):
         tag = f"per_query[{i}]"
@@ -214,6 +271,9 @@ def validate_quality_evidence(q_ev, run_manifest, expected_counts) -> list:
             errs.append(f"{tag}: intent_id ว่าง/ผิดชนิด")
         else:
             intents.add(iid)
+        ct = row.get("challenge_tags")
+        if not isinstance(ct, list) or not ct or any(not E._good_str(t) for t in ct):
+            errs.append(f"{tag}: challenge_tags ว่าง/ผิดชนิด (ต้องมีไว้ derive hard-neg)")
         arms = row.get("arms")
         if not isinstance(arms, dict) or set(arms) != set(ARMS):
             errs.append(f"{tag}: arms ต้องมี {ARMS} ครบ (exact)")
@@ -266,13 +326,33 @@ def paired_bootstrap(deltas: list, resamples: int = RESAMPLES, seed: int = 0) ->
             "resamples": resamples, "seed": seed}
 
 
-# ── arm decision (hard-negative evidence ต้องครบ gate categories) ──────────────
+def derive_hardneg_deltas(per_query: list, arm: str, baseline: str, categories) -> dict:
+    """
+    B4: derive ΔnDCG@5 ต่อ hard-neg category จาก per-query rows ที่ผูกไว้ (ไม่รับ naked dict)
+    ต่อ category: จับ intent ที่ challenge_tags มี category → per-intent mean → mean ของ delta
+    raise ถ้า category ใดไม่มี evidence เลย (bundle ไม่ครบ)
+    """
+    out = {}
+    for cat in categories:
+        arm_by, base_by = {}, {}
+        for row in per_query:
+            if cat in row.get("challenge_tags", []):
+                arm_by.setdefault(row["intent_id"], []).append(row["arms"][arm]["ndcg@5"])
+                base_by.setdefault(row["intent_id"], []).append(row["arms"][baseline]["ndcg@5"])
+        if not arm_by:
+            raise ValueError(f"hard-neg category {cat!r} ไม่มี evidence ใน per_query")
+        deltas = [sum(arm_by[i]) / len(arm_by[i]) - sum(base_by[i]) / len(base_by[i]) for i in arm_by]
+        out[cat] = sum(deltas) / len(deltas)
+    return out
+
+
+# ── arm decision (hard-negative deltas ต้อง derive มาแล้ว + ครบ gate categories) ─
 def decide_arm(rerank_vs_dense: dict, fused_vs_rerank: dict,
                hardneg_rerank: dict, hardneg_fused: dict,
                required_hardneg=(), thr=DEFAULT_THRESHOLDS) -> dict:
     """
-    rerank แทน dense เมื่อ mean Δ>=min_delta และ CI lower>=0 และ hard-neg evidence ครบ+ไม่ต่ำกว่า floor
-    (hard-neg dict ว่าง หรือ ขาด gate category ที่ required = ไม่ผ่าน — ไม่ใช่ vacuous True)
+    rerank แทน dense เมื่อ mean Δ>=min_delta และ CI lower>=0 และ hard-neg ครบ required+ไม่ต่ำกว่า floor
+    (hard-neg dict ว่าง หรือ ขาด gate category = ไม่ผ่าน — ไม่ vacuous True)
     fused แทน rerank เมื่อ +>=fused_vs_rerank_min และ CI lower>=0 และ hard-neg ผ่าน ; มิฉะนั้น arm ที่ง่ายกว่า
     """
     req = set(required_hardneg)
@@ -303,15 +383,19 @@ def decide_arm(rerank_vs_dense: dict, fused_vs_rerank: dict,
 
 
 # ── latency (stage set/count/error ต้องครบก่อน within budget) ──────────────────
-def validate_latency_evidence(lat_ev, run_manifest, expected_count, thr=DEFAULT_THRESHOLDS) -> list:
-    """stage ครบ exact + finite non-negative + post-warmup count เท่ากันทุก stage == expected + error/OOM=0 + digest"""
+def validate_latency_evidence(lat_ev, run_manifest, expected_count, thr=DEFAULT_THRESHOLDS,
+                              sel_digest=None, selected_n=None) -> list:
+    """stage ครบ exact + finite non-negative + post-warmup count เท่ากันทุก stage == expected + error/OOM=0
+    + raw_latency_digest == recompute จาก stages + (ถ้ามี) ผูก selection digest/selected_n"""
     if not isinstance(lat_ev, dict):
         return ["latency_evidence ต้องเป็น dict"]
     errs = []
     if lat_ev.get("run_manifest_sha256") != run_manifest:
         errs.append("latency run_manifest_sha256 ไม่ตรง root")
-    if not _is_sha256(lat_ev.get("raw_latency_digest")):
-        errs.append("latency raw_latency_digest ต้องเป็น sha256")
+    if sel_digest is not None and lat_ev.get("selection_digest") != sel_digest:
+        errs.append("latency selection_digest ไม่ตรง N ที่เลือก")
+    if selected_n is not None and lat_ev.get("selected_n") != selected_n:
+        errs.append("latency selected_n ไม่ตรง N ที่เลือก")
     if not _exact_zero_int(lat_ev.get("error_count")):
         errs.append("latency error_count ต้อง 0 (exact int)")
     if not _exact_zero_int(lat_ev.get("oom_count")):
@@ -325,6 +409,11 @@ def validate_latency_evidence(lat_ev, run_manifest, expected_count, thr=DEFAULT_
     if not isinstance(stages, dict) or set(stages) != set(LATENCY_STAGES):
         errs.append(f"latency stages ต้องมี {LATENCY_STAGES} ครบ (exact)")
         return errs
+    exp = _safe_digest(stages)
+    if exp is None:
+        errs.append("latency stages ไม่ canonicalizable (malformed)")
+    elif lat_ev.get("raw_latency_digest") != exp:
+        errs.append("latency raw_latency_digest ไม่ตรง recompute จาก stages")
     for st in LATENCY_STAGES:
         xs = stages.get(st)
         if not isinstance(xs, list) or not all(_is_finite_number(v) and v >= 0 for v in xs):
@@ -336,9 +425,10 @@ def validate_latency_evidence(lat_ev, run_manifest, expected_count, thr=DEFAULT_
     return errs
 
 
-def latency_summary(lat_ev, run_manifest, expected_count, thr=DEFAULT_THRESHOLDS) -> dict:
+def latency_summary(lat_ev, run_manifest, expected_count, thr=DEFAULT_THRESHOLDS,
+                    sel_digest=None, selected_n=None) -> dict:
     """p50/p95 ต่อ stage (ตัด warm-up) + within_budget — reject (ValueError) ถ้า evidence ไม่ครบ/ไม่เท่ากัน"""
-    errs = validate_latency_evidence(lat_ev, run_manifest, expected_count, thr)
+    errs = validate_latency_evidence(lat_ev, run_manifest, expected_count, thr, sel_digest, selected_n)
     if errs:
         raise ValueError(f"latency_evidence invalid: {errs[:3]}")
     warm, out = lat_ev["warmup"], {}
@@ -352,34 +442,70 @@ def latency_summary(lat_ev, run_manifest, expected_count, thr=DEFAULT_THRESHOLDS
     return out
 
 
-# ── single fail-closed decision entry point ────────────────────────────────────
+# ── single fail-closed decision entry point (public approval surface เดียว) ────
 def _not_eligible(reasons) -> dict:
     return {"status": "NOT_DECISION_ELIGIBLE", "decision_eligible": False, "arm": None, "reasons": reasons}
 
 
-def _hardneg_complete(hn, gate_tags) -> bool:
-    """hard-neg evidence ต้องครอบทุก frozen gate category ด้วยค่า finite (ว่าง/ขาด = ไม่ครบ)"""
-    if not isinstance(hn, dict) or not set(gate_tags).issubset(hn):
-        return False
-    return all(_is_finite_number(v) for v in hn.values())
+def _root_binding_errors(plan, cases, corpus, m4, canary, sel_digest) -> list:
+    """
+    B2/B4: root artifact/model digests ต้องตรง artifact จริง + evidence metadata จริง (ไม่ใช่แค่รู้ root hash)
+    """
+    errs, dg = [], plan["artifact_digests"]
+    try:
+        if E.eval_set_sha256(cases) != dg["eval_set_sha256"]:
+            errs.append("root eval_set_sha256 ไม่ตรง cases จริง")
+        if E.corpus_manifest_sha256(corpus) != dg["corpus_manifest_sha256"]:
+            errs.append("root corpus_manifest_sha256 ไม่ตรง corpus จริง")
+    except (ValueError, TypeError, AttributeError) as e:
+        return [f"artifacts hash ไม่ได้ (malformed): {type(e).__name__}"]
+    idx = dg["retrieval_index_manifest_sha256"]
+    checks = {
+        "retrieval_index_manifest_sha256": idx,
+        "model_revision": plan["model_commit"], "tokenizer_revision": plan["tokenizer_commit"],
+        "model_file_manifest_sha256": plan["model_file_manifest_sha256"], "image_digest": plan["image_digest"],
+        "inference_config": plan["inference_config"], "selection_digest": sel_digest,
+    }
+    for field, want in checks.items():
+        if m4.get(field) != want:
+            errs.append(f"m4 {field} ไม่ตรง root/selection ({field})")
+    # canary bind: index + model + image + selection (metadata ชุดเดียวกับ M4/root)
+    for field, want in (("retrieval_index_manifest_sha256", idx), ("model_revision", plan["model_commit"]),
+                        ("image_digest", plan["image_digest"]), ("selection_digest", sel_digest)):
+        if canary.get(field) != want:
+            errs.append(f"canary {field} ไม่ตรง root/selection ({field})")
+    return errs
 
 
 def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
-              hardneg_rerank, hardneg_fused, m4_evidence, canary_evidence, signoff,
-              cases, corpus, known_roles, evaluated_roles, gate_tags,
-              thr=DEFAULT_THRESHOLDS) -> dict:
+              m4_evidence, canary_evidence, signoff, cases, corpus, known_roles) -> dict:
     """
-    B3/B4: **decision entry point เดียว** — fail-closed. คืน arm verdict ก็ต่อเมื่อ bundle ครบทุกด่าน:
-      valid RunPlan → selected N (dev, ∈N_SET) → quality (test, intent/arm ครบ) → paired CI (seed/resamples จาก plan)
-      → latency (stage/count/error ครบ, within budget สำหรับ arm ที่ไม่ใช่ dense)
-      → hard-neg gate ครบ → M4 PASS + canary PASS (ผูก root + model/image เดียวกัน) → Data Owner sign-off
-    ทุกกรณีที่ไม่ครบ → NOT_DECISION_ELIGIBLE (ไม่มีเส้นทางคืน arm จาก partial bundle)
+    **decision entry point เดียว** — fail-closed + authoritative. คืน DECISION (approved) ก็ต่อเมื่อ:
+      valid RunPlan → root/model digests ตรง artifact+evidence จริง → selected N (dev,∈N_SET) →
+      quality/latency ผูก SelectionManifest (N เดียวกัน) + raw digest ตรง body → paired CI (seed/resamples จาก plan)
+      → hard-neg deltas derive จาก per-query ครบ gate categories → arm ผ่าน + latency within budget (arm≠dense)
+      → M4 PASS + canary PASS (ผูก root) → Data Owner sign-off
+    threshold/gate_tags/evaluated_roles อ่านจาก plan เท่านั้น (ไม่มี override) ; partial bundle → NOT_DECISION_ELIGIBLE
     """
     plan_errs = validate_run_plan(plan)
     if plan_errs:
         return _not_eligible(["run_plan invalid"] + plan_errs)
     root = run_manifest_sha256(plan)
+    thr = plan["thresholds"]
+    gate_tags = plan["gate_tags"]
+    evaluated_roles = plan["evaluated_roles"]
     ec = plan["expected_counts"]
+
+    # B2: root eval/corpus ต้องตรง artifact จริงก่อน (กัน DECISION จาก root hash ที่ไม่ตรงของจริง)
+    try:
+        eval_hash = E.eval_set_sha256(cases)
+        corpus_hash = E.corpus_manifest_sha256(corpus)
+    except (ValueError, TypeError, AttributeError) as e:
+        return _not_eligible([f"artifacts hash ไม่ได้ (malformed): {type(e).__name__}"])
+    if eval_hash != plan["artifact_digests"]["eval_set_sha256"]:
+        return _not_eligible(["root eval_set_sha256 ไม่ตรง cases จริง"])
+    if corpus_hash != plan["artifact_digests"]["corpus_manifest_sha256"]:
+        return _not_eligible(["root corpus_manifest_sha256 ไม่ตรง corpus จริง"])
 
     try:
         sel = select_n(dev_evidence, root, ec, thr)
@@ -387,54 +513,50 @@ def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
         return _not_eligible([f"dev_evidence: {e}"])
     if sel["status"] != "SELECTED":
         return _not_eligible([f"N selection: {sel['status']}"])
+    selected_n = sel["selected_n"]
+    sel_digest = selection_digest(root, dev_evidence["raw_result_digest"], selected_n)
 
-    q_errs = validate_quality_evidence(quality_evidence, root, ec)
+    q_errs = validate_quality_evidence(quality_evidence, root, ec, sel_digest, selected_n)
     if q_errs:
         return _not_eligible(["quality_evidence invalid"] + q_errs[:5])
     pq = quality_evidence["per_query"]
     try:
         rvd = paired_bootstrap(paired_deltas(pq, "rerank", "dense"), plan["resamples"], plan["seed"])
         fvr = paired_bootstrap(paired_deltas(pq, "fused", "rerank"), plan["resamples"], plan["seed"])
+        hn_rerank = derive_hardneg_deltas(pq, "rerank", "dense", gate_tags)
+        hn_fused = derive_hardneg_deltas(pq, "fused", "rerank", gate_tags)
     except ValueError as e:
-        return _not_eligible([f"paired analysis: {e}"])
+        return _not_eligible([f"analysis: {e}"])
 
-    lat_errs = validate_latency_evidence(latency_evidence, root, ec["test_queries"], thr)
+    lat_errs = validate_latency_evidence(latency_evidence, root, ec["test_queries"], thr, sel_digest, selected_n)
     if lat_errs:
         return _not_eligible(["latency invalid"] + lat_errs[:5])
-    lat = latency_summary(latency_evidence, root, ec["test_queries"], thr)
+    lat = latency_summary(latency_evidence, root, ec["test_queries"], thr, sel_digest, selected_n)
 
-    # B3: hard-neg evidence ต้องครบ frozen gate categories ก่อนตัด arm (ว่าง/ขาด = decision ไม่ eligible)
-    for name, hn in (("rerank", hardneg_rerank), ("fused", hardneg_fused)):
-        if not _hardneg_complete(hn, gate_tags):
-            return _not_eligible([f"hard-negative evidence ({name}) ไม่ครบ frozen gate categories {list(gate_tags)}"])
-
-    arm = decide_arm(rvd, fvr, hardneg_rerank, hardneg_fused, required_hardneg=gate_tags, thr=thr)
+    arm = decide_arm(rvd, fvr, hn_rerank, hn_fused, required_hardneg=gate_tags, thr=thr)
     if arm["arm"] in ("rerank", "fused") and not lat["within_budget"]:
         return _not_eligible([f"latency over budget สำหรับ arm {arm['arm']} → arm นี้เลือกไม่ได้"])
 
-    # B4: model/image ของ evidence ต้องตรง root plan ก่อนเข้า evidence gate
-    binding = []
-    for name, ev in (("m4", m4_evidence), ("canary", canary_evidence)):
-        if not isinstance(ev, dict):
-            binding.append(f"{name}_evidence หาย/ผิดชนิด")
-            continue
-        if ev.get("model_revision") != plan["model_commit"]:
-            binding.append(f"{name} model_revision != root model_commit")
-        if ev.get("image_digest") != plan["image_digest"]:
-            binding.append(f"{name} image_digest != root image_digest")
+    # B2/B4: root/selection binding vs evidence metadata จริง
+    if not isinstance(m4_evidence, dict) or not isinstance(canary_evidence, dict):
+        return _not_eligible(["m4/canary evidence หาย/ผิดชนิด"])
+    binding = _root_binding_errors(plan, cases, corpus, m4_evidence, canary_evidence, sel_digest)
     if binding:
         return _not_eligible(binding)
 
-    try:
-        bench = E.decision_benchmark_manifest(cases, corpus, known_roles, evaluated_roles,
-                                              gate_tags, signoff, m4_evidence, canary_evidence,
-                                              run_manifest_sha256=root)
-    except ValueError as e:
-        return _not_eligible([f"decision benchmark gate: {e}"])
+    # evidence + signoff gate (labels/coverage/m4/canary/signoff) — ผูก root, ค่า gate/role จาก plan
+    ev_errs = E.decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff,
+                                         m4_evidence, canary_evidence, root, eval_hash, corpus_hash)
+    if ev_errs:
+        return _not_eligible([f"decision evidence gate ({len(ev_errs)}): {ev_errs[:3]}"])
 
     return {
-        "status": "DECISION", "decision_eligible": True,
-        "arm": arm["arm"], "reason": arm["reason"], "selected_n": sel["selected_n"],
-        "run_manifest_sha256": root,
-        "rerank_vs_dense": rvd, "fused_vs_rerank": fvr, "latency": lat, "benchmark": bench,
+        "status": "DECISION", "decision_eligible": True, "approved": True,
+        "arm": arm["arm"], "reason": arm["reason"], "selected_n": selected_n,
+        "run_manifest_sha256": root, "selection_digest": sel_digest,
+        "benchmark_contract_version": BENCHMARK_CONTRACT_VERSION,
+        "eval_set_sha256": eval_hash, "corpus_manifest_sha256": corpus_hash,
+        "rerank_vs_dense": rvd, "fused_vs_rerank": fvr,
+        "hardneg_rerank": hn_rerank, "hardneg_fused": hn_fused, "latency": lat,
+        "signoff": signoff, "m4_evidence": m4_evidence, "canary_evidence": canary_evidence,
     }
