@@ -50,11 +50,14 @@ _COMMIT = "b" * 40
 _IMG = "sha256:" + "c" * 64
 _FM = "d" * 64            # model file-manifest sha256
 _IDX = "e" * 64          # retrieval index manifest sha256
-_M4_ISO = {"project_uuid_sha256": _s("p"), "network_uuid_sha256": _s("n"), "volume_uuid_sha256": _s("v"),
-           "collection_uuid_sha256": _s("c"), "marker_sha256": _s("mk")}
+_M4_COLL = _s("m4coll")
+_M4_ISO = {"project_id_sha256": _s("p"), "network_id_sha256": _s("n"), "volume_id_sha256": _s("v"),
+           "collection_id_sha256": _M4_COLL, "marker_written_sha256": _s("mk"), "marker_readback_sha256": _s("mk"),
+           "initial_point_count": 0, "network_published_ports": 0, "endpoint_is_production": False}
 _M4_ISO["isolation_proof_sha256"] = E.m4_isolation_proof_sha256(_M4_ISO)
+_M4_OBS = [{"case_id_sha256": _M4_CASE, "observed_authorized_pairs": sorted([_M4_PA]), "observed_sentinel_pairs": sorted([_M4_PS])}]
 _M4_ORACLE = {"frozen_manifest_sha256": M4_MAN_DIGEST, "retrieval_index_manifest_sha256": _IDX,
-              "case_set_sha256": E._m4_case_set_sha256([_M4_CASE])}
+              "collection_id_sha256": _M4_COLL, "observation_sha256": E.m4_observation_sha256(_M4_OBS), "observed_visibility": _M4_OBS}
 _M4_ORACLE["oracle_proof_sha256"] = E.m4_oracle_proof_sha256(_M4_ORACLE)
 GATE_TAGS = ["sibling-hard-negative", "table-row", "negation", "current-superseded",
              "lexical-overlap", "multi-constraint"]
@@ -268,6 +271,8 @@ def build_bundle(plan):
           "image_digest": _IMG, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _IDX,
           "run_receipt_sha256": _EH, "run_manifest_sha256": root, "run_id": "runX",
           "eval_set_sha256": _EH, "corpus_manifest_sha256": _CH}
+    m4["evidence_body_sha256"] = hashlib.sha256(E._canonical_json(
+        {k: v for k, v in m4.items() if k not in ("run_receipt_sha256", "evidence_body_sha256")})).hexdigest()
     can = {"status": "PASS", "leak_count": 0, "auth_status": "VERIFIED",
            "arm_status": {"dense": "PASS", "rerank": "PASS", "fused": "PASS"},
            "arm_error_counts": {"dense": 0, "rerank": 0, "fused": 0},

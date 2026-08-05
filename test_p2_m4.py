@@ -38,13 +38,22 @@ EXP = {"model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "model_file_m
        "image_digest": "sha256:" + "e" * 64, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _H}
 
 
-def iso_proof(marker="m4-marker"):
-    b = {"project_uuid_sha256": _s("proj"), "network_uuid_sha256": _s("net"), "volume_uuid_sha256": _s("vol"),
-         "collection_uuid_sha256": _s("coll"), "marker_sha256": _s(marker)}
+_COLL = _s("coll")
+def iso_proof(marker="m4-marker", **over):
+    b = {"project_id_sha256": _s("proj"), "network_id_sha256": _s("net"), "volume_id_sha256": _s("vol"),
+         "collection_id_sha256": _COLL, "marker_written_sha256": _s(marker), "marker_readback_sha256": _s(marker),
+         "initial_point_count": 0, "network_published_ports": 0, "endpoint_is_production": False}
+    b.update(over)
     b["isolation_proof_sha256"] = E.m4_isolation_proof_sha256(b)
     return b
-def oracle_proof(man, case_ids, index=_H):
-    b = {"frozen_manifest_sha256": man, "retrieval_index_manifest_sha256": index, "case_set_sha256": E._m4_case_set_sha256(list(case_ids))}
+def oracle_proof(frozen, man=None, index=_H, coll=None, observed=None):
+    src = observed if observed is not None else [
+        {"case_id_sha256": cid, "observed_authorized_pairs": fc["authorized_pairs"], "observed_sentinel_pairs": fc["sentinel_pairs"]}
+        for cid, fc in frozen["cases"].items()]
+    obs = [{"case_id_sha256": o["case_id_sha256"], "observed_authorized_pairs": sorted(o["observed_authorized_pairs"]),
+            "observed_sentinel_pairs": sorted(o["observed_sentinel_pairs"])} for o in src]
+    b = {"frozen_manifest_sha256": man or E.m4_case_manifest_sha256(frozen), "retrieval_index_manifest_sha256": index,
+         "collection_id_sha256": coll or _COLL, "observation_sha256": E.m4_observation_sha256(obs), "observed_visibility": obs}
     b["oracle_proof_sha256"] = E.m4_oracle_proof_sha256(b)
     return b
 
@@ -63,16 +72,20 @@ def pcase(case_id, role, category, auth_pair, comps, n=10, erole="qc", qv=None, 
             "unfiltered_topn_pairs": [PS, auth_pair], "observed_sentinel_ranks": [[PS, 1]],
             "provider_pairs": [auth_pair], "model_input_pairs": [auth_pair], "rerank_output_pairs": [auth_pair],
             "model_call_count": 1, "model_input_count": 1, "score_count": 1, "all_scores_finite": True, "status": "PASS"}
-def m4(pcs, man, case_ids=(CQC,), **over):
+def m4(pcs, man, frozen=None, **over):
+    fr = frozen if frozen is not None else FROZEN1
     m = {"schema_version": E.M4_SCHEMA_VERSION, "status": "PASS", "isolated_interlock": "PASS", "independent_oracle": "PASS",
          "sentinel_reached_model": False, "unauthorized_in_model_inputs": 0, "scorer_kind": "pinned-cross-encoder",
          "evidence_stage": "selected-n", "selected_n": 10, "selection_digest": _H,
          "m4_case_manifest_sha256": man, "per_case": pcs, "raw_evidence_sha256": _raw(pcs),
-         "isolation_proof": iso_proof(), "oracle_proof": oracle_proof(man, case_ids),
+         "isolation_proof": iso_proof(), "oracle_proof": oracle_proof(fr),
          "model_revision": "a" * 40, "tokenizer_revision": "a" * 40, "image_digest": "sha256:" + "e" * 64,
          "model_file_manifest_sha256": _H, "inference_config": dict(IC), "run_receipt_sha256": _H,
          "retrieval_index_manifest_sha256": _H, "run_id": "run-1", "eval_set_sha256": _H, "corpus_manifest_sha256": _H}
+    ebs = over.pop("evidence_body_sha256", None)
     m.update(over)
+    m["evidence_body_sha256"] = ebs if ebs is not None else hashlib.sha256(
+        E._canonical_json({k: v for k, v in m.items() if k not in ("run_receipt_sha256", "evidence_body_sha256")})).hexdigest()
     return m
 def V(m4d, frozen, **kw):
     return E.validate_m4_run_evidence(m4d, frozen, kw.pop("expected", EXP), _H, _H, **kw)
@@ -117,18 +130,32 @@ MAN2 = E.m4_case_manifest_sha256(FROZEN2)
 PC_SWAP = [pcase(CQC, QC, "negation", PB, [comp(BID, BTX), comp(SID, STX)], erole="qc"),
            pcase(CSA, SALES, "table-row", PA, [comp(AID, ATX), comp(SID, STX)], erole="sales")]
 check("B1 ⭐ cross-role swap -> error (per-case จับได้ แม้ aggregate subset ผ่าน)",
-      any("provider ไม่ ⊆" in e for e in V(m4(PC_SWAP, MAN2, case_ids=(CQC, CSA), raw_evidence_sha256=_raw(PC_SWAP)), FROZEN2)))
+      any("provider ไม่ ⊆" in e for e in V(m4(PC_SWAP, MAN2, frozen=FROZEN2, raw_evidence_sha256=_raw(PC_SWAP)), FROZEN2)))
 PC2 = [pcase(CQC, QC, "negation", PA, [comp(AID, ATX), comp(SID, STX)], erole="qc"),
        pcase(CSA, SALES, "table-row", PB, [comp(BID, BTX), comp(SID, STX)], erole="sales")]
-check("2-case ถูกต้อง -> valid", V(m4(PC2, MAN2, case_ids=(CQC, CSA), raw_evidence_sha256=_raw(PC2)), FROZEN2) == [], V(m4(PC2, MAN2, case_ids=(CQC, CSA), raw_evidence_sha256=_raw(PC2)), FROZEN2))
+check("2-case ถูกต้อง -> valid", V(m4(PC2, MAN2, frozen=FROZEN2, raw_evidence_sha256=_raw(PC2)), FROZEN2) == [], V(m4(PC2, MAN2, frozen=FROZEN2, raw_evidence_sha256=_raw(PC2)), FROZEN2))
 
-# ── B2: run-level proof binding (isolation/oracle) ────────────────────────────
-check("B2: isolation_proof หาย -> error", any("isolation_proof" in e for e in V(m4(PC1, MAN1, isolation_proof=None), FROZEN1)))
-check("B2: isolation_proof recompute ไม่ตรง -> error", any("isolation_proof_sha256" in e for e in V(m4(PC1, MAN1, isolation_proof={**iso_proof(), "marker_sha256": _s("tamper")}), FROZEN1)))
-check("B2: isolation UUID ไม่ distinct -> error", any("distinct" in e for e in V(m4(PC1, MAN1, isolation_proof=(lambda b: {**b, "network_uuid_sha256": b["project_uuid_sha256"], "isolation_proof_sha256": E.m4_isolation_proof_sha256({**b, "network_uuid_sha256": b["project_uuid_sha256"]})})(iso_proof())), FROZEN1)))
-check("B2: oracle_proof frozen_manifest ผิด -> error", any("oracle_proof frozen_manifest" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof("0" * 64, [CQC])), FROZEN1)))
-check("B2: oracle case_set ไม่ครอบ frozen -> error", any("case_set" in e for e in V(m4(PC2, MAN2, case_ids=(CQC, CSA), oracle_proof=oracle_proof(MAN2, [CQC]), raw_evidence_sha256=_raw(PC2)), FROZEN2)))
-check("B2: oracle index != M4RunRequest -> error", any("oracle_proof retrieval_index" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof(MAN1, [CQC], index="9" * 64)), FROZEN1)))
+# ── B1: durable evidence-body root (post-run body swap ต้อง fail) ─────────────
+check("B1: evidence_body_sha256 ไม่ตรง top-level body -> error", any("evidence_body_sha256" in e for e in V(m4(PC1, MAN1, evidence_body_sha256="0" * 64), FROZEN1)))
+_swap = m4(PC1, MAN1); _swap["oracle_proof"] = oracle_proof(FROZEN1, coll=_s("swapped"))   # สลับ proof หลังคำนวณ body
+check("B1: สลับ oracle_proof หลัง body digest -> error", any("evidence_body_sha256" in e for e in V(_swap, FROZEN1)))
+
+# ── B3: IsolationProof = interlock observation (ไม่ใช่แค่ names) ────────────────
+check("B3: isolation_proof หาย -> error", any("isolation_proof" in e for e in V(m4(PC1, MAN1, isolation_proof=None), FROZEN1)))
+check("B3: resource id ไม่ distinct -> error", any("distinct" in e for e in V(m4(PC1, MAN1, isolation_proof=iso_proof(network_id_sha256=_s("proj"))), FROZEN1)))
+check("B3: collection ไม่ว่างก่อน seed -> error", any("initial_point_count" in e for e in V(m4(PC1, MAN1, isolation_proof=iso_proof(initial_point_count=3)), FROZEN1)))
+check("B3: network publish port -> error", any("network_published_ports" in e for e in V(m4(PC1, MAN1, isolation_proof=iso_proof(network_published_ports=1)), FROZEN1)))
+check("B3: production endpoint -> error", any("endpoint_is_production" in e for e in V(m4(PC1, MAN1, isolation_proof=iso_proof(endpoint_is_production=True)), FROZEN1)))
+check("B3: marker readback != written -> error", any("marker readback" in e for e in V(m4(PC1, MAN1, isolation_proof=iso_proof(marker_readback_sha256=_s("other"))), FROZEN1)))
+
+# ── B2: OracleProof = independent observed visibility (ไม่ derive จาก frozen เฉย ๆ) ──
+check("B2: oracle observed_visibility ว่าง -> error", any("observed_visibility" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof(FROZEN1, observed=[])), FROZEN1)))
+check("B2: observed_authorized != frozen -> error", any("observed_authorized_pairs" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof(FROZEN1, observed=[{"case_id_sha256": CQC, "observed_authorized_pairs": [PB], "observed_sentinel_pairs": [PS]}])), FROZEN1)))
+check("B2: observed sentinel != frozen -> error", any("observed_sentinel_pairs" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof(FROZEN1, observed=[{"case_id_sha256": CQC, "observed_authorized_pairs": [PA], "observed_sentinel_pairs": [PB]}])), FROZEN1)))
+check("B2: observed case ไม่ครอบ frozen -> error", any("observed case set" in e for e in V(m4(PC2, MAN2, frozen=FROZEN2, oracle_proof=oracle_proof(FROZEN2, observed=[{"case_id_sha256": CQC, "observed_authorized_pairs": [PA], "observed_sentinel_pairs": [PS]}]), raw_evidence_sha256=_raw(PC2)), FROZEN2)))
+check("B2: oracle frozen_manifest ผิด -> error", any("oracle_proof frozen_manifest" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof(FROZEN1, man="0" * 64)), FROZEN1)))
+check("B2: oracle index != M4RunRequest -> error", any("oracle_proof retrieval_index" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof(FROZEN1, index="9" * 64)), FROZEN1)))
+check("B2: isolation/oracle collection ไม่ตรง -> error", any("collection_id ไม่ตรง" in e for e in V(m4(PC1, MAN1, oracle_proof=oracle_proof(FROZEN1, coll=_s("other-coll"))), FROZEN1)))
 
 # ── B1 (QueryProbe ผูก frozen): เลือก vector หลังเห็นผลไม่ได้ ──────────────────
 _qp = copy.deepcopy(PC1)

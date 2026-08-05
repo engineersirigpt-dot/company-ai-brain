@@ -109,9 +109,15 @@ per_case[]:               ← **หลักฐาน authoritative** (security 
   model_input ∩ sentinel(frozen) = ∅ · sentinel ⊆ unfiltered_topn
   model_call_count/model_input_count/score_count > 0 (score==input) · all_scores_finite · status = PASS
 # run-level provenance proofs (B2 — verdict derive จาก proof จริง ไม่ใช่ string/count)
-isolation_proof{project/network/volume/collection_uuid_sha256 (distinct) · marker_sha256 · isolation_proof_sha256=recompute(body)}
-   ← marker_sha256 == receipt.isolation_marker_sha256 (marker load-bearing, ตรวจใน preflight bundle)
-oracle_proof{frozen_manifest_sha256==m4_manifest · retrieval_index_manifest_sha256==M4RunRequest · case_set_sha256==sorted(frozen cases) · oracle_proof_sha256=recompute(body)}
+isolation_proof{ **interlock observation จาก runner** : project/network/volume/collection_id_sha256 (distinct) ·
+   initial_point_count==0 (collection ว่างก่อน seed) · network_published_ports==0 (internal/no publish) ·
+   endpoint_is_production==False · marker_written_sha256==marker_readback_sha256 (write→read กลับ target เดียวกัน) · isolation_proof_sha256=recompute(body)}
+   ← marker_written_sha256 == receipt.isolation_marker_sha256 (marker load-bearing, ตรวจใน preflight bundle)
+oracle_proof{ **independent direct-scroll observation** : frozen_manifest_sha256==m4_manifest · retrieval_index_manifest_sha256==M4RunRequest ·
+   collection_id_sha256==isolation_proof.collection_id (อ่าน collection ที่ isolate) ·
+   observed_visibility[{case_id_sha256, observed_authorized_pairs==frozen authorized, observed_sentinel_pairs==frozen sentinel}] ·
+   observation_sha256=recompute(observed) · oracle_proof_sha256=recompute(body)}   ← builder สร้าง PASS จาก frozen อย่างเดียวไม่ได้
+evidence_body_sha256   ← durable root ทั้ง bundle (ทุก top-level ยกเว้น run_receipt_sha256) · receipt commit ค่านี้ → post-run proof swap = mismatch
 # pin + durable binding — scorer_kind/model_revision/tokenizer_revision/model_file_manifest_sha256/inference_config มาจาก ScorerProof
 model_revision / tokenizer_revision (commit) · image_digest · model_file_manifest_sha256 · inference_config
 run_id · retrieval_index_manifest_sha256 · eval/corpus hash · run_manifest_sha256 (decision) · selection_digest (M4b)
@@ -128,7 +134,7 @@ run_id · retrieval_index_manifest_sha256 · eval/corpus hash · run_manifest_sh
 # validator: exact case set · case roles == evaluated_roles == plan · required_categories == plan · QueryProbe==frozen · zero missing
 ```
 > validator `validate_m4_run_evidence` v5 + `validate_m4_frozen_manifest` + `validate_m4_isolation_proof`/`validate_m4_oracle_proof` + M4RunRequest + RunPlan binding พร้อมแล้ว
-> (test_p2_m4.py 47/47 · test_p2_m4_harness.py 33/33 — scorer provenance · single run_case boundary · proof recompute/coverage · marker load-bearing · cross-role swap · QueryProbe(text+vector)-ผูก-frozen · M4a exact pin)
+> (test_p2_m4.py 56/56 · test_p2_m4_harness.py 41/41 — scorer provenance · single run_case boundary · evidence_body durable root (post-run swap fail) · IsolationProof interlock observation · OracleProof observed visibility · marker load-bearing · cross-role swap · QueryProbe(text+vector)-ผูก-frozen · M4a exact pin)
 > harness ผลิต evidence ผ่าน **boundary เดียว** `run_case`/`run_m4_cases` (validate scorer + input ก่อน delegate) + `build_isolation_proof`/`build_oracle_proof`/`build_run_verdicts` + `M4RunReceipt` แยกที่ `run_receipt_sha256` อ้างถึง
 
 ## Gate ที่คงไว้

@@ -79,9 +79,14 @@ class PinnedCrossEncoder:
         return out
 
     def metadata(self) -> dict:
-        return {"model": self.model_name, "model_revision": self.model_commit,
-                "tokenizer_revision": self.tokenizer_commit, "file_manifest_sha256": self.file_manifest_sha256,
-                "dtype": self.dtype, "torch_version": self.torch_version,
+        # superset: M4 provenance contract (kind/model_name/model_file_manifest_sha256/inference_config
+        # ตรง M4RunRequest) + legacy keys (file_manifest_sha256/torch/transformers) สำหรับ model smoke
+        ic = {"model_name": self.model_name, "max_length": self.max_length,
+              "batch_size": self.batch_size, "device": self.device, "dtype": self.dtype}
+        return {"kind": "pinned-cross-encoder", "model_name": self.model_name, "model": self.model_name,
+                "model_revision": self.model_commit, "tokenizer_revision": self.tokenizer_commit,
+                "model_file_manifest_sha256": self.file_manifest_sha256, "file_manifest_sha256": self.file_manifest_sha256,
+                "inference_config": ic, "dtype": self.dtype, "torch_version": self.torch_version,
                 "transformers_version": self.transformers_version, "device": self.device,
                 "max_length": self.max_length, "batch_size": self.batch_size}
 

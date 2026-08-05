@@ -195,19 +195,36 @@ def build_frozen_manifest(cases: dict, required_categories, evaluated_roles) -> 
             "required_categories": list(required_categories), "evaluated_roles": list(evaluated_roles)}
 
 
-# ── run-level proofs (B2): isolation interlock + independent oracle ───────────────────────────
-def build_isolation_proof(*, project_uuid, network_uuid, volume_uuid, collection_uuid, marker) -> dict:
-    b = {"project_uuid_sha256": _id_hash(project_uuid), "network_uuid_sha256": _id_hash(network_uuid),
-         "volume_uuid_sha256": _id_hash(volume_uuid), "collection_uuid_sha256": _id_hash(collection_uuid),
-         "marker_sha256": _id_hash(marker)}
+# ── run-level proofs (B2/B3): interlock + independent oracle = **runtime observation** จาก runner ──────
+def build_isolation_proof(*, project_id, network_id, volume_id, collection_id, marker,
+                          initial_point_count=0, network_published_ports=0, endpoint_is_production=False,
+                          marker_readback=None) -> dict:
+    """
+    IsolationProof จากผล interlock ของ runner — collection ว่างก่อน seed · internal/no publish ·
+    non-production endpoint · marker write→readback (default readback == marker เมื่ออ่านกลับจาก target เดียวกัน)
+    """
+    mw = _id_hash(marker)
+    b = {"project_id_sha256": _id_hash(project_id), "network_id_sha256": _id_hash(network_id),
+         "volume_id_sha256": _id_hash(volume_id), "collection_id_sha256": _id_hash(collection_id),
+         "marker_written_sha256": mw,
+         "marker_readback_sha256": _id_hash(marker_readback) if marker_readback is not None else mw,
+         "initial_point_count": initial_point_count, "network_published_ports": network_published_ports,
+         "endpoint_is_production": endpoint_is_production}
     b["isolation_proof_sha256"] = E.m4_isolation_proof_sha256(b)
     return b
 
 
-def build_oracle_proof(*, frozen, index_sha256) -> dict:
-    b = {"frozen_manifest_sha256": E.m4_case_manifest_sha256(frozen),
-         "retrieval_index_manifest_sha256": index_sha256,
-         "case_set_sha256": E._m4_case_set_sha256(list((frozen.get("cases") or {})))}
+def build_oracle_proof(*, frozen, index_sha256, collection_id, observed_visibility) -> dict:
+    """
+    OracleProof จาก **independent direct-scroll** — `observed_visibility` = [{case_id_sha256,
+    observed_authorized_pairs, observed_sentinel_pairs}] ที่ reader แยกเห็นจริง (runner ต้องอ่านจาก isolated collection)
+    """
+    obs = [{"case_id_sha256": o["case_id_sha256"],
+            "observed_authorized_pairs": sorted(o["observed_authorized_pairs"]),
+            "observed_sentinel_pairs": sorted(o["observed_sentinel_pairs"])} for o in observed_visibility]
+    b = {"frozen_manifest_sha256": E.m4_case_manifest_sha256(frozen), "retrieval_index_manifest_sha256": index_sha256,
+         "collection_id_sha256": _id_hash(collection_id), "observation_sha256": E.m4_observation_sha256(obs),
+         "observed_visibility": obs}
     b["oracle_proof_sha256"] = E.m4_oracle_proof_sha256(b)
     return b
 
@@ -219,7 +236,7 @@ def build_run_verdicts(*, expected, isolation_proof, oracle_proof, case_records,
     iso_ok = E.validate_m4_isolation_proof(isolation_proof) == []
     man = E._safe_m4_manifest_digest(frozen)
     oracle_ok = man is not None and E.validate_m4_oracle_proof(
-        oracle_proof, man, expected.get("retrieval_index_manifest_sha256"), list(frozen.get("cases") or {})) == []
+        oracle_proof, man, expected.get("retrieval_index_manifest_sha256"), frozen) == []
     cases = frozen.get("cases") or {}
     unauth = sentinel_hit = passed = traced = 0
     for r in case_records:
@@ -270,6 +287,9 @@ def assemble_evidence(case_records: list, *, stage, run_meta: dict, scorer_proof
     ev["evidence_stage"] = stage
     ev["per_case"] = case_records
     ev["raw_evidence_sha256"] = hashlib.sha256(E._canonical_json(case_records)).hexdigest()
+    # B1: durable root — commit ทั้ง top-level (run_receipt_sha256 ยังไม่มีตอนนี้ ; exclude ตัวมันเอง)
+    ev["evidence_body_sha256"] = hashlib.sha256(E._canonical_json(
+        {k: v for k, v in ev.items() if k != "evidence_body_sha256"})).hexdigest()
     return ev
 
 
@@ -277,9 +297,10 @@ def assemble_receipt(evidence: dict, *, run_manifest, m4_case_manifest, expected
                      isolation_proof, started_utc, finished_utc, exit_code=0) -> dict:
     return {"schema_version": E.M4_RECEIPT_SCHEMA_VERSION, "run_id": evidence["run_id"],
             "run_manifest_sha256": run_manifest, "m4_case_manifest_sha256": m4_case_manifest,
-            "raw_evidence_sha256": evidence["raw_evidence_sha256"], "command_sha256": _argv_hash(argv),
-            "started_utc": started_utc, "finished_utc": finished_utc, "exit_code": exit_code,
-            "stdout_sha256": _bytes_sha256(stdout), "stderr_sha256": _bytes_sha256(stderr),
-            "isolation_marker_sha256": isolation_proof["marker_sha256"],   # marker load-bearing (ผูก IsolationProof)
+            "raw_evidence_sha256": evidence["raw_evidence_sha256"],
+            "evidence_body_sha256": evidence["evidence_body_sha256"],   # B1: durable full-bundle root
+            "command_sha256": _argv_hash(argv), "started_utc": started_utc, "finished_utc": finished_utc,
+            "exit_code": exit_code, "stdout_sha256": _bytes_sha256(stdout), "stderr_sha256": _bytes_sha256(stderr),
+            "isolation_marker_sha256": isolation_proof["marker_written_sha256"],   # marker load-bearing (ผูก IsolationProof)
             "retrieval_index_manifest_sha256": expected["retrieval_index_manifest_sha256"],
             "model_revision": expected["model_revision"], "image_digest": expected["image_digest"], "status": "PASS"}

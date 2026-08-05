@@ -507,10 +507,10 @@ def validate_m4_preflight_bundle(plan, frozen, evidence, receipt) -> list:
             errs.append("evidence.run_receipt_sha256 != recompute จาก receipt body")
     # evidence: preflight, ผูก root + eval/corpus จาก RunPlan + exact M4RunRequest (รวม run_id จาก plan)
     errs += E.validate_m4_run_evidence(evidence, frozen, expected, eh, ch, root, require_stage=E.M4_STAGE_PREFLIGHT)
-    # B2: isolation marker ต้อง load-bearing — proof body ผูกกับ marker เดียวกับที่ receipt บันทึก
+    # B2: isolation marker ต้อง load-bearing — proof observation ผูก marker เดียวกับที่ receipt บันทึก
     iso = evidence.get("isolation_proof")
-    if isinstance(iso, dict) and iso.get("marker_sha256") != receipt.get("isolation_marker_sha256"):
-        errs.append("isolation_proof.marker_sha256 != receipt.isolation_marker_sha256 (marker ไม่ load-bearing)")
+    if isinstance(iso, dict) and iso.get("marker_written_sha256") != receipt.get("isolation_marker_sha256"):
+        errs.append("isolation_proof.marker_written_sha256 != receipt.isolation_marker_sha256 (marker ไม่ load-bearing)")
     return errs
 
 
