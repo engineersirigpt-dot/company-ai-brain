@@ -112,15 +112,16 @@ check("build_latency_evidence -> validate_latency_evidence ผ่าน",
 check("evidence ไม่มี approved/decision field (approval = decide_p2 เท่านั้น)",
       not any(k in quality or k in dev or k in latency for k in ("approved", "decision_eligible", "arm")))
 
-# ── integration (real p2_harness) — guarded: skip ถ้าไม่มี qdrant_client ────────
-try:
+# ── integration (real p2_harness) — guard เจาะจง optional dep เท่านั้น (M1) ──────
+# skip เฉพาะเมื่อไม่มี qdrant_client ; ถ้ามีแล้ว p2_harness import ล้ม = ให้ error จริง (ไม่กลืนเป็น skip)
+import importlib.util
+_INTEG = importlib.util.find_spec("qdrant_client") is not None
+if not _INTEG:
+    print("SKIP integration: ไม่มี qdrant_client (optional dep) — pure section ครอบ contract แล้ว")
+else:
     import policy as P
     import p2_reranker as RK
     import p2_harness as H
-    _INTEG = True
-except ImportError as e:
-    _INTEG = False
-    print(f"SKIP integration (missing dep, ปกติบน clean env): {type(e).__name__}: {e}")
 
 if _INTEG:
     class _Res:

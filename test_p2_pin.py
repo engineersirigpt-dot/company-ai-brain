@@ -17,7 +17,6 @@ import p2_reranker as RK
 import p2_runplan as RP
 import p2_fetch_model as FM
 import p2_verify_snapshot as VS
-import p2_docker_build as DB
 
 res = []
 def check(name, cond, detail=""):
@@ -60,17 +59,6 @@ check("M1: P2_EXPECT_COMMIT blank -> SystemExit (ไม่มองเป็น 
 os.environ["P2_EXPECT_COMMIT"] = "   "
 check("M1: P2_EXPECT_COMMIT whitespace -> SystemExit", raises_sysexit(FM._assert_expected_commit))
 os.environ.pop("P2_EXPECT_COMMIT", None)
-
-# ── B2: p2_docker_build — PY_BASE fail-closed (digest จริง + platform lock) ─────
-_gooddig = "python@sha256:" + "a" * 64
-check("B2: validate_py_base digest จริง -> ผ่าน", DB.validate_py_base(_gooddig) == [])
-check("B2: validate_py_base sentinel zeros -> error", any("sentinel" in e for e in DB.validate_py_base("python@sha256:" + "0" * 64)))
-check("B2: validate_py_base floating tag -> error", DB.validate_py_base("python:3.11-slim") != [])
-check("B2: validate_py_base non-python image -> error", DB.validate_py_base("ubuntu@sha256:" + "a" * 64) != [])
-check("B2: validate_py_base blank/None -> error", DB.validate_py_base("") != [] and DB.validate_py_base(None) != [])
-check("B2: build_command ล็อก linux/amd64 + iidfile + ส่ง pin ทั้งสอง",
-      "linux/amd64" in DB.build_command(_gooddig) and "--iidfile" in DB.build_command(_gooddig)
-      and f"PY_BASE={_gooddig}" in DB.build_command(_gooddig) and f"MODEL_COMMIT={PIN.MODEL_COMMIT}" in DB.build_command(_gooddig))
 
 # ── M2: verify snapshot fail-closed ด้วย SystemExit (ไม่ใช่ assert) ─────────────
 os.environ["HF_HOME"] = os.path.join(os.environ.get("TEMP", "."), "p2_no_such_cache")

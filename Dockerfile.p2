@@ -55,14 +55,15 @@ ENV HF_HOME=/opt/hf \
 WORKDIR /app
 COPY requirements.p2.txt /app/
 COPY --from=prep /wheels /wheels
+# M2: wheel manifest (filename+sha256) เป็น build evidence + verify integrity **ก่อน** install
+COPY --from=prep /opt/wheelhouse.manifest.sha256 /opt/wheelhouse.manifest.sha256
+RUN cd /wheels && sha256sum -c /opt/wheelhouse.manifest.sha256
 # M3: ติดตั้งจาก wheelhouse เท่านั้น — ไม่มี network/index (artifact set เดียวกับที่ verify ใน prep)
 RUN pip install --no-index --find-links=/wheels -r requirements.p2.txt \
  && pip freeze > /opt/wheelhouse.freeze.txt
 # copy ทั้ง HF cache (snapshots/<SHA> + blobs) — รักษา layout/symlink ให้ _resolved_commit ผ่าน (#2/#3)
 COPY --from=prep /opt/hf /opt/hf
 COPY --from=prep /opt/model_file_manifest.sha256 /opt/model_file_manifest.sha256
-# M2: wheel manifest (filename+sha256) เป็น build evidence ของ dependency closure
-COPY --from=prep /opt/wheelhouse.manifest.sha256 /opt/wheelhouse.manifest.sha256
 COPY p2_pin.py p2_reranker.py p2_verify_snapshot.py p2_model_smoke.py /app/
 # M2: verify offline snapshot fail-closed ด้วย SystemExit (ไม่ใช่ assert) — ไม่โหลด weights/ไม่รัน benchmark
 RUN python p2_verify_snapshot.py

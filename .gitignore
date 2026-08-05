@@ -8,6 +8,12 @@ __pycache__/
 qdrant_storage/
 parsed_output/
 
+# P2 Docker build runtime artifacts (build receipts/image ids — runtime output, ไม่ commit)
+.p2_build/
+p2_image.id
+p2_build_manifest.json
+wheels/
+
 # Secrets
 api.txt
 .env
