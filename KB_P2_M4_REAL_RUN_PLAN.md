@@ -108,17 +108,20 @@ per_case[]:               ← **หลักฐาน authoritative** (security 
 # pin + durable binding
 model_revision / tokenizer_revision (commit) · image_digest · model_file_manifest_sha256
 run_id · retrieval_index_manifest_sha256 · eval/corpus hash · run_manifest_sha256 (decision) · selection_digest (M4b)
-# per_case ต้องมี QueryProbe (M2): query_vector_sha256 · unfiltered/filtered_query_vector_sha256 · unfiltered/filtered_limit(==N)
-# + effective_role (ผูก role ต่อ case) · exact hash-only keys (M1: reject raw/unknown field ทุกระดับ)
-# frozen M4 manifest (จาก fixture/oracle — expected_visible_roles matrix, M2):
-#   cases{case_id_sha256: {role_identity_sha256, effective_role, category, authorized_pairs[], sentinel_pairs[]}}
+# per_case: effective_role · QueryProbe (query_vector_sha256 == frozen ; unfiltered/filtered vector == query_vector ; limit==N)
+#   · run_receipt_sha256 (durable receipt reference — ไม่ใส่ command/raw log ตรง ๆ) · exact hash-only keys (reject raw/unknown)
+# M4RunRequest (expected) — จาก RunPlan/frozen run request : model_revision · tokenizer_revision · model_file_manifest_sha256
+#   · image_digest · inference_config · retrieval_index_manifest_sha256 [· run_id]  → validator เทียบ **exact ทั้ง M4a/M4b**
+# frozen M4 manifest (fixture/oracle — expected_visible_roles matrix):
+#   cases{case_id_sha256: {role_identity_sha256, effective_role, category, query_vector_sha256, authorized_pairs[], sentinel_pairs[]}}
 #   required_categories[] · evaluated_roles[]  → digest = m4_case_manifest_sha256 (ผูกเข้า RunPlan)
-# validate_m4_frozen_manifest (ก่อน hash, ไม่ crash): exact types/keys · sha256 · non-blank/unique ·
-#   authorized/sentinel disjoint · **ทุก required_category + evaluated_role มี case** (coverage)
-# validator: exact case set == frozen · case roles == evaluated_roles == plan · required_categories == plan · zero missing
+# validate_m4_frozen_manifest (ก่อน hash, ไม่ crash): exact types/keys · sha256 · non-blank/unique pairs ·
+#   authorized/sentinel disjoint · **ทุก required_category + evaluated_role มี case**
+# validator: exact case set · case roles == evaluated_roles == plan · required_categories == plan · QueryProbe==frozen · zero missing
 ```
-> validator `validate_m4_run_evidence` v4 + `validate_m4_frozen_manifest` + RunPlan binding พร้อมแล้ว
-> (test_p2_m4.py 34/34 รวม cross-role swap + rank-เท็จ + role-ไม่มี-case + malformed + raw-field) — harness เพียงผลิต evidence ตาม schema นี้
+> validator `validate_m4_run_evidence` v4 + `validate_m4_frozen_manifest` + M4RunRequest + RunPlan binding พร้อมแล้ว
+> (test_p2_m4.py 39/39 — cross-role swap · rank-เท็จ · QueryProbe-ผูก-frozen · M4a exact pin · role-ไม่มี-case · malformed · mixed-key · raw-field)
+> harness เพียงผลิต evidence ตาม schema นี้ + `M4RunReceipt` (command/timestamp/exit/log hashes) แยกที่ `run_receipt_sha256` อ้างถึง
 
 ## Gate ที่คงไว้
 - Data Owner sign-off **ไม่จำเป็นกับ M4a** (isolated synthetic mechanics) — แต่ M4a ติดป้าย non-decision และ **ห้ามส่งเข้า `decide_p2()` แทน M4b**

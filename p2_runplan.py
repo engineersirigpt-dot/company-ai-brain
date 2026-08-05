@@ -607,9 +607,15 @@ def decide_p2(plan, dev_evidence, quality_evidence, latency_evidence,
     if set(m4_frozen_manifest.get("required_categories") or []) != set(plan["required_categories"]):
         return _not_eligible(["frozen required_categories != RunPlan.required_categories"])
 
+    # B2: M4RunRequest (exact pin/image/index/inference_config) จาก RunPlan — bind M4 evidence กับ root จริง
+    m4_expected = {"model_revision": plan["model_commit"], "tokenizer_revision": plan["tokenizer_commit"],
+                   "model_file_manifest_sha256": plan["model_file_manifest_sha256"], "image_digest": plan["image_digest"],
+                   "inference_config": plan["inference_config"],
+                   "retrieval_index_manifest_sha256": plan["artifact_digests"]["retrieval_index_manifest_sha256"]}
     # evidence + signoff gate (labels/coverage/m4/canary/signoff) — ผูก root + frozen M4 manifest, ค่า gate/role จาก plan
     ev_errs = E.decision_evidence_errors(cases, corpus, known_roles, evaluated_roles, gate_tags, signoff,
-                                         m4_evidence, canary_evidence, root, m4_frozen_manifest, eval_hash, corpus_hash)
+                                         m4_evidence, canary_evidence, root, m4_frozen_manifest, m4_expected,
+                                         eval_hash, corpus_hash)
     if ev_errs:
         return _not_eligible([f"decision evidence gate ({len(ev_errs)}): {ev_errs[:3]}"])
 

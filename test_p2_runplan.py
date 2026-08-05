@@ -27,8 +27,9 @@ def _s(x): return hashlib.sha256(x.encode()).hexdigest()
 _M4_AID, _M4_ATX = _s("mA"), _s("mtA"); _M4_PA = E._pair_sha256(_M4_AID, _M4_ATX)
 _M4_SID, _M4_STX = _s("mS"), _s("mtS"); _M4_PS = E._pair_sha256(_M4_SID, _M4_STX)
 _M4_CASE, _M4_ROLE = _s("m4-case-qc"), _s("m4-qc")
+_M4_QV = _s("m4-qv")
 M4_FROZEN = {"cases": {_M4_CASE: {"role_identity_sha256": _M4_ROLE, "effective_role": "qc", "category": "negation",
-                                  "authorized_pairs": [_M4_PA], "sentinel_pairs": [_M4_PS]}},
+                                  "query_vector_sha256": _M4_QV, "authorized_pairs": [_M4_PA], "sentinel_pairs": [_M4_PS]}},
              "required_categories": ["negation"], "evaluated_roles": ["qc"]}
 M4_MAN_DIGEST = E.m4_case_manifest_sha256(M4_FROZEN)
 
@@ -240,10 +241,9 @@ def build_bundle(plan):
     stages = {"candidate_retrieval": [10] * 60, "rerank": [100] * 60, "rrf": [1] * 60, "total": [150] * 60}
     latency = {"run_manifest_sha256": root, "selection_digest": sd, "selected_n": seln,
                "raw_latency_digest": RP.raw_digest(stages), "error_count": 0, "oom_count": 0, "warmup": 10, "stages": stages}
-    _m4qv = _s("m4-qv")
     m4_pc = [{"case_id_sha256": _M4_CASE, "role_identity_sha256": _M4_ROLE, "effective_role": "qc",
-              "category": "negation", "selected_n": seln, "query_vector_sha256": _m4qv,
-              "unfiltered_query_vector_sha256": _m4qv, "filtered_query_vector_sha256": _m4qv,
+              "category": "negation", "selected_n": seln, "query_vector_sha256": _M4_QV,
+              "unfiltered_query_vector_sha256": _M4_QV, "filtered_query_vector_sha256": _M4_QV,
               "unfiltered_limit": seln, "filtered_limit": seln,
               "pair_components": [{"point_id_sha256": _M4_AID, "rerank_text_sha256": _M4_ATX, "pair_sha256": _M4_PA},
                                   {"point_id_sha256": _M4_SID, "rerank_text_sha256": _M4_STX, "pair_sha256": _M4_PS}],
@@ -257,7 +257,8 @@ def build_bundle(plan):
           "raw_evidence_sha256": hashlib.sha256(E._canonical_json(m4_pc)).hexdigest(),
           "model_revision": _COMMIT, "tokenizer_revision": _COMMIT, "model_file_manifest_sha256": _FM,
           "image_digest": _IMG, "inference_config": dict(IC), "retrieval_index_manifest_sha256": _IDX,
-          "run_manifest_sha256": root, "run_id": "runX", "eval_set_sha256": _EH, "corpus_manifest_sha256": _CH}
+          "run_receipt_sha256": _EH, "run_manifest_sha256": root, "run_id": "runX",
+          "eval_set_sha256": _EH, "corpus_manifest_sha256": _CH}
     can = {"status": "PASS", "leak_count": 0, "auth_status": "VERIFIED",
            "arm_status": {"dense": "PASS", "rerank": "PASS", "fused": "PASS"},
            "arm_error_counts": {"dense": 0, "rerank": 0, "fused": 0},

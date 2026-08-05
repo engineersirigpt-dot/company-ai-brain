@@ -257,9 +257,9 @@ check("B3: artifact_manifest_unapproved approved=False (smoke)",
 check("B3: ไม่มี public decision_benchmark_manifest (approved=True builder) แล้ว",
       not hasattr(E, "decision_benchmark_manifest"))
 check("B3: decision_evidence_errors ไม่มี signoff -> error list (ไม่ approve)",
-      len(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], None, "m4", "canary", "a" * 64, {})) > 0)
+      len(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], None, "m4", "canary", "a" * 64, {}, {})) > 0)
 check("B3: decision_evidence_errors คืน list เสมอ (ไม่มี approved=True self-stamp)",
-      isinstance(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs, None, "canary", "a" * 64, {}), list))
+      isinstance(E.decision_evidence_errors([case()], CORPUS, KNOWN, ["qc"], ["direct"], _gs, None, "canary", "a" * 64, {}, {}), list))
 
 # ── M1: combined gate malformed artifacts -> controlled (ไม่ crash) ────────────
 def _no_crash(fn):
