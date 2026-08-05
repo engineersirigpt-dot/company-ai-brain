@@ -196,18 +196,27 @@ def build_frozen_manifest(cases: dict, required_categories, evaluated_roles) -> 
 
 
 # ── run-level proofs (B2/B3): interlock + independent oracle = **runtime observation** จาก runner ──────
-def build_isolation_proof(*, project_id, network_id, volume_id, collection_id, marker,
-                          initial_point_count=0, network_published_ports=0, endpoint_is_production=False,
-                          marker_readback=None) -> dict:
+def _good_id(x) -> bool:
+    """resource id/marker ต้องเป็น non-blank scalar (int หรือ str ที่ไม่ว่าง/ไม่มี control/surrogate)"""
+    if isinstance(x, bool) or not isinstance(x, (int, str)):
+        return False
+    return True if isinstance(x, int) else not E._bad_str(x)
+
+
+def build_isolation_proof(*, project_id, network_id, volume_id, collection_id, marker, marker_readback,
+                          initial_point_count, network_published_ports, endpoint_is_production) -> dict:
     """
-    IsolationProof จากผล interlock ของ runner — collection ว่างก่อน seed · internal/no publish ·
-    non-production endpoint · marker write→readback (default readback == marker เมื่ออ่านกลับจาก target เดียวกัน)
+    IsolationProof จากผล interlock ของ runner — **ทุก observation ต้องส่งเข้ามา explicit** (ไม่มี PASS default):
+    collection ว่างก่อน seed (initial_point_count) · internal/no publish (network_published_ports) ·
+    endpoint_is_production · marker_readback = ค่าที่ **อ่านกลับจาก target จริง** (ไม่ auto-copy จาก written)
     """
-    mw = _id_hash(marker)
+    for name, v in (("project_id", project_id), ("network_id", network_id), ("volume_id", volume_id),
+                    ("collection_id", collection_id), ("marker", marker), ("marker_readback", marker_readback)):
+        if not _good_id(v):
+            raise ValueError(f"isolation {name} ต้องเป็น non-blank scalar (ไม่ใช่ ''/whitespace/control/bool): {v!r}")
     b = {"project_id_sha256": _id_hash(project_id), "network_id_sha256": _id_hash(network_id),
          "volume_id_sha256": _id_hash(volume_id), "collection_id_sha256": _id_hash(collection_id),
-         "marker_written_sha256": mw,
-         "marker_readback_sha256": _id_hash(marker_readback) if marker_readback is not None else mw,
+         "marker_written_sha256": _id_hash(marker), "marker_readback_sha256": _id_hash(marker_readback),
          "initial_point_count": initial_point_count, "network_published_ports": network_published_ports,
          "endpoint_is_production": endpoint_is_production}
     b["isolation_proof_sha256"] = E.m4_isolation_proof_sha256(b)
@@ -218,10 +227,12 @@ def build_oracle_proof(*, frozen, index_sha256, collection_id, observed_visibili
     """
     OracleProof จาก **independent direct-scroll** — `observed_visibility` = [{case_id_sha256,
     observed_authorized_pairs, observed_sentinel_pairs}] ที่ reader แยกเห็นจริง (runner ต้องอ่านจาก isolated collection)
+    N1: canonicalize ลำดับ (sort ทั้ง outer by case_id + inner pairs) → durable digest reproducible ไม่ขึ้นกับลำดับ scroll
     """
-    obs = [{"case_id_sha256": o["case_id_sha256"],
-            "observed_authorized_pairs": sorted(o["observed_authorized_pairs"]),
-            "observed_sentinel_pairs": sorted(o["observed_sentinel_pairs"])} for o in observed_visibility]
+    obs = sorted(({"case_id_sha256": o["case_id_sha256"],
+                   "observed_authorized_pairs": sorted(o["observed_authorized_pairs"]),
+                   "observed_sentinel_pairs": sorted(o["observed_sentinel_pairs"])} for o in observed_visibility),
+                 key=lambda o: o["case_id_sha256"])
     b = {"frozen_manifest_sha256": E.m4_case_manifest_sha256(frozen), "retrieval_index_manifest_sha256": index_sha256,
          "collection_id_sha256": _id_hash(collection_id), "observation_sha256": E.m4_observation_sha256(obs),
          "observed_visibility": obs}

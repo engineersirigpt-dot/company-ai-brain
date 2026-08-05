@@ -84,8 +84,13 @@ SCORER = PinnedScorer({"ta": 2.0, "tb": 2.0})
 RECORDS, PROOF = HN.run_m4_cases(expected=EXP, frozen=FROZEN, scorer=SCORER, inputs=INPUTS, selected_n=50)
 OBS = [{"case_id_sha256": cid, "observed_authorized_pairs": fc["authorized_pairs"], "observed_sentinel_pairs": fc["sentinel_pairs"]}
        for cid, fc in FROZEN["cases"].items()]
-ISO = HN.build_isolation_proof(project_id="proj-u", network_id="net-u", volume_id="vol-u",
-                               collection_id="coll-u", marker="m4-run-uuid")
+def iso(**over):
+    d = dict(project_id="proj-u", network_id="net-u", volume_id="vol-u", collection_id="coll-u",
+             marker="m4-run-uuid", marker_readback="m4-run-uuid", initial_point_count=0,
+             network_published_ports=0, endpoint_is_production=False)
+    d.update(over)
+    return HN.build_isolation_proof(**d)
+ISO = iso()
 ORACLE = HN.build_oracle_proof(frozen=FROZEN, index_sha256=_H, collection_id="coll-u", observed_visibility=OBS)
 VERDICTS = HN.build_run_verdicts(expected=EXP, isolation_proof=ISO, oracle_proof=ORACLE, case_records=RECORDS, frozen=FROZEN)
 RUN_META = {"m4_case_manifest_sha256": MAN, "run_id": "run-1", "run_manifest_sha256": ROOT,
@@ -126,8 +131,16 @@ check("B1: ไม่มี public build_case_record/score_case (trace = private)
 check("B1: underlying scorer ได้ query ของ case จริง (ไม่ใช่ 'm4')", SCORER.queries == [QT1, QT2])
 check("B1: query_text_sha256 ใน evidence ตรง frozen", EV["per_case"][0]["query_text_sha256"] == HN._text_hash(QT1))
 
+# ── B1: build_isolation_proof เป็น fail-closed producer (ไม่มี PASS default) ──────────────────
+check("B1: omit observation field -> TypeError (ไม่มี PASS default)", raises(lambda: HN.build_isolation_proof(project_id="p", network_id="n", volume_id="v", collection_id="c", marker="m"), TypeError))
+check("B1: resource id ว่าง/blank -> ValueError", raises(lambda: iso(collection_id="   "), ValueError))
+check("B1: marker_readback bool -> ValueError", raises(lambda: iso(marker_readback=True), ValueError))
+# N1: observed_visibility ลำดับสลับ -> durable digest เท่าเดิม
+_o_rev = HN.build_oracle_proof(frozen=FROZEN, index_sha256=_H, collection_id="coll-u", observed_visibility=list(reversed(OBS)))
+check("N1: observed_visibility ลำดับสลับ -> oracle digest เท่าเดิม (reproducible)", _o_rev["oracle_proof_sha256"] == ORACLE["oracle_proof_sha256"])
+
 # ── B1: durable evidence-body root — post-run proof swap ต้อง fail (receipt เดิม) ──────────────
-_swap_iso = HN.build_isolation_proof(project_id="EVIL-p", network_id="EVIL-n", volume_id="EVIL-v", collection_id="coll-u", marker="m4-run-uuid")
+_swap_iso = iso(project_id="EVIL-p", network_id="EVIL-n", volume_id="EVIL-v")
 _ev_swap = {**EV, "isolation_proof": _swap_iso}   # สลับ isolation หลังรัน, ไม่ recompute evidence_body, receipt เดิม
 check("B1: สลับ IsolationProof resource id หลังรัน (receipt เดิม) -> gate fail", RP.validate_m4_preflight_bundle(PLAN, FROZEN, _ev_swap, RC) != [])
 _ev_swap2 = HN.assemble_evidence(RECORDS, stage="preflight-n50", run_meta=RUN_META, scorer_proof=PROOF, isolation_proof=_swap_iso, oracle_proof=ORACLE, verdicts=HN.build_run_verdicts(expected=EXP, isolation_proof=_swap_iso, oracle_proof=ORACLE, case_records=RECORDS, frozen=FROZEN))
@@ -138,15 +151,16 @@ check("B1: recompute evidence_body แต่ไม่ออก receipt ใหม
 _bad_iso = {**ISO, "isolation_proof_sha256": "9" * 64}
 _v_iso = HN.build_run_verdicts(expected=EXP, isolation_proof=_bad_iso, oracle_proof=ORACLE, case_records=RECORDS, frozen=FROZEN)
 check("B2: isolation_proof recompute ไม่ตรง -> isolated_interlock FAIL + status FAIL", _v_iso["isolated_interlock"] == "FAIL" and _v_iso["status"] == "FAIL")
-check("B3: initial_point_count != 0 -> isolation invalid", E.validate_m4_isolation_proof(HN.build_isolation_proof(project_id="p", network_id="n", volume_id="v", collection_id="c", marker="m", initial_point_count=5)) != [])
-check("B3: production endpoint -> isolation invalid", E.validate_m4_isolation_proof(HN.build_isolation_proof(project_id="p", network_id="n", volume_id="v", collection_id="c", marker="m", endpoint_is_production=True)) != [])
-check("B3: marker readback != written -> isolation invalid", E.validate_m4_isolation_proof(HN.build_isolation_proof(project_id="p", network_id="n", volume_id="v", collection_id="c", marker="m", marker_readback="different")) != [])
+check("B3: initial_point_count != 0 -> isolation invalid", E.validate_m4_isolation_proof(iso(initial_point_count=5)) != [])
+check("B3: network publish port -> isolation invalid", E.validate_m4_isolation_proof(iso(network_published_ports=1)) != [])
+check("B3: production endpoint -> isolation invalid", E.validate_m4_isolation_proof(iso(endpoint_is_production=True)) != [])
+check("B3: marker readback != written -> isolation invalid", E.validate_m4_isolation_proof(iso(marker_readback="different")) != [])
 check("B2: oracle observed != frozen visibility -> oracle invalid", E.validate_m4_oracle_proof(HN.build_oracle_proof(frozen=FROZEN, index_sha256=_H, collection_id="coll-u", observed_visibility=[{"case_id_sha256": cid, "observed_authorized_pairs": [HN.component("Z", "tz")["pair_sha256"]], "observed_sentinel_pairs": fc["sentinel_pairs"]} for cid, fc in FROZEN["cases"].items()]), MAN, _H, FROZEN) != [])
 check("B2: oracle case ไม่ครอบ frozen -> oracle invalid", E.validate_m4_oracle_proof(HN.build_oracle_proof(frozen=FROZEN, index_sha256=_H, collection_id="coll-u", observed_visibility=OBS[:1]), MAN, _H, FROZEN) != [])
 check("B2: isolation/oracle collection ไม่ตรง -> gate fail", any("collection_id" in e for e in E.validate_m4_run_evidence({**EV, "oracle_proof": HN.build_oracle_proof(frozen=FROZEN, index_sha256=_H, collection_id="OTHER", observed_visibility=OBS)}, FROZEN, EXP, _H, _H)))
 
 # ── B2: marker load-bearing (proof ผูก marker เดียวกับ receipt) ────────────────────────────────
-_iso2 = HN.build_isolation_proof(project_id="proj-u", network_id="net-u", volume_id="vol-u", collection_id="coll-u", marker="OTHER-marker")
+_iso2 = iso(marker="OTHER-marker", marker_readback="OTHER-marker")
 _rc2 = HN.assemble_receipt(EV, run_manifest=ROOT, m4_case_manifest=MAN, expected={**EXP, "run_id": "run-1"}, argv=["python", "p2_m4_runner.py", "--preflight"], stdout=b"ok", stderr=b"", isolation_proof=_iso2, started_utc="2026-08-05T05:00:00+07:00", finished_utc="2026-08-05T05:03:00+07:00", exit_code=0)
 _ev2 = {**EV, "run_receipt_sha256": E.m4_run_receipt_sha256(_rc2)}
 check("B2: receipt marker != evidence isolation_proof.marker -> gate fail", any("marker" in e for e in RP.validate_m4_preflight_bundle(PLAN, FROZEN, _ev2, _rc2)))
