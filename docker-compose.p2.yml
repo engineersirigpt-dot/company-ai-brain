@@ -4,7 +4,11 @@
 # ลำดับ (หลัง review เท่านั้น):
 #   1) build : docker compose -f docker-compose.p2.yml build \
 #                --build-arg PY_BASE=python@sha256:<digest> --build-arg MODEL_COMMIT=953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
-#   2) บันทึก image digest : docker inspect --format '{{index .RepoDigests 0}}' <image>  → RunPlan.image_digest
+#   2) บันทึก image identity (local, ยังไม่ push — RepoDigests จะว่าง จึงห้ามใช้):
+#        docker build --iidfile p2_image.id -f Dockerfile.p2 .            # หรือ
+#        docker image inspect --format '{{.Id}}' company-ai-brain/p2-reranker:pinned   # -> sha256:<config digest>
+#      -> RunPlan.image_digest (ใช้ local image Id/config digest ; ห้ามใช้ tag :pinned เป็น digest)
+#      ถ้า push ไป registry ที่ควบคุมได้ ค่อยใช้ registry content digest แทน
 #   3) model-load smoke : docker compose -f docker-compose.p2.yml run --rm reranker python p2_model_smoke.py
 #
 # ยังไม่มี service ของ real M4 / N-sweep / benchmark ในไฟล์นี้ (NO-GO จน smoke ผ่าน + gates ครบ)

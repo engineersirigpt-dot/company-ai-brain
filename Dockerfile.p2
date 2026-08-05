@@ -12,17 +12,25 @@
 # <<FILL-AT-BUILD>> = ค่าที่รู้ได้เฉพาะตอน build จริง (ห้ามเดาล่วงหน้า):
 #   - base image digest (gotcha #6/#7) : ใช้ python@sha256:... จริง ไม่ใช่ tag ลอย
 #   - torch/transformers/... versions   : ยืนยันให้ตรง CUDA ของ 4x4090 (ดู requirements.p2.txt)
-#   - image_digest (หลัง build)         : `docker inspect` → กรอกใน RunPlan.image_digest
+#   - image_digest (หลัง build)         : local image Id/config digest — `docker image inspect --format '{{.Id}}'`
+#                                         หรือ `docker build --iidfile` (ห้ามใช้ RepoDigests สำหรับ local image ที่ยังไม่ push)
 
-ARG PY_BASE=python@sha256:<<FILL-AT-BUILD: python:3.11-slim base image digest>>
+# PY_BASE: <<FILL-AT-BUILD>> — B1 decision (ยังไม่ล็อก): CPU-compat vs CUDA/GPU evidence image
+#   ต้อง override เป็น **digest-pinned** base ตอน build จริง เช่น
+#   --build-arg PY_BASE=python@sha256:<digest>   (หรือ CUDA/PyTorch runtime base ที่ pin digest)
+#   ค่า default ด้านล่างเป็น tag ชั่วคราวให้ parse ได้เท่านั้น — ห้ามใช้ build evidence ด้วย tag ลอย
+ARG PY_BASE=python:3.11-slim
 ARG MODEL_COMMIT=953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
 
 # ── Stage 1: fetch (network ON) ──────────────────────────────────────────────
 FROM ${PY_BASE} AS fetch
 ARG MODEL_COMMIT
+# B2: ส่ง build arg เข้า env ให้ p2_fetch_model assert == p2_pin.MODEL_COMMIT ก่อน fetch
+# (single source = p2_pin ; build arg ที่ไม่ตรง = build fail ทันที ไม่ใช่ control ปลอม)
 ENV HF_HOME=/opt/hf \
     HF_HUB_DISABLE_TELEMETRY=1 \
-    P2_MANIFEST_OUT=/opt/model_file_manifest.sha256
+    P2_MANIFEST_OUT=/opt/model_file_manifest.sha256 \
+    P2_EXPECT_COMMIT=${MODEL_COMMIT}
 WORKDIR /app
 COPY requirements.p2.txt /app/
 # ห้าม fallback main: pip ล้มเหลว = build ล้มเหลว (gotcha #8)
@@ -45,12 +53,9 @@ COPY --from=fetch /opt/hf /opt/hf
 COPY --from=fetch /opt/model_file_manifest.sha256 /opt/model_file_manifest.sha256
 COPY p2_pin.py p2_reranker.py p2_model_smoke.py /app/
 # ยืนยันว่า cache offline resolve ได้ (ไม่โหลด weights — แค่ path/commit check) ตอน build; ไม่รัน benchmark
-RUN python -c "import os,p2_pin as P,p2_reranker as RK; \
-p=os.path.join(os.environ['HF_HOME'],'hub','models--BAAI--bge-reranker-v2-m3','snapshots',P.MODEL_COMMIT); \
-assert os.path.isdir(p),'snapshot dir missing: '+p; \
-assert RK._resolved_commit(p)==P.MODEL_COMMIT; \
-assert all(os.path.exists(os.path.join(p,f)) for f in P.REQUIRED_FILES); \
-print('offline snapshot OK', P.MODEL_COMMIT)"
+# M2: ใช้ SystemExit ไม่ใช่ assert (assert ปิดได้ด้วย -O/PYTHONOPTIMIZE จึงไม่ fail-closed)
+COPY p2_verify_snapshot.py /app/
+RUN python p2_verify_snapshot.py
 # model-load smoke = ขั้น manual แยก (gotcha #9) — ไม่รันตอน build:
 #   docker compose -f docker-compose.p2.yml run --rm reranker python p2_model_smoke.py
 CMD ["python", "-c", "import p2_pin; print('p2 reranker image pinned', p2_pin.MODEL_COMMIT)"]

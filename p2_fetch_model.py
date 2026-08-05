@@ -19,7 +19,19 @@ import p2_reranker as RK
 MANIFEST_OUT = os.environ.get("P2_MANIFEST_OUT", "/opt/model_file_manifest.sha256")
 
 
+def _assert_expected_commit() -> None:
+    """
+    B2: p2_pin = single source of truth. ถ้า build ส่ง `P2_EXPECT_COMMIT` (จาก --build-arg MODEL_COMMIT)
+    มาแต่ไม่ตรง p2_pin → fail ก่อน network fetch (กัน build arg เป็น control ปลอมที่ไม่มีผล)
+    """
+    expect = os.environ.get("P2_EXPECT_COMMIT")
+    if expect and expect != PIN.MODEL_COMMIT:
+        raise SystemExit(f"FAIL build MODEL_COMMIT {expect!r} != p2_pin.MODEL_COMMIT {PIN.MODEL_COMMIT!r} "
+                         f"(single source of truth — แก้ p2_pin.py หรือ build arg ให้ตรง)")
+
+
 def fetch_and_verify() -> dict:
+    _assert_expected_commit()
     from huggingface_hub import snapshot_download   # network ในสเตจนี้ (ไม่ตั้ง HF_HUB_OFFLINE)
 
     # revision = full immutable SHA ตรง ๆ — ถ้าโหลดไม่ได้ให้ fail (ห้าม fallback main; gotcha #8)
