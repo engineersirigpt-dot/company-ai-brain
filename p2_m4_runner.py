@@ -1,28 +1,25 @@
 """
-P2 M4a real-path runner (pure/injectable orchestrator) — Codex GO (FIX5 re-review `0A033C4`).
-**เขียน/ทดสอบแบบ injectable เท่านั้น ; รัน M4a บน Qdrant/model จริง = NO-GO** จน runner-review + Data Owner sign-off.
+P2 M4a real-path runner (pure/injectable orchestrator) — Codex GO (FIX5) → review bfa69a0 (FIX B1-B4/M1-M2).
+**เขียน/ทดสอบแบบ injectable เท่านั้น ; รัน M4a บน Qdrant/model จริง = NO-GO** จน adapter-review + Data Owner sign-off.
 
-runner **ไม่ import qdrant_client/torch** — infra ทุกอย่างฉีดผ่าน `ports` (duck-typed) เพื่อให้ทั้ง flow
-offline-testable และ provenance ตรวจย้อนได้ (Codex load-bearing checks: ทุก observation field มาจาก call จริง):
+runner **ไม่ import qdrant_client/torch** — infra ฉีดผ่าน `ports` (duck-typed). fail-closed แบบ **fail-before-mutate**:
+interlock/corpus/target ผิด → abort **ก่อน** write_marker/seed/model ; teardown ครอบ provision + เกิด **ก่อน** publish
 
-  ports.scorer   : .metadata() , .score(query_text, texts)                       (pinned cross-encoder จริง)
+  ports.scorer   : .metadata() , .score(query_text, texts)
   ports.isolation: .provision() -> {project_id,network_id,volume_id,collection_id,endpoint}
-                   .observe_initial_count() -> int         (#1 count collection ก่อน seed จริง)
-                   .observe_published_ports() -> int        (#2 inspect isolated network จริง)
-                   .observe_endpoint_is_production() -> bool (#3 derive จาก endpoint/policy ไม่ hardcode)
-                   .write_marker(marker) ; .read_marker() -> readback   (#4 read-after-write ผ่าน target เดียว)
-                   .seed(corpus) ; .teardown()
-  ports.provider : .filtered_candidates(effective_role, query_vector, limit) -> [(point_id, rerank_text)]
-                   (compiled RBAC filter ก่อน retrieval — เฉพาะ authorized ถึง model)
-  ports.oracle   : .unfiltered_topn(query_vector, limit) -> [(point_id, rerank_text)]  (raw ไม่ผ่าน filter)
-                   .observe_visibility(effective_role) -> {authorized_pairs, sentinel_pairs}
-                   (#5 independent direct scroll แยก client จาก provider)
-  ports.clock    : .now_iso() -> str (ISO-8601 + tz)
+                   .observe_initial_count() / .observe_published_ports() / .observe_endpoint_is_production()
+                   .write_marker(marker) ; .read_marker() -> readback
+                   .seed(corpus) ; .teardown()   (teardown ต้อง partial-provision-safe/idempotent — B4)
+  ports.provider : .bind(handle) ; .observed_target_identity() -> {collection_id,endpoint}       (B3)
+                   .filtered_candidates(effective_role, query_vector, limit) -> [(point_id, rerank_text)]
+  ports.oracle   : .bind(handle) ; .observed_target_identity() -> {collection_id,endpoint}        (B3, client แยก)
+                   .unfiltered_topn(query_vector, limit) ; .observe_visibility(effective_role)
+  ports.clock    : .now_iso() -> str
 
-flow (fail-closed): validate plan → M4RunRequest → validate scorer pin → provision + observe interlock →
-  seed → ต่อ case (filtered provider + unfiltered oracle + run_case ; sentinel ถึง model = raise) →
-  IsolationProof/OracleProof (จาก observation) → build_run_verdicts (derive) → evidence + receipt →
-  **validate public bundle → atomic publish** (#6 ไม่ทิ้ง PASS artifact ถ้า fail) → teardown เสมอ
+flow: validate plan → M4RunRequest → **bind corpus↔RunPlan (B2)** → validate scorer pin → provision →
+  **exact interlock check ก่อน write_marker (B1)** → write/read marker → validate IsolationProof **ก่อน seed (B1)** →
+  **bind+verify provider/oracle target == isolated handle ก่อน seed (B3)** → seed → run cases (sentinel→raise) →
+  proofs → verdicts → assemble evidence → **teardown → build receipt → validate bundle → atomic publish (B4/#6)**
 """
 from __future__ import annotations
 
@@ -31,25 +28,33 @@ import p2_eval as E
 import p2_m4_harness as HN
 import p2_runplan as RP
 
-M4A_STAGE = E.M4_STAGE_PREFLIGHT     # runner นี้ = M4a preflight (decision_eligible=False, N=50)
+M4A_STAGE = E.M4_STAGE_PREFLIGHT
 M4A_SELECTED_N = 50
 
 
 class RunnerError(Exception):
-    """orchestration ล้มเหลวก่อน publish (plan/case/coverage ผิด) — ไม่มี PASS artifact"""
+    """orchestration/provenance ล้มเหลว — abort ก่อน publish, ไม่มี PASS artifact"""
 
 
 def _sentinel_items(unfiltered, sentinel_pairs):
-    """sentinel ที่ observe จริงใน unfiltered top-N (load-bearing: sentinel ต้องโผล่ unfiltered)"""
     want = set(sentinel_pairs or [])
     return [(pid, txt) for (pid, txt) in unfiltered if HN.component(pid, txt)["pair_sha256"] in want]
 
 
+def _safe_teardown(iso) -> None:
+    """cleanup best-effort — swallow เพื่อไม่ให้ teardown error กลบ original exception (B4)"""
+    try:
+        iso.teardown()
+    except Exception:
+        pass
+
+
+def _target_identity(handle) -> dict:
+    return {"collection_id": handle["collection_id"], "endpoint": handle["endpoint"]}
+
+
 def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout, stderr) -> dict:
-    """
-    รัน M4a preflight ครบ flow → publish evidence+receipt แบบ atomic. คืน {status, path, evidence, receipt}.
-    ล้มเหลว/leak/interlock ผิด → raise (RunnerError / PermissionError / PublishRefused) โดยไม่ทิ้ง PASS artifact
-    """
+    """รัน M4a preflight → publish bundle แบบ atomic. คืน {status, path, evidence, receipt}. fail-closed ทุกเส้น"""
     perrs = RP.validate_run_plan(plan)
     if perrs:
         raise RunnerError("run_plan invalid: " + "; ".join(map(str, perrs[:3])))
@@ -58,26 +63,55 @@ def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout
     root = RP.run_manifest_sha256(plan)
     expected = {**RP.m4_run_request(plan), "run_id": plan["run_id"]}
 
-    sc, iso, prov, orac, clock = ports.scorer, ports.isolation, ports.provider, ports.oracle, ports.clock
+    # B2: corpus ต้องผูก RunPlan.corpus_manifest_sha256 (ก่อน provision/seed) — กัน seed corpus อื่นแต่ evidence อ้าง corpus นี้
+    if not isinstance(corpus, dict):
+        raise RunnerError("corpus ต้องเป็น canonical frozen corpus dict")
+    cerrs = E.validate_corpus(corpus)
+    if cerrs:
+        raise RunnerError("corpus invalid: " + "; ".join(map(str, cerrs[:3])))
+    if E.corpus_manifest_sha256(corpus) != plan["artifact_digests"]["corpus_manifest_sha256"]:
+        raise RunnerError("corpus_manifest_sha256 ไม่ตรง RunPlan (seed corpus ต้องเป็นชุดที่ evidence อ้าง)")
 
-    scorer_proof = HN.validate_scorer_metadata(sc, expected)   # fail-closed: mock/wrong pin → raise (ก่อน provision)
+    sc, iso, prov, orac, clock = ports.scorer, ports.isolation, ports.provider, ports.oracle, ports.clock
+    scorer_proof = HN.validate_scorer_metadata(sc, expected)   # fail-closed pin (ก่อน provision — ยังไม่มี resource)
     started = clock.now_iso()
-    handle = iso.provision()
+
+    handle = None
     try:
-        # observe interlock ก่อน seed — แต่ละ field มาจาก observation call แยกกัน (provenance ชัด, ไม่ hardcode)
+        handle = iso.provision()
+        # B1: exact interlock ทันทีหลัง observe และ **ก่อน write_marker** — ผิด → abort ก่อน mutate/model
         init_count = iso.observe_initial_count()
+        if not E._exact_zero_int(init_count):
+            raise RunnerError("initial_point_count != 0 (collection ไม่ว่างก่อน seed) — abort ก่อน write/seed")
         published_ports = iso.observe_published_ports()
+        if not E._exact_zero_int(published_ports):
+            raise RunnerError("network_published_ports != 0 (network ไม่ internal) — abort ก่อน write/seed")
         is_production = iso.observe_endpoint_is_production()
+        if is_production is not False:
+            raise RunnerError("endpoint_is_production ไม่ False (target อาจเป็น production) — abort ก่อน write/seed")
+
         iso.write_marker(marker)
-        readback = iso.read_marker()                           # อ่านกลับจาก target เดียวกัน (ไม่ reuse marker written)
+        readback = iso.read_marker()                           # read-after-write ผ่าน target เดียว (ไม่ reuse marker)
         iso_proof = HN.build_isolation_proof(
             project_id=handle["project_id"], network_id=handle["network_id"],
             volume_id=handle["volume_id"], collection_id=handle["collection_id"],
             marker=marker, marker_readback=readback,
             initial_point_count=init_count, network_published_ports=published_ports,
             endpoint_is_production=is_production)
+        ierrs = E.validate_m4_isolation_proof(iso_proof)       # B1: validate **ก่อน seed** (marker mismatch → abort ก่อน seed/model)
+        if ierrs:
+            raise RunnerError("IsolationProof invalid: " + "; ".join(map(str, ierrs[:3])))
 
-        iso.seed(corpus)                                        # seed หลัง observe empty-count
+        # B3: provider/oracle ต้อง bind isolated target เดียวกับ handle ก่อน seed/query (พิสูจน์ไม่ได้ชี้ collection อื่น)
+        prov.bind(handle)
+        orac.bind(handle)
+        tgt = _target_identity(handle)
+        if prov.observed_target_identity() != tgt:
+            raise RunnerError("provider target != isolated handle (อาจ query collection อื่น) — abort ก่อน seed")
+        if orac.observed_target_identity() != tgt:
+            raise RunnerError("oracle target != isolated handle — abort ก่อน seed")
+
+        iso.seed(corpus)                                       # seed หลังผ่าน interlock/target validation ทั้งหมด
 
         records, observed = [], []
         for cspec in cases:
@@ -88,14 +122,14 @@ def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout
             if role != fc.get("effective_role"):
                 raise RunnerError(f"case {cid!r} effective_role ไม่ตรง frozen")
             qt, qv = cspec["query_text"], cspec["query_vector"]
-            filtered = prov.filtered_candidates(role, qv, M4A_SELECTED_N)      # authorized เท่านั้น (filter ก่อน retrieval)
-            unfiltered = orac.unfiltered_topn(qv, M4A_SELECTED_N)             # raw (independent reader)
+            filtered = prov.filtered_candidates(role, qv, M4A_SELECTED_N)
+            unfiltered = orac.unfiltered_topn(qv, M4A_SELECTED_N)
             rec = HN.run_case(expected=expected, scorer=sc, case_id=cid, frozen_case=fc,
                               query_text=qt, query_vector=qv, candidates=filtered,
                               unfiltered_items=unfiltered, sentinel_items=_sentinel_items(unfiltered, fc.get("sentinel_pairs")),
-                              selected_n=M4A_SELECTED_N)          # sentinel ถึง model → PermissionError (ไม่ PASS)
+                              selected_n=M4A_SELECTED_N)         # sentinel ถึง model → PermissionError
             records.append(rec)
-            vis = orac.observe_visibility(role)                  # independent direct-scroll visibility ต่อ role
+            vis = orac.observe_visibility(role)
             observed.append({"case_id_sha256": HN._id_hash(cid),
                              "observed_authorized_pairs": vis["authorized_pairs"],
                              "observed_sentinel_pairs": vis["sentinel_pairs"]})
@@ -112,15 +146,21 @@ def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout
                     "selected_n": M4A_SELECTED_N, "decision_eligible": False}
         evidence = HN.assemble_evidence(records, stage=M4A_STAGE, run_meta=run_meta, scorer_proof=scorer_proof,
                                         isolation_proof=iso_proof, oracle_proof=oracle_proof, verdicts=verdicts)
-        finished = clock.now_iso()
-        receipt = HN.assemble_receipt(evidence, run_manifest=root, m4_case_manifest=plan["m4_case_manifest_sha256"],
-                                      expected=expected, argv=argv, stdout=stdout, stderr=stderr,
-                                      isolation_proof=iso_proof, started_utc=started, finished_utc=finished, exit_code=0)
-        evidence["run_receipt_sha256"] = E.m4_run_receipt_sha256(receipt)
+    except BaseException:
+        _safe_teardown(iso)          # cleanup ทุก failure รวม **partial provision** (teardown ต้อง idempotent) ; ไม่กลบ original
+        raise
 
-        # #6: validate public bundle **ก่อน** publish ; atomic (temp→rename) ; fail → ไม่ทิ้ง PASS artifact
-        path = AT.publish_m4_bundle(out_dir=out_dir, run_id=plan["run_id"], evidence=evidence, receipt=receipt,
-                                    validate=lambda: RP.validate_m4_preflight_bundle(plan, frozen, evidence, receipt))
-    finally:
-        iso.teardown()                                          # teardown เสมอ (แม้ leak/refuse)
+    # B4: work สำเร็จ → teardown ให้เรียบร้อย **ก่อน** publish ; teardown fail → ไม่มี PASS artifact
+    try:
+        iso.teardown()
+    except Exception as e:
+        raise RunnerError("teardown failed — ไม่ publish PASS artifact") from e
+
+    finished = clock.now_iso()
+    receipt = HN.assemble_receipt(evidence, run_manifest=root, m4_case_manifest=plan["m4_case_manifest_sha256"],
+                                  expected=expected, argv=argv, stdout=stdout, stderr=stderr,
+                                  isolation_proof=iso_proof, started_utc=started, finished_utc=finished, exit_code=0)
+    evidence["run_receipt_sha256"] = E.m4_run_receipt_sha256(receipt)
+    path = AT.publish_m4_bundle(out_dir=out_dir, run_id=plan["run_id"], evidence=evidence, receipt=receipt,
+                                validate=lambda: RP.validate_m4_preflight_bundle(plan, frozen, evidence, receipt))
     return {"status": "PUBLISHED", "path": path, "evidence": evidence, "receipt": receipt}

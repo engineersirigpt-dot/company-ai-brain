@@ -25,6 +25,7 @@ import p2_eval as E
 import p2_reranker as RK
 
 N_SET = (10, 20, 30, 50)
+SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")   # M1: run_id = artifact path segment (no traversal)
 RESAMPLES = 10000
 ARMS = ("dense", "rerank", "fused")
 LATENCY_STAGES = ("candidate_retrieval", "rerank", "rrf", "total")
@@ -119,6 +120,8 @@ def validate_run_plan(plan) -> list:
     errs = []
     if not isinstance(plan.get("run_id"), str) or not plan.get("run_id", "").strip():
         errs.append("run_id หาย/ผิดชนิด")
+    elif not SAFE_RUN_ID_RE.match(plan["run_id"]):     # M1: run_id เป็น artifact path — บังคับ safe basename (กัน traversal)
+        errs.append("run_id ต้องเป็น safe basename ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ (กัน path injection)")
     if plan.get("benchmark_contract_version") != BENCHMARK_CONTRACT_VERSION:
         errs.append(f"benchmark_contract_version ต้องเป็น {BENCHMARK_CONTRACT_VERSION}")
     if tuple(plan.get("n_set", ())) != N_SET:
