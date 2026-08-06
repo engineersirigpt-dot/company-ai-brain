@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -62,7 +63,7 @@ check("overwrite refuse -> ของเดิมไม่ถูกแตะ", js
 
 # ── M1: run_id path-injection containment ─────────────────────────────────────
 UNSAFE = ["a/b", "a\\b", "..", ".", "../esc", "/abs", "\\abs", "C:evil", "c:\\x", "con", "PRN.txt",
-          "nul", "COM1", "lpt9.log", " ", ".hidden", "a b", "x" * 129, "หนึ่ง"]
+          "nul", "COM1", "lpt9.log", " ", ".hidden", "a b", "x" * 129, "หนึ่ง", "run\n", "run\r", "run\x00id"]
 allref = all(refused(lambda r=r: pub(r)) for r in UNSAFE)
 check("M1: run_id ไม่ปลอดภัยทุกแบบ -> PublishRefused", allref)
 check("M1: ไม่มีไฟล์หลุดออกนอก out_dir", not any(os.path.exists(os.path.join(os.path.dirname(BASE), n)) for n in ("escape", "esc", "abs", "evil")))
@@ -73,6 +74,42 @@ check("evidence ไม่ใช่ dict -> refuse", refused(lambda: pub("r-x", e
 check("validate ไม่ callable -> refuse", refused(lambda: AT.publish_m4_bundle(out_dir=BASE, run_id="r-y", evidence=EV, receipt=RC, validate="nope")))
 check("validate คืนไม่ใช่ list -> refuse", refused(lambda: pub("r-z", validate=lambda: None)))
 check("guard fail -> ไม่มีไฟล์ตกค้าง", not any(os.path.exists(os.path.join(BASE, r + ".bundle.json")) for r in ("r-x", "r-y", "r-z")))
+
+# ── B1: atomic no-clobber ภายใต้ concurrent writers (exactly-one winner) ──────
+def _race():
+    barrier = threading.Barrier(2)
+    out = []
+    def w():
+        barrier.wait()
+        try:
+            out.append(("ok", pub("run-race")))
+        except AT.PublishRefused:
+            out.append(("refused", None))
+        except BaseException as e:
+            out.append(("err", repr(e)))
+    ts = [threading.Thread(target=w) for _ in range(2)]
+    for t in ts: t.start()
+    for t in ts: t.join()
+    return out
+rr = _race()
+check("B1: concurrent publish -> exactly one PUBLISHED + one PublishRefused (ไม่มี uncontrolled error)",
+      sorted(k for k, _ in rr) == ["ok", "refused"], rr)
+check("B1: race winner file อยู่ + ไม่มี temp ค้าง", os.path.isfile(os.path.join(BASE, "run-race.bundle.json")) and not any(n.startswith(".run-race") for n in os.listdir(BASE)))
+
+# ── M3: durability semantics พูดตามจริง ───────────────────────────────────────
+check("M3: _fsync_dir dir ปกติ -> ไม่ raise (durable/unsupported)", AT._fsync_dir(BASE) in ("durable", "unsupported"))
+_orig = AT._fsync_dir
+def _boom(_p): raise OSError("fsync boom")
+AT._fsync_dir = _boom
+try:
+    dur = False
+    try:
+        pub("run-dur")
+    except AT.DurabilityUnconfirmed:
+        dur = True
+finally:
+    AT._fsync_dir = _orig
+check("M3: parent fsync fail หลัง publish -> DurabilityUnconfirmed + final ปรากฏแล้ว", dur and os.path.isfile(os.path.join(BASE, "run-dur.bundle.json")))
 
 shutil.rmtree(BASE, ignore_errors=True)
 print(f"\n{sum(res)}/{len(res)} passed")

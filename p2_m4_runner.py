@@ -41,12 +41,61 @@ def _sentinel_items(unfiltered, sentinel_pairs):
     return [(pid, txt) for (pid, txt) in unfiltered if HN.component(pid, txt)["pair_sha256"] in want]
 
 
-def _safe_teardown(iso) -> None:
-    """cleanup best-effort — swallow เพื่อไม่ให้ teardown error กลบ original exception (B4)"""
+def _safe_teardown(iso):
+    """cleanup best-effort — คืน teardown exception (ไม่ raise) เพื่อไม่กลบ original แต่ยังสังเกตได้ (B4/M2)"""
     try:
         iso.teardown()
+        return None
+    except Exception as te:
+        return te
+
+
+def _note(exc, msg) -> None:
+    """M2: preserve original cause + แนบ cleanup failure ให้ operator เห็น (ไม่เปลี่ยน primary cause)"""
+    try:
+        exc.add_note(msg)
     except Exception:
         pass
+
+
+def _preflight_frozen_cases(plan, frozen, cases) -> None:
+    """
+    B2: fail-before-mutate สำหรับ frozen/case input — ตรวจ **ทั้งหมดก่อน provision/scorer/seed/model**
+    (frozen valid + digest/roles/categories == RunPlan ; case set exact + ทุก id/role/query hash ตรง frozen)
+    """
+    ferrs = E.validate_m4_frozen_manifest(frozen)
+    if ferrs:
+        raise RunnerError("frozen manifest invalid: " + "; ".join(map(str, ferrs[:3])))
+    if E.m4_case_manifest_sha256(frozen) != plan["m4_case_manifest_sha256"]:
+        raise RunnerError("frozen digest != RunPlan.m4_case_manifest_sha256")
+    if set(frozen.get("evaluated_roles") or []) != set(plan["evaluated_roles"]):
+        raise RunnerError("frozen evaluated_roles != RunPlan")
+    if set(frozen.get("required_categories") or []) != set(plan["required_categories"]):
+        raise RunnerError("frozen required_categories != RunPlan")
+    fcases, seen = frozen["cases"], []
+    for c in cases:
+        if not isinstance(c, dict) or not isinstance(c.get("case_id"), str) or not isinstance(c.get("effective_role"), str):
+            raise RunnerError("case spec ต้องมี case_id/effective_role เป็น str")
+        cidh = HN._id_hash(c["case_id"])
+        seen.append(cidh)
+        fc = fcases.get(cidh)
+        if fc is None:
+            raise RunnerError(f"case {c['case_id']!r} ไม่อยู่ frozen manifest")
+        if c["effective_role"] != fc.get("effective_role"):
+            raise RunnerError(f"case {c['case_id']!r} effective_role ไม่ตรง frozen")
+        try:
+            qt_ok = HN._text_hash(c.get("query_text")) == fc.get("query_text_sha256")
+            qv_ok = HN._vec_hash(c.get("query_vector")) == fc.get("query_vector_sha256")
+        except (ValueError, TypeError):
+            raise RunnerError(f"case {c['case_id']!r} query text/vector malformed")
+        if not qt_ok:
+            raise RunnerError(f"case {c['case_id']!r} query_text ไม่ตรง frozen QueryProbe")
+        if not qv_ok:
+            raise RunnerError(f"case {c['case_id']!r} query_vector ไม่ตรง frozen QueryProbe")
+    if len(seen) != len(set(seen)):
+        raise RunnerError("case spec ซ้ำ (duplicate case_id)")
+    if set(seen) != set(fcases):
+        raise RunnerError("case set != frozen manifest (missing/extra)")
 
 
 def _target_identity(handle) -> dict:
@@ -60,6 +109,7 @@ def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout
         raise RunnerError("run_plan invalid: " + "; ".join(map(str, perrs[:3])))
     if not isinstance(cases, list) or not cases:
         raise RunnerError("cases ว่าง")
+    _preflight_frozen_cases(plan, frozen, cases)   # B2: frozen/case fail-before-mutate (ก่อน provision/scorer/seed/model)
     root = RP.run_manifest_sha256(plan)
     expected = {**RP.m4_run_request(plan), "run_id": plan["run_id"]}
 
@@ -146,8 +196,10 @@ def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout
                     "selected_n": M4A_SELECTED_N, "decision_eligible": False}
         evidence = HN.assemble_evidence(records, stage=M4A_STAGE, run_meta=run_meta, scorer_proof=scorer_proof,
                                         isolation_proof=iso_proof, oracle_proof=oracle_proof, verdicts=verdicts)
-    except BaseException:
-        _safe_teardown(iso)          # cleanup ทุก failure รวม **partial provision** (teardown ต้อง idempotent) ; ไม่กลบ original
+    except BaseException as e:
+        terr = _safe_teardown(iso)   # cleanup ทุก failure รวม **partial provision** (teardown idempotent) ; ไม่กลบ original
+        if terr is not None:         # M2: teardown ก็ล้ม → แนบ note (resource อาจค้าง) โดยคง primary cause เดิม
+            _note(e, f"cleanup ล้มเหลวด้วย: {terr!r} — isolated resource อาจค้าง ต้องตรวจ manual")
         raise
 
     # B4: work สำเร็จ → teardown ให้เรียบร้อย **ก่อน** publish ; teardown fail → ไม่มี PASS artifact

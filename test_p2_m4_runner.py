@@ -76,6 +76,11 @@ class ProvisionRaises(FakeIso):
     def provision(self): self.calls.append("provision"); raise RuntimeError("provision boom")
 class TeardownRaises(FakeIso):
     def teardown(self): self.calls.append("teardown"); self.torn = True; raise RuntimeError("teardown boom")
+class CountBadTeardownRaises(FakeIso):
+    def __init__(self): super().__init__(initial_count=5)
+    def teardown(self): self.calls.append("teardown"); self.torn = True; raise RuntimeError("teardown boom")
+class ProvBadTeardownRaises(ProvisionRaises):
+    def teardown(self): self.calls.append("teardown"); self.torn = True; raise RuntimeError("teardown boom")
 
 class FakeProvider:
     def __init__(self, by_role, target=None): self.by_role = by_role; self.seen = []; self._bound = None; self._t = target
@@ -191,11 +196,59 @@ _bad = {"qc": {"authorized_pairs": _pairs([("B", "tb")]), "sentinel_pairs": _pai
 ok, na, _ = attempt(AT.PublishRefused, oracle=FakeOracle(UNFIL, _bad))
 check("oracle observed_authorized != frozen -> PublishRefused + ไม่มี artifact", ok and na)
 
+# ── B2: frozen/case preflight — fail-before-mutate (ก่อน provision/scorer/seed/model) ────────
+_case3 = [{"case_id": "case-qc", "effective_role": "qc", "query_text": QT1, "query_vector": VEC1},
+          {"case_id": "case-sales", "effective_role": "sales", "query_text": QT2, "query_vector": VEC2},
+          {"case_id": "case-extra", "effective_role": "qc", "query_text": QT1, "query_vector": VEC1}]
+def attempt_cases(exc, cases):
+    d = fresh(); pt = ports()
+    ok = raises(lambda: RUN.run_m4a(plan=PLAN, frozen=FROZEN, cases=cases, corpus=CORPUS, marker="m4-run-uuid",
+                                    ports=pt, out_dir=d, argv=["x"], stdout=b"", stderr=b""), exc)
+    shutil.rmtree(d, ignore_errors=True)
+    return ok, pt
+_bad_first = [{"case_id": "case-qc", "effective_role": "WRONG", "query_text": QT1, "query_vector": VEC1},
+              {"case_id": "case-sales", "effective_role": "sales", "query_text": QT2, "query_vector": VEC2}]
+_bad_last = [{"case_id": "case-qc", "effective_role": "qc", "query_text": QT1, "query_vector": VEC1},
+             {"case_id": "case-sales", "effective_role": "sales", "query_text": "ผิด query", "query_vector": VEC2}]
+ok, pt = attempt_cases(RUN.RunnerError, _bad_first)
+check("B2: case แรก role ผิด -> RunnerError ก่อน provision (ไม่ seed/model)", ok and pt.isolation.calls == [] and pt.scorer.queries == [])
+ok, pt = attempt_cases(RUN.RunnerError, _bad_last)
+check("B2: case ท้าย query_text ผิด -> RunnerError ก่อน provision", ok and pt.isolation.calls == [] and pt.scorer.queries == [])
+ok, pt = attempt_cases(RUN.RunnerError, CASES + [_case3[2]])
+check("B2: case set เกิน frozen (extra) -> RunnerError ก่อน provision", ok and pt.isolation.calls == [])
+ok, pt = attempt_cases(RUN.RunnerError, [CASES[0]])
+check("B2: case set ขาด frozen (missing) -> RunnerError ก่อน provision", ok and pt.isolation.calls == [])
+ok, pt = attempt_cases(RUN.RunnerError, [CASES[0], CASES[0]])
+check("B2: case ซ้ำ -> RunnerError ก่อน provision", ok and pt.isolation.calls == [])
+ok, na, pt = attempt(RUN.RunnerError, plan={**PLAN, "m4_case_manifest_sha256": "0" * 64})
+check("B2: frozen digest != RunPlan -> RunnerError ก่อน provision", ok and pt.isolation.calls == [])
+
+# ── M2: cleanup observability (work/provision fail + teardown fail) ───────────
+def _capture(iso):
+    d = fresh(); pt = ports(iso=iso); exc = None
+    try:
+        call(pt, d)
+    except BaseException as e:
+        exc = e
+    na = not any("run-1" in n for n in (os.listdir(d) if os.path.isdir(d) else []))
+    shutil.rmtree(d, ignore_errors=True)
+    return exc, na
+_e, _na = _capture(CountBadTeardownRaises())
+check("M2: work fail + teardown fail -> primary=RunnerError + note cleanup + ไม่มี artifact",
+      isinstance(_e, RUN.RunnerError) and any("cleanup" in n for n in getattr(_e, "__notes__", [])) and _na)
+_e, _na = _capture(ProvBadTeardownRaises())
+check("M2: provision fail + teardown fail -> primary=RuntimeError(provision) + note cleanup",
+      isinstance(_e, RuntimeError) and not isinstance(_e, RUN.RunnerError) and any("cleanup" in n for n in getattr(_e, "__notes__", [])) and _na)
+
 # ── mock scorer / M1 run_id / immutability / bad case ─────────────────────────
 ok, na, pt = attempt(TypeError, scorer=MockScorer(SMAP))
 check("mock scorer -> raise + ไม่มี artifact + ไม่ provision", ok and na and pt.isolation.calls == [])
 ok, na, pt = attempt(RUN.RunnerError, plan={**PLAN, "run_id": "a/b"})
 check("M1: run_id ไม่ปลอดภัยใน plan -> RunnerError ก่อน provision", ok and na and pt.isolation.calls == [])
+ok, na, pt = attempt(RUN.RunnerError, plan={**PLAN, "run_id": "CON"})
+check("M1: reserved run_id ใน plan -> RunnerError ก่อน provision (ไม่ seed/model)", ok and pt.isolation.calls == [] and pt.scorer.queries == [])
+ok, na, pt = attempt(RUN.RunnerError, plan={**PLAN, "run_id": "run-1\n"})
+check("M1: run_id trailing newline ใน plan -> RunnerError ก่อน provision", ok and pt.isolation.calls == [])
 check("รัน run_id เดิมซ้ำ -> PublishRefused (immutable)", raises(lambda: call(ports(), BASE), AT.PublishRefused))
 check("cases ว่าง -> RunnerError", raises(lambda: RUN.run_m4a(plan=PLAN, frozen=FROZEN, cases=[], corpus=CORPUS, marker="m", ports=ports(), out_dir=fresh(), argv=["x"], stdout=b"", stderr=b""), RUN.RunnerError))
 _badrole = [{"case_id": "case-qc", "effective_role": "sales", "query_text": QT1, "query_vector": VEC1}]
