@@ -44,13 +44,33 @@ def _now(clock) -> str:
     return t
 
 
-def _monotonic(started: str, candidate: str) -> str:
+def _dt(x):
+    return datetime.fromisoformat(x.replace("Z", "+00:00"))
+
+
+def _finished(clock, started_at):
+    """M3.1: finished จาก trusted clock ; invalid/regression → clamp = started_at + **clock_anomaly=True** (ไม่เงียบ)"""
     try:
-        s = datetime.fromisoformat(started.replace("Z", "+00:00"))
-        c = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-        return candidate if c >= s else started            # clamp non-monotonic (clock ของ wrapper ไม่ควรถอยหลัง)
+        cand = clock.now_iso()
+    except Exception:
+        return started_at, True
+    if not E._valid_iso_tz(cand):
+        return started_at, True
+    try:
+        return (cand, False) if _dt(cand) >= _dt(started_at) else (started_at, True)
     except ValueError:
-        return started
+        return started_at, True
+
+
+def _receipt_within(started_at, finished_at, receipt) -> bool:
+    """PUBLISHED cross-check: receipt run interval ต้องอยู่ใน operational interval [started_at, finished_at]"""
+    rst, rfn = receipt.get("started_utc"), receipt.get("finished_utc")
+    if not (E._valid_iso_tz(rst) and E._valid_iso_tz(rfn)):
+        return False
+    try:
+        return _dt(started_at) <= _dt(rst) <= _dt(rfn) <= _dt(finished_at)
+    except ValueError:
+        return False
 
 
 def _bundle_path(out_dir: str, run_id) -> str:
@@ -89,9 +109,10 @@ def _verify_published(plan, frozen, path) -> dict:
 
 
 def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus, marker, ports, argv, stdout, stderr,
-                        clock, attempt_id=None) -> dict:
+                        attempt_id=None) -> dict:
     aid = _resolve_attempt_id(attempt_id)
     run_id = plan.get("run_id") if isinstance(plan, dict) else None
+    clock = ports.clock                                     # M3.1: authority เดียวกับ runner (receipt)
     try:
         started_at = _now(clock)
     except Exception as e:                                  # clock ไม่น่าเชื่อ → abort ก่อน STARTED/provision
@@ -110,18 +131,20 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
         return {"attempt_id": aid, "run_id": run_id, "status": "FAILED", "phase": "provenance_started",
                 "error_type": type(e).__name__}
 
-    def _terminal(status, phase, **extra):
-        try:
-            finished_at = _monotonic(started_at, _now(clock))   # trusted clock ครั้งเดียว/terminal (M3.1)
-        except Exception:
-            finished_at = started_at
+    def _terminal(status, phase, receipt=None, **extra):
+        finished_at, anomaly = _finished(clock, started_at)
+        if status == "PUBLISHED" and isinstance(receipt, dict) and not _receipt_within(started_at, finished_at, receipt):
+            anomaly = True                                 # M3.1: PUBLISHED cross-check receipt interval
         rec = {"attempt_id": aid, "run_id": run_id, "event": status, "status": status, "phase": phase,
                "finished_at": finished_at, **extra}
+        if anomaly:
+            rec["clock_anomaly"] = True                    # explicit — ไม่ clean PUBLISHED โดยเงียบ
         try:
             PV.append_event(provenance_log, rec)
+        except PV.ProvenanceIndeterminate as pe:
+            return {**rec, "status": "PROVENANCE_INDETERMINATE", "provenance_error_type": type(pe).__name__}
         except Exception as pe:
-            return {**rec, "status": "PROVENANCE_UNCONFIRMED", "recorded": False,
-                    "provenance_error_type": type(pe).__name__}
+            return {**rec, "status": "PROVENANCE_UNCONFIRMED", "recorded": False, "provenance_error_type": type(pe).__name__}
         return rec
 
     if plan_errs:
@@ -144,14 +167,20 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
     except Exception as e:
         return _terminal("FAILED", "run", capability=cap_sum, error_type=type(e).__name__)
 
+    # M3.2-B: validate runner-result shape ก่อนใช้ ; sanitized path เดียว (ไม่ dereference untrusted result ซ้ำใน error handler)
+    if not isinstance(result, dict) or not isinstance(result.get("path"), str) or not result["path"]:
+        return _terminal("FAILED", "run_result_malformed", capability=cap_sum)
+    path = result["path"]
+    receipt = result.get("receipt")
+
     # M3.2: PUBLISHED ต้อง verify final bundle จากดิสก์ได้ก่อน (fail-closed) — ไม่งั้นไม่ใช่ clean PUBLISHED
     try:
-        binding = _verify_published(plan, frozen, result["path"])
+        binding = _verify_published(plan, frozen, path)
     except Exception as e:
-        return _terminal("FAILED", "verify_publish", capability=cap_sum, path=result["path"], error_type=type(e).__name__)
+        return _terminal("FAILED", "verify_publish", capability=cap_sum, path=path, error_type=type(e).__name__)
 
-    term = _terminal("PUBLISHED", "complete", capability=cap_sum, durability_mode=result.get("durability"),
-                     path=result["path"], **binding)
+    term = _terminal("PUBLISHED", "complete", receipt=receipt, capability=cap_sum,
+                     durability_mode=result.get("durability"), path=path, **binding)
     if term.get("status") != "PUBLISHED":
         return term
-    return {**term, "evidence": result["evidence"], "receipt": result["receipt"]}
+    return {**term, "evidence": result.get("evidence"), "receipt": receipt}

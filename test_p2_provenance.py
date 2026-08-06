@@ -31,7 +31,22 @@ def raises(fn, exc=Exception):
 
 BASE = tempfile.mkdtemp(prefix="p2prov-")
 def _log(n): return os.path.join(BASE, n)
-def _ev(aid, rid, event, **kw): return {"attempt_id": aid, "run_id": rid, "event": event, **kw}
+def _ev(aid, rid, event, **kw):
+    r = {"attempt_id": aid, "run_id": rid, "event": event}
+    if event == "STARTED":
+        r["started_at"] = "2026-08-06T09:00:00+07:00"
+    elif event in ("PUBLISHED", "DEGRADED", "FAILED"):
+        r["status"] = event
+        r["finished_at"] = "2026-08-06T09:03:00+07:00"
+        if event == "PUBLISHED":
+            r.update({"artifact_sha256": "a" * 64, "evidence_body_sha256": "a" * 64,
+                      "run_receipt_sha256": "a" * 64, "capability": {}, "path": "/x.bundle.json"})
+        elif event == "DEGRADED":
+            r["capability"] = {}
+        elif event == "FAILED":
+            r["phase"] = "run"
+    r.update(kw)
+    return r
 
 
 # ── ledger STARTED → terminal + reconcile ─────────────────────────────────────
@@ -92,9 +107,9 @@ finally:
 check("os.write คืน 0 -> ProvenanceError", zero)
 
 # ── strict reconcile ──────────────────────────────────────────────────────────
-check("reconcile STARTED-only -> INCOMPLETE", PV.reconcile([{"attempt_id": "x", "event": "STARTED"}]) == {"x": "INCOMPLETE"})
-check("reconcile terminal-only -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "y", "event": "PUBLISHED"}]), PV.ProvenanceError))
-check("reconcile duplicate terminal -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "z", "event": "STARTED"}, {"attempt_id": "z", "event": "PUBLISHED"}, {"attempt_id": "z", "event": "FAILED"}]), PV.ProvenanceError))
+check("reconcile STARTED-only -> INCOMPLETE", PV.reconcile([_ev("x", "r", "STARTED")]) == {"x": "INCOMPLETE"})
+check("reconcile terminal-only -> ProvenanceError", raises(lambda: PV.reconcile([_ev("y", "r", "PUBLISHED", status="PUBLISHED")]), PV.ProvenanceError))
+check("reconcile duplicate terminal -> ProvenanceError", raises(lambda: PV.reconcile([_ev("z", "r", "STARTED"), _ev("z", "r", "PUBLISHED", status="PUBLISHED"), _ev("z", "r", "FAILED", status="FAILED")]), PV.ProvenanceError))
 
 # ── B3.1-R: reconcile order-sensitive (ลำดับ/run/status) ──────────────────────
 check("reconcile PUBLISHED-ก่อน-STARTED -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o1", "r", "PUBLISHED", status="PUBLISHED"), _ev("o1", "r", "STARTED")]), PV.ProvenanceError))
@@ -102,19 +117,55 @@ check("reconcile terminal run_id != STARTED -> ProvenanceError", raises(lambda: 
 check("reconcile status != event -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o3", "r", "STARTED"), _ev("o3", "r", "PUBLISHED", status="FAILED")]), PV.ProvenanceError))
 check("append_event = reducer เดียวกับ reconcile (status != event) -> ProvenanceError", raises(lambda: PV.append_event(_log("se.jsonl"), _ev("se1", "r", "STARTED")) or PV.append_event(_log("se.jsonl"), _ev("se1", "r", "PUBLISHED", status="FAILED")), PV.ProvenanceError))
 
-# ── B3.2-P: terminal fsync fail -> rollback (record ไม่ปรากฏ) -> retry ปิด attempt ได้ ─
+# ── M3.2-A: ledger enforce terminal schema (PUBLISHED ต้องมี binding) ──────────
+MA = _log("m32a.jsonl")
+PV.append_event(MA, _ev("m1", "r", "STARTED"))
+check("M3.2-A: PUBLISHED ไม่มี binding -> ProvenanceError (ledger enforce schema)", raises(lambda: PV.append_event(MA, {"attempt_id": "m1", "run_id": "r", "event": "PUBLISHED", "status": "PUBLISHED", "finished_at": "2026-08-06T09:03:00+07:00"}), PV.ProvenanceError))
+check("M3.2-A: reconcile minimal PUBLISHED (raw) -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "z", "run_id": "r", "event": "STARTED", "started_at": "2026-08-06T09:00:00+07:00"}, {"attempt_id": "z", "run_id": "r", "event": "PUBLISHED", "status": "PUBLISHED", "finished_at": "2026-08-06T09:03:00+07:00"}]), PV.ProvenanceError))
+
+# ── B3.2-P: commit fsync fail + rollback ยืนยันได้ -> UNCOMMITTED -> retry ปิด attempt ได้ ─
+_rfs = os.fsync
 F = _log("fsyncfail.jsonl")
 PV.append_event(F, _ev("f1", "r", "STARTED"))
-_rfs = os.fsync
-os.fsync = lambda fd: (_ for _ in ()).throw(OSError("fsync fail"))
+_n = {"c": 0}
+def _fsync_once_fail(fd):
+    _n["c"] += 1
+    if _n["c"] == 1:
+        raise OSError("commit fsync fail")
+    return _rfs(fd)
+os.fsync = _fsync_once_fail
 try:
-    fsync_raised = raises(lambda: PV.append_event(F, _ev("f1", "r", "PUBLISHED", status="PUBLISHED")), OSError)
+    unc = raises(lambda: PV.append_event(F, _ev("f1", "r", "PUBLISHED", status="PUBLISHED")), OSError)
 finally:
     os.fsync = _rfs
-check("B3.2-P: terminal fsync fail -> exception", fsync_raised)
-check("B3.2-P: rolled back — reader เห็นแค่ STARTED + reconcile INCOMPLETE (result ไม่ขัด disk)", [r["event"] for r in PV.read_provenance(F)] == ["STARTED"] and PV.reconcile(PV.read_provenance(F))["f1"] == "INCOMPLETE")
+check("B3.2-P: commit fsync fail + rollback confirmed -> UNCOMMITTED (reader เห็นแค่ STARTED)", unc and [r["event"] for r in PV.read_provenance(F)] == ["STARTED"] and PV.reconcile(PV.read_provenance(F))["f1"] == "INCOMPLETE")
 PV.append_event(F, _ev("f1", "r", "FAILED", status="FAILED"))
 check("B3.2-P: retry terminal หลัง rollback -> ปิด attempt ได้", PV.reconcile(PV.read_provenance(F))["f1"] == "FAILED")
+
+# ── B3.2-P.1: rollback ยืนยันไม่ได้ -> ProvenanceIndeterminate + poison (fail-closed) ─
+P = _log("poison.jsonl")
+PV.append_event(P, _ev("p1", "r", "STARTED"))
+os.fsync = lambda fd: (_ for _ in ()).throw(OSError("fsync fail always"))
+try:
+    ind = raises(lambda: PV.append_event(P, _ev("p1", "r", "PUBLISHED", status="PUBLISHED")), PV.ProvenanceIndeterminate)
+finally:
+    os.fsync = _rfs
+check("B3.2-P.1: commit + rollback fsync ล้ม -> ProvenanceIndeterminate + poison marker", ind and os.path.exists(P + ".poison"))
+check("B3.2-P.1: poisoned ledger -> read/append fail-closed", raises(lambda: PV.read_provenance(P), PV.ProvenanceIndeterminate) and raises(lambda: PV.append_event(P, _ev("p2", "r", "STARTED")), PV.ProvenanceIndeterminate))
+
+# ── B3.2-P.2: post-commit release fail -> record ยัง durable (append ไม่ report fail) ─
+C2 = _log("postcommit.jsonl")
+PV.append_event(C2, _ev("c1", "r", "STARTED"))
+_rrel = PV._release
+def _rel_fail(fd):
+    _rrel(fd)                                   # ปล่อย lock จริง แล้วค่อยโยน cleanup error
+    raise OSError("release cleanup fail")
+PV._release = _rel_fail
+try:
+    PV.append_event(C2, _ev("c1", "r", "PUBLISHED", status="PUBLISHED"))   # committed แล้ว release ล้ม -> กลืน (warning)
+finally:
+    PV._release = _rrel
+check("B3.2-P.2: post-commit release fail -> record durable (reconcile PUBLISHED)", PV.reconcile(PV.read_provenance(C2))["c1"] == "PUBLISHED")
 
 # ── concurrent writers (lock mutual exclusion) ───────────────────────────────
 CC = _log("conc.jsonl")

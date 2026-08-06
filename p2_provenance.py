@@ -12,11 +12,45 @@ crash-safe append-only JSONL event ledger (STARTED → terminal ต่อ attemp
 from __future__ import annotations
 import json
 import os
+import re
 import time
+from datetime import datetime
 
 MAX_RECORD_BYTES = 65536
 _TERMINALS = ("PUBLISHED", "DEGRADED", "FAILED")
 _O_BINARY = getattr(os, "O_BINARY", 0)          # Windows: กัน CRLF translation ทำ byte offset เพี้ยน
+_SHA_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _is_sha256(x) -> bool:
+    return isinstance(x, str) and bool(_SHA_RE.fullmatch(x))
+
+
+def _valid_iso_tz(x) -> bool:
+    if not isinstance(x, str):
+        return False
+    try:
+        dt = datetime.fromisoformat(x.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return dt.utcoffset() is not None
+
+
+def _poison_path(log_path: str) -> str:
+    return log_path + ".poison"
+
+
+def _poison(log_path: str) -> None:
+    try:
+        fd = os.open(_poison_path(log_path), os.O_CREAT | os.O_WRONLY, 0o644)
+        os.close(fd)
+    except OSError:
+        pass                        # best-effort ; ถ้าเขียน marker ไม่ได้ caller ก็ยังได้ ProvenanceIndeterminate
+
+
+def _check_poison(log_path: str) -> None:
+    if os.path.exists(_poison_path(log_path)):
+        raise ProvenanceIndeterminate(f"ledger poisoned — ต้อง operator repair ก่อน: {_poison_path(log_path)}")
 
 
 def _read_all(fd) -> bytes:
@@ -65,6 +99,10 @@ class ProvenanceLocked(Exception):
     """acquire lock ไม่ได้ในเวลาที่กำหนด (writer อื่นถืออยู่)"""
 
 
+class ProvenanceIndeterminate(Exception):
+    """commit หรือ rollback ยืนยันไม่ได้ → ledger poisoned ; read/reconcile/append ต้อง fail-closed จน operator repair"""
+
+
 def _lock(log_path: str, retries: int = 200, delay: float = 0.005) -> int:
     fd = os.open(log_path + ".lock", os.O_RDWR | os.O_CREAT | _O_BINARY, 0o644)
     try:
@@ -111,12 +149,40 @@ def _parse_committed(committed: bytes) -> list:
     return out
 
 
+def _validate_terminal_schema(r: dict) -> None:
+    """
+    M3.2-A: enforce event-specific schema ที่ **ledger boundary** — terminal ต้องมี binding ครบ ไม่งั้น
+    audit authority ยอมรับ clean terminal ที่ไม่มีหลักฐานผูก run/artifact ได้
+    """
+    ev = r.get("event")
+    if ev == "STARTED":
+        if not (isinstance(r.get("started_at"), str) and _valid_iso_tz(r["started_at"])):
+            raise ProvenanceError("STARTED ต้องมี started_at (ISO+tz)")
+        return
+    if not _valid_iso_tz(r.get("finished_at")):
+        raise ProvenanceError(f"{ev} ต้องมี finished_at (ISO+tz)")
+    if ev == "PUBLISHED":
+        for k in ("artifact_sha256", "evidence_body_sha256", "run_receipt_sha256"):
+            if not _is_sha256(r.get(k)):
+                raise ProvenanceError(f"PUBLISHED ต้องมี {k} (64-hex)")
+        if not isinstance(r.get("capability"), dict):
+            raise ProvenanceError("PUBLISHED ต้องมี capability (dict)")
+        if not isinstance(r.get("path"), str) or not r["path"]:
+            raise ProvenanceError("PUBLISHED ต้องมี path (str)")
+    elif ev == "DEGRADED":
+        if not isinstance(r.get("capability"), dict):
+            raise ProvenanceError("DEGRADED ต้องมี capability (dict)")
+    elif ev == "FAILED":
+        if not isinstance(r.get("phase"), str) or not r["phase"]:
+            raise ProvenanceError("FAILED ต้องมี phase (str)")
+
+
 def _reduce(records: list) -> dict:
     """
-    **reducer เดียว** (order-sensitive) ใช้ทั้ง append validation และ reconcile (B3.1-R) —
+    **reducer เดียว** (order-sensitive + terminal schema) ใช้ทั้ง append validation และ reconcile (B3.1-R/M3.2-A) —
     consume record ตามลำดับ: state ว่าง → รับเฉพาะ STARTED ; state STARTED → รับ terminal ครั้งเดียว
-    (run_id ตรง STARTED + `status == event`) ; state terminal → รับ event เพิ่มไม่ได้
-    คืน {attempt_id: terminal_status | 'INCOMPLETE'} ; ลำดับ/run/status ผิด → ProvenanceError
+    (run_id ตรง + `status == event` + terminal schema ครบ) ; state terminal → รับเพิ่มไม่ได้
+    คืน {attempt_id: terminal_status | 'INCOMPLETE'} ; ลำดับ/run/status/schema ผิด → ProvenanceError
     """
     state = {}
     for r in records:
@@ -129,6 +195,7 @@ def _reduce(records: list) -> dict:
         if ev == "STARTED":
             if cur is not None:
                 raise ProvenanceError(f"STARTED ซ้ำ/ผิดลำดับ: {aid}")
+            _validate_terminal_schema(r)
             state[aid] = {"run_id": rid, "terminal": None}
         elif ev in _TERMINALS:
             if cur is None:
@@ -139,6 +206,7 @@ def _reduce(records: list) -> dict:
                 raise ProvenanceError(f"terminal run_id != STARTED: {aid}")
             if r.get("status") != ev:
                 raise ProvenanceError(f"status != event: {aid}")
+            _validate_terminal_schema(r)
             cur["terminal"] = ev
         else:
             raise ProvenanceError(f"event ไม่รู้จัก: {ev!r}")
@@ -155,6 +223,7 @@ def _locked_append(log_path: str, record: dict, validate_state) -> None:
     (record ที่ล้มไม่ปรากฏ ; retry ปิด attempt ได้) ; exception หลัง commit (close/release) = record durable แล้ว
     (committed-with-cleanup-warning ไม่ใช่ uncommitted)
     """
+    _check_poison(log_path)                                # poisoned ledger → fail-closed ก่อน (B3.2-P.1)
     line = _serialize(record)
     d = os.path.dirname(log_path)
     if d:
@@ -181,28 +250,36 @@ def _locked_append(log_path: str, record: dict, validate_state) -> None:
                     mv = mv[n:]
                 os.fsync(fd)                               # ← durable commit boundary
                 committed = True
-            except BaseException:
-                if not committed:                          # rollback: ลบ record ที่ล้ม (in-process มองไม่เห็น)
-                    try:
-                        os.ftruncate(fd, cut)
-                    except OSError:
-                        pass
-                    try:
-                        os.fsync(fd)
-                    except OSError:
-                        pass
-                raise
+            except BaseException as werr:
+                # rollback ต้อง **ยืนยัน** (truncate + fsync) → UNCOMMITTED retry ได้ ; ยืนยันไม่ได้ → poison (B3.2-P.1)
+                try:
+                    os.ftruncate(fd, cut)
+                    os.fsync(fd)
+                except OSError as rberr:
+                    _poison(log_path)
+                    raise ProvenanceIndeterminate("append commit ล้มและ rollback ยืนยันไม่ได้ — ledger poisoned") from rberr
+                raise werr                                 # UNCOMMITTED (rolled back confirmed)
             created = (cut == 0)
         finally:
-            os.close(fd)                                   # หลัง commit: close ล้ม = cleanup warning (record durable แล้ว)
-        if created and d and os.name == "posix":
-            dfd = os.open(d, os.O_RDONLY)
             try:
-                os.fsync(dfd)                              # parent durability เมื่อสร้าง log ใหม่
-            finally:
-                os.close(dfd)
+                os.close(fd)
+            except OSError:
+                if not committed:
+                    raise                                  # pre-commit close fail = จริง ; post-commit = warning (กลืน, B3.2-P.2)
+        if committed and created and d and os.name == "posix":
+            try:
+                dfd = os.open(d, os.O_RDONLY)
+                try:
+                    os.fsync(dfd)                          # parent durability เมื่อสร้าง log ใหม่
+                finally:
+                    os.close(dfd)
+            except OSError:
+                pass                                       # post-commit parent fsync = cleanup warning
     finally:
-        _release(lockfd)
+        try:
+            _release(lockfd)
+        except OSError:
+            pass                                           # post-commit (หรือหลัง fail) release = best-effort (B3.2-P.2)
 
 
 def append_provenance(log_path: str, record: dict) -> None:
@@ -216,7 +293,9 @@ def append_event(log_path: str, record: dict) -> None:
 
 
 def read_provenance(log_path: str) -> list:
-    """อ่าน records ที่ commit แล้ว (ปิดด้วย \\n) — tail ไม่มี newline = uncommitted → drop ; interior corrupt = raise"""
+    """อ่าน records ที่ commit แล้ว (ปิดด้วย \\n) — tail ไม่มี newline = uncommitted → drop ; interior corrupt = raise ;
+    ledger poisoned → ProvenanceIndeterminate (fail-closed จน operator repair)"""
+    _check_poison(log_path)
     if not os.path.exists(log_path):
         return []
     with open(log_path, "rb") as f:
