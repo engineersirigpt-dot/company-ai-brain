@@ -152,12 +152,37 @@ if _symlink_ok:
 else:
     check("B1: symlink ไม่รองรับบน fs/สิทธิ์นี้ -> skip symlink rejection", True)
 
-# ── M2: existing zero-length authority -> fail-closed (ไม่ re-init เป็น empty ledger) ──
-ZL = _log("zero.db")
-PV.append_event(ZL, _ev("z0", "r", "STARTED"))
-with open(ZL, "r+b") as f: f.truncate(0)                       # จำลอง authority ถูก truncate เป็น 0 bytes
-check("M2: existing 0-byte db -> read/append fail-closed (ProvenanceError, ไม่ตีเป็น fresh empty)",
-      raises(lambda: PV.read_provenance(ZL), PV.ProvenanceError) and raises(lambda: PV.append_event(ZL, _ev("z1", "r", "STARTED")), PV.ProvenanceError))
+# ── B1/M2 (round-9): exact-schema fail-closed — foreign/weak-index/truncated db ไม่ถูก adopt/mutate ──
+_rr, _rd = PV._OPEN_RETRIES, PV._OPEN_DELAY
+PV._OPEN_RETRIES, PV._OPEN_DELAY = 3, 0.005                     # เร่ง fail-closed path ให้ test เร็ว
+try:
+    # foreign SQLite db (มี table อื่น, ไม่มี events) -> fail-closed + ไม่ถูก adopt/แก้ schema
+    FG = _log("foreign.db")
+    _fc = sqlite3.connect(FG, isolation_level=None); _fc.execute("CREATE TABLE other(x)"); _fc.execute("INSERT INTO other VALUES(1)"); _fc.close()
+    _fgr = raises(lambda: PV.read_provenance(FG), PV.ProvenanceError)
+    _fga = raises(lambda: PV.append_event(FG, _ev("f0", "r", "STARTED")), PV.ProvenanceError)
+    _fc = sqlite3.connect(FG, isolation_level=None)
+    _adopted = _fc.execute("SELECT count(*) FROM sqlite_master WHERE name IN ('events','ux_started','ux_terminal')").fetchone()[0]
+    _uv = _fc.execute("PRAGMA user_version").fetchone()[0]; _fc.close()
+    check("B1: foreign SQLite db -> fail-closed + ไม่ถูก adopt (ไม่เพิ่ม events/index + user_version ไม่ถูก stamp)",
+          _fgr and _fga and _adopted == 0 and _uv == 0)
+    # same-name events แต่ index อ่อน (non-unique/non-partial) -> verify reject (ไม่ใช่แค่ชื่อ object)
+    WK = _log("weak.db")
+    _wc = sqlite3.connect(WK, isolation_level=None)
+    _wc.execute("CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT, run_id TEXT, event TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL)")
+    _wc.execute("CREATE INDEX ux_started ON events(attempt_id)")           # non-unique/non-partial
+    _wc.execute("CREATE INDEX ux_terminal ON events(attempt_id)")
+    _wc.execute("PRAGMA user_version=%d" % PV.SCHEMA_VERSION); _wc.close()
+    check("B1: same-name events แต่ index อ่อน (non-unique/non-partial) -> verify reject (ProvenanceError)",
+          raises(lambda: PV.read_provenance(WK), PV.ProvenanceError) and raises(lambda: PV.append_event(WK, _ev("w0", "r", "STARTED")), PV.ProvenanceError))
+    # M2: existing zero-length authority -> fail-closed (ไม่ re-init เป็น empty ledger)
+    ZL = _log("zero.db")
+    PV.append_event(ZL, _ev("z0", "r", "STARTED"))
+    with open(ZL, "r+b") as f: f.truncate(0)
+    check("M2: existing 0-byte db -> read/append fail-closed (ไม่ตีเป็น fresh empty)",
+          raises(lambda: PV.read_provenance(ZL), PV.ProvenanceError) and raises(lambda: PV.append_event(ZL, _ev("z1", "r", "STARTED")), PV.ProvenanceError))
+finally:
+    PV._OPEN_RETRIES, PV._OPEN_DELAY = _rr, _rd
 
 # ── M1: row decoder verify checksum + column identity (tamper via SQL) -> ProvenanceError ──
 TM = _log("tamper.db")
@@ -211,9 +236,8 @@ finally:
     PV._do_commit = _rdc; PV._row_exists = _rre
 check("B2: COMMIT ambiguous + verify ไม่ได้ -> ProvenanceIndeterminate (fail-closed)", _ind)
 
-# ── concurrent writers (pre-seeded) -> serialize ใต้ write lock, records ครบ ไม่ corrupt ────
+# ── concurrent writers (NO pre-seed: init race handled by O_EXCL creator + bounded open-wait) ────
 CC = _log("conc.db")
-PV.append_event(CC, _ev("seed", "r", "STARTED"))               # pre-seed (กัน create-race ชน M2 zero-length check)
 def _worker(i):
     for j in range(5):
         PV.append_event(CC, _ev(f"w{i}-{j}", "r", "STARTED"))
@@ -221,7 +245,7 @@ ts = [threading.Thread(target=_worker, args=(i,)) for i in range(4)]
 for t in ts: t.start()
 for t in ts: t.join()
 _cc = PV.read_provenance(CC)
-check("concurrent 4x5 writers (pre-seeded) -> 21 records ครบ ไม่ corrupt", len(_cc) == 21 and len({r["attempt_id"] for r in _cc}) == 21)
+check("concurrent 4x5 writers (no pre-seed) -> 20 records ครบ ไม่ corrupt (init race handled)", len(_cc) == 20 and len({r["attempt_id"] for r in _cc}) == 20)
 
 # ── lock contention: writer อื่นถือ write tx -> ProvenanceLocked (map จาก SQLITE_BUSY) ──
 LC = _log("lock.db")
@@ -299,6 +323,20 @@ finally:
     os.write = _rw
 check("B3: export write ล้ม -> final ไม่ถูกสร้าง (atomic temp) + ไม่มี tmp ค้าง",
       _ef and not os.path.exists(EXOUT2) and not any(x.startswith("ex2.evidence.jsonl.tmp") for x in os.listdir(BASE)))
+
+# ── B2: export receipt + JSONL จาก snapshot เดียว — writer commit หลัง freeze ไม่กระทบ ──
+SS = _log("snap.db"); SSOUT = _log("snap.evidence.jsonl")
+PV.append_event(SS, _ev("s1", "r", "STARTED"))
+_orig_hook = PV._after_snapshot_hook
+PV._after_snapshot_hook = lambda dbp: PV.append_event(dbp, _ev("s2", "r", "STARTED"))   # commit เพิ่มหลัง freeze snapshot
+try:
+    _rc2 = PV.export_jsonl(SS, SSOUT)
+finally:
+    PV._after_snapshot_hook = _orig_hook
+_snlines = [l for l in open(SSOUT, encoding="utf-8").read().split("\n") if l]
+check("B2: export snapshot-bound -> receipt.row_count/max_seq ตรงกับไฟล์ แม้มี commit หลัง freeze (db=2 แต่ export=1)",
+      _rc2["row_count"] == 1 and _rc2["max_seq"] == 1 and len(_snlines) == 1
+      and _rc2["jsonl_sha256"] == hashlib.sha256(open(SSOUT, "rb").read()).hexdigest() and len(PV.read_provenance(SS)) == 2)
 
 shutil.rmtree(BASE, ignore_errors=True)
 print(f"\n{sum(res)}/{len(res)} passed")

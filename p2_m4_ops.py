@@ -154,9 +154,12 @@ def run_m4a_operational(*, provenance_db, out_dir, plan, frozen, cases, corpus, 
             return {**rec, "status": "PROVENANCE_INDETERMINATE", "provenance_error_type": type(pe).__name__}
         except Exception as pe:
             return {**rec, "status": "PROVENANCE_UNCONFIRMED", "recorded": False, "provenance_error_type": type(pe).__name__}
-        # B3: export immutable JSONL evidence snapshot ของ ledger (best-effort — authority = db ; export ล้มไม่เปลี่ยน terminal)
+        # B3: diagnostic JSONL snapshot ของ operational ledger — path ผูก run_id+attempt_id (retry-safe, ไม่ชน no-clobber) ;
+        # **ไม่ใช่ clean-publish decision evidence** (decision gate = SQLite ledger authority + runner bundle เท่านั้น) ;
+        # authority = db → export ล้ม/ชน ไม่เปลี่ยน terminal (แค่แนบ error diagnostic)
+        _safe_aid = re.sub(r"[^A-Za-z0-9._-]", "_", str(aid))
         try:
-            rec["provenance_export"] = PV.export_jsonl(provenance_db, os.path.join(out_dir_real, str(run_id) + ".provenance.jsonl"))
+            rec["provenance_export"] = PV.export_jsonl(provenance_db, os.path.join(out_dir_real, f"{run_id}.{_safe_aid}.provenance.jsonl"))
         except Exception as ee:
             rec["provenance_export_error"] = type(ee).__name__
         return rec

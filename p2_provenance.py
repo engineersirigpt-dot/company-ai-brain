@@ -20,6 +20,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime
 
 MAX_RECORD_BYTES = 65536
@@ -119,23 +120,87 @@ def _apply_pragmas(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=DELETE")
 
 
-_DDL_TABLE = """CREATE TABLE IF NOT EXISTS events (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    attempt_id  TEXT,
-    run_id      TEXT,
-    event       TEXT NOT NULL,
-    body        TEXT NOT NULL,
-    body_sha256 TEXT NOT NULL)"""
+# ── B1/M2 (round-9): exact schema contract — init เฉพาะไฟล์ที่เราสร้างเอง (O_EXCL) ; existing = verify-only, ไม่แก้ ──
+_DDL_UX_STARTED = "CREATE UNIQUE INDEX ux_started ON events(attempt_id) WHERE event='STARTED'"
+_DDL_UX_TERMINAL = "CREATE UNIQUE INDEX ux_terminal ON events(attempt_id) WHERE event IN ('PUBLISHED','DEGRADED','FAILED')"
+# PRAGMA table_info(events) → (name, type, notnull, pk) ตาม contract แบบ exact
+_EXPECT_COLUMNS = [("seq", "INTEGER", 0, 1), ("attempt_id", "TEXT", 0, 0), ("run_id", "TEXT", 0, 0),
+                   ("event", "TEXT", 1, 0), ("body", "TEXT", 1, 0), ("body_sha256", "TEXT", 1, 0)]
+_OPEN_RETRIES, _OPEN_DELAY = 100, 0.02          # รอ concurrent creator commit schema (bounded) ก่อน fail-closed
 
 
-def _schema_ok(conn: sqlite3.Connection) -> bool:
+def _norm_sql(s: str) -> str:
+    return " ".join(s.split()).lower() if isinstance(s, str) else ""
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
+
+
+def _verify_schema(conn: sqlite3.Connection) -> None:
+    """B1: ตรวจ **exact** schema — columns (name/type/notnull/pk) + index uniqueness/partial-predicate (ไม่ใช่แค่ชื่อ)"""
+    cols = [(c[1], c[2], c[3], c[5]) for c in conn.execute("PRAGMA table_info(events)").fetchall()]
+    if cols != _EXPECT_COLUMNS:
+        raise ProvenanceError(f"events columns ไม่ตรง contract: {cols}")
+    for name, ddl in (("ux_started", _DDL_UX_STARTED), ("ux_terminal", _DDL_UX_TERMINAL)):
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+        if not row or _norm_sql(row[0]) != _norm_sql(ddl):
+            raise ProvenanceError(f"index {name} ไม่ตรง contract (unique/partial/predicate/columns)")
+    uv = conn.execute("PRAGMA user_version").fetchone()[0]
+    if uv != SCHEMA_VERSION:
+        raise ProvenanceError(f"provenance schema version ไม่ตรง: {uv} != {SCHEMA_VERSION}")
+
+
+def _initialize(conn: sqlite3.Connection) -> None:
+    """สร้าง exact schema + stamp version ใต้ write lock (เฉพาะไฟล์ที่เราเพิ่งสร้างด้วย O_EXCL)"""
+    conn.execute("BEGIN IMMEDIATE")
     try:
-        t = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").fetchone()
-        i1 = conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='ux_started'").fetchone()
-        i2 = conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='ux_terminal'").fetchone()
-    except sqlite3.Error:
+        if _has_table(conn, "events"):           # เผื่อ race (ไม่ควรเกิดกับไฟล์ O_EXCL) → verify แทน create
+            _verify_schema(conn)
+        else:
+            conn.execute("CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT, "
+                         "run_id TEXT, event TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL)")
+            conn.execute(_DDL_UX_STARTED)
+            conn.execute(_DDL_UX_TERMINAL)
+            conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        conn.execute("COMMIT")
+    except BaseException:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+
+
+def _open_existing(conn: sqlite3.Connection, canonical: str) -> None:
+    """
+    existing file = verify-only (ไม่สร้าง/แก้ schema, B1) — foreign/truncated/wrong schema = fail-closed ;
+    รอ concurrent creator ที่กำลัง init commit (bounded) ก่อนตัดสินว่า schema หาย
+    """
+    for _ in range(_OPEN_RETRIES):
+        if _has_table(conn, "events"):
+            _verify_schema(conn)
+            return
+        time.sleep(_OPEN_DELAY)
+    raise ProvenanceError(f"existing provenance db ไม่มี provenance schema (foreign/truncated/init ค้าง) — fail-closed: {canonical}")
+
+
+def _try_create(canonical: str) -> bool:
+    """atomic creator detection: O_EXCL สำเร็จ = เราสร้าง (initialize) ; EEXIST = ไฟล์มีอยู่ (open+verify เท่านั้น)"""
+    try:
+        os.close(os.open(canonical, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+        return True
+    except FileExistsError:
         return False
-    return bool(t and i1 and i2)
+    except OSError as e:
+        raise ProvenanceError(f"สร้าง provenance db ไม่ได้: {e}") from e
+
+
+def _safe_unlink(p: str) -> None:
+    try:
+        os.unlink(p)
+    except OSError:
+        pass
 
 
 def _connect(log_path: str) -> sqlite3.Connection:
@@ -143,27 +208,34 @@ def _connect(log_path: str) -> sqlite3.Connection:
     parent = _parent_dir(canonical)
     if not os.path.isdir(parent):                # durability boundary: ไม่ auto-create directory
         raise ProvenanceError(f"provenance parent directory ต้องมีอยู่ก่อนเขียน: {parent}")
-    exists = os.path.exists(canonical)
-    if exists and os.path.getsize(canonical) == 0:   # M2: existing zero-length authority = corruption (fail-closed)
-        raise ProvenanceError(f"existing provenance db เป็น 0 bytes — corruption (fail-closed): {canonical}")
+    created = _try_create(canonical)
     try:
         conn = sqlite3.connect(canonical, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
         _apply_pragmas(conn)
-        conn.execute(_DDL_TABLE)
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_started ON events(attempt_id) WHERE event='STARTED'")
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_terminal ON events(attempt_id) "
-                     "WHERE event IN ('PUBLISHED','DEGRADED','FAILED')")
-        uv = conn.execute("PRAGMA user_version").fetchone()[0]
-        if uv == 0:
-            conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")   # M2: fresh/legacy → stamp
-        elif uv != SCHEMA_VERSION:
-            conn.close()
-            raise ProvenanceError(f"provenance schema version ไม่ตรง: {uv} != {SCHEMA_VERSION}")
-        if not _schema_ok(conn):
-            conn.close()
-            raise ProvenanceError("provenance schema/index หาย — fail-closed")
     except sqlite3.Error as e:
+        if created:
+            _safe_unlink(canonical)
         raise ProvenanceError(f"เปิด provenance db ไม่ได้: {e}") from e
+    try:
+        if created:
+            _initialize(conn)                    # เราสร้างไฟล์เอง → init exact schema
+        else:
+            _open_existing(conn, canonical)      # ไฟล์มีอยู่ → verify-only (fail-closed ถ้า foreign/wrong)
+    except ProvenanceError:
+        conn.close()
+        if created:
+            _safe_unlink(canonical)              # init ล้ม → ไม่ทิ้ง empty poisoned file
+        raise
+    except sqlite3.Error as e:
+        conn.close()
+        if created:
+            _safe_unlink(canonical)
+        raise ProvenanceError(f"provenance db ใช้ไม่ได้: {e}") from e
+    except BaseException:
+        conn.close()
+        if created:
+            _safe_unlink(canonical)
+        raise
     return conn
 
 
@@ -369,30 +441,44 @@ def reconcile(records: list) -> dict:
     return _reduce(records)
 
 
-def _db_stats(canonical: str):
-    conn = sqlite3.connect(canonical, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
+_after_snapshot_hook = None                      # test seam: เรียกหลัง freeze snapshot (จำลอง concurrent commit)
+
+
+def _read_snapshot(conn: sqlite3.Connection):
+    """B2: อ่าน rows + user_version จาก **snapshot เดียว** (read transaction) → receipt/JSONL มาจากชุดเดียวกัน"""
+    conn.execute("BEGIN DEFERRED")
     try:
-        row = conn.execute("SELECT COALESCE(MAX(seq),0), COUNT(*) FROM events").fetchone()
-        return int(row[0]), int(row[1])
+        rows = conn.execute("SELECT attempt_id, run_id, event, body, body_sha256, seq FROM events ORDER BY seq").fetchall()
+        uv = conn.execute("PRAGMA user_version").fetchone()[0]
     finally:
-        conn.close()
+        conn.execute("COMMIT")
+    records = [_decode_row(r[0], r[1], r[2], r[3], r[4]) for r in rows]
+    max_seq = max((r[5] for r in rows), default=0)
+    return records, int(max_seq), len(rows), int(uv)
 
 
 def export_jsonl(db_path: str, out_path: str) -> dict:
     """
     B3: export committed events → **immutable JSONL evidence** (atomic no-clobber) + receipt —
-    validate ทุก row (checksum/identity) ก่อน ; temp + fsync → `os.link` no-clobber → parent fsync ;
-    คืน receipt {source_db, schema_version, max_seq, row_count, jsonl_sha256, path} ผูก snapshot กับ source
+    อ่าน rows/max_seq/row_count/version จาก **snapshot เดียว** (B2) ; validate ทุก row (checksum/identity) ;
+    temp + fsync → `os.link` no-clobber → parent fsync ; คืน receipt ผูก snapshot ที่ export จริง
+    (เป็น diagnostic snapshot ของ operational ledger — ไม่ใช่ clean-publish decision evidence)
     """
     canonical = _resolve_db_path(db_path)
-    records = read_provenance(canonical)         # verify checksum/identity (M1)
-    body = "".join(_canonical(r) + "\n" for r in records).encode("utf-8")
-    jsonl_sha = hashlib.sha256(body).hexdigest()
     out_parent = _parent_dir(out_path)
     if not os.path.isdir(out_parent):
         raise ProvenanceError(f"export parent directory ต้องมีอยู่ก่อน: {out_parent}")
     if os.path.exists(out_path):                 # immutable: ห้าม overwrite artifact เดิม
         raise ProvenanceError(f"export target มีอยู่แล้ว (no-clobber): {out_path}")
+    conn = _connect(canonical)
+    try:
+        records, max_seq, row_count, uv = _read_snapshot(conn)   # freeze ทุกอย่างจาก snapshot เดียว
+    finally:
+        conn.close()
+    if _after_snapshot_hook is not None:         # test: writer commit หลัง freeze → ต้องไม่กระทบ receipt/file
+        _after_snapshot_hook(canonical)
+    body = "".join(_canonical(r) + "\n" for r in records).encode("utf-8")   # derive จาก rows ชุดที่ freeze
+    jsonl_sha = hashlib.sha256(body).hexdigest()
     tmp = out_path + ".tmp-" + jsonl_sha[:16]
     fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_BINARY, 0o644)
     try:                                         # temp → fsync → atomic no-clobber publish ; cleanup tmp ทุกกรณี
@@ -411,6 +497,5 @@ def export_jsonl(db_path: str, out_path: str) -> dict:
             os.unlink(tmp)
         except OSError:
             pass
-    max_seq, row_count = _db_stats(canonical)
-    return {"source_db": canonical, "schema_version": SCHEMA_VERSION, "max_seq": max_seq,
+    return {"source_db": canonical, "schema_version": uv, "max_seq": max_seq,
             "row_count": row_count, "jsonl_sha256": jsonl_sha, "path": out_path}
