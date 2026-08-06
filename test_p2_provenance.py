@@ -1,19 +1,19 @@
 """
-Unit test ของ p2_provenance — crash-safe event ledger (pure/offline)
-append_event state machine · newline-commit + tail repair · OS crash-safe lock (subprocess) ·
-full-write/allow_nan/oversize · strict reconcile · concurrent writers
+Unit test ของ p2_provenance — **SQLite authority** event ledger (pure/offline)
+append_event state machine · strict reconcile · terminal schema · durable transaction ·
+file identity (hard-link alias) · lock contention/crash-safe · JSONL evidence export
 
     python test_p2_provenance.py
 """
 import io
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-import warnings
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -50,220 +50,169 @@ def _ev(aid, rid, event, **kw):
     return r
 
 
-# ── ledger STARTED → terminal + reconcile ─────────────────────────────────────
-L = _log("led.jsonl")
+# ── ledger STARTED → terminal + reconcile (append order) ──────────────────────
+L = _log("led.db")
 PV.append_event(L, _ev("att-00000001", "run-1", "STARTED"))
 PV.append_event(L, _ev("att-00000001", "run-1", "PUBLISHED", status="PUBLISHED"))
 PV.append_event(L, _ev("att-00000002", "run-2", "STARTED"))          # ตายกลางทาง (ไม่มี terminal)
 recs = PV.read_provenance(L)
-check("ledger read ตามลำดับ", [r["event"] for r in recs] == ["STARTED", "PUBLISHED", "STARTED"])
+check("ledger read ตามลำดับ append", [r["event"] for r in recs] == ["STARTED", "PUBLISHED", "STARTED"])
 rc = PV.reconcile(recs)
 check("reconcile att-1 -> PUBLISHED, att-2 -> INCOMPLETE", rc["att-00000001"] == "PUBLISHED" and rc["att-00000002"] == "INCOMPLETE")
+check("read_provenance(db ไม่มี) -> []", PV.read_provenance(_log("nope.db")) == [])
 
-# ── B3.1: state machine ───────────────────────────────────────────────────────
-S = _log("sm.jsonl")
+# ── B3.1: state machine (บังคับที่ ledger boundary ใน transaction) ─────────────
+S = _log("sm.db")
 PV.append_event(S, _ev("s1", "r", "STARTED"))
 check("duplicate STARTED -> ProvenanceError", raises(lambda: PV.append_event(S, _ev("s1", "r", "STARTED")), PV.ProvenanceError))
 check("terminal without STARTED -> ProvenanceError", raises(lambda: PV.append_event(S, _ev("s2", "r", "PUBLISHED", status="PUBLISHED")), PV.ProvenanceError))
 PV.append_event(S, _ev("s1", "r", "PUBLISHED", status="PUBLISHED"))
 check("duplicate terminal -> ProvenanceError", raises(lambda: PV.append_event(S, _ev("s1", "r", "FAILED", status="FAILED")), PV.ProvenanceError))
-R = _log("rid.jsonl")
+check("bad transition rollback -> ไม่มี row ปนใน ledger (ยังอ่านได้ปกติ)", [r["event"] for r in PV.read_provenance(S)] == ["STARTED", "PUBLISHED"])
+R = _log("rid.db")
 PV.append_event(R, _ev("a1", "r1", "STARTED"))
 check("terminal run_id != STARTED -> ProvenanceError", raises(lambda: PV.append_event(R, _ev("a1", "r2", "PUBLISHED", status="PUBLISHED")), PV.ProvenanceError))
 check("attempt_id reuse ข้าม run -> duplicate STARTED error", raises(lambda: PV.append_event(R, _ev("a1", "r3", "STARTED")), PV.ProvenanceError))
 
-# ── B3.2: newline = commit marker + tail repair ก่อน append ───────────────────
-N = _log("nl.jsonl")
-PV.append_event(N, _ev("n1", "r", "STARTED"))
-with open(N, "a", encoding="utf-8") as f:
-    f.write('{"attempt_id":"n1","run_id":"r","event":"PUBLISHED","status":"PUBLISHED"}')   # valid JSON แต่ไม่มี \n
-check("valid JSON ไม่มี newline -> uncommitted -> drop", [r["event"] for r in PV.read_provenance(N)] == ["STARTED"])
-T = _log("repair.jsonl")
-PV.append_event(T, _ev("t1", "r", "STARTED"))
-with open(T, "a", encoding="utf-8") as f:
-    f.write('{"attempt_id":"t1","event":"PUBL')                                            # partial tail (crash กลางเขียน)
-PV.append_event(T, _ev("t1", "r", "PUBLISHED", status="PUBLISHED"))                        # ต้องตัด tail ก่อน append
-check("partial tail ถูกตัดก่อน append -> terminal อ่าน/reconcile ได้", PV.reconcile(PV.read_provenance(T))["t1"] == "PUBLISHED")
-C = _log("corrupt.jsonl")
-with open(C, "w", encoding="utf-8") as f:
-    f.write('{"a":1}\nGARBAGE-INTERIOR\n{"b":2}\n')
-check("interior corruption (committed) -> ProvenanceError", raises(lambda: PV.read_provenance(C), PV.ProvenanceError))
-
-# ── M1: full-write / allow_nan / oversize ─────────────────────────────────────
+# ── serialize guard: not-dict / NaN / oversize (ก่อนแตะ db) ───────────────────
 check("record ไม่ใช่ dict -> TypeError", raises(lambda: PV._append_raw(L, ["x"]), TypeError))
-check("NaN -> ProvenanceError (allow_nan=False)", raises(lambda: PV._append_raw(_log("nan.jsonl"), {"x": float("nan")}), PV.ProvenanceError))
-check("oversize -> ProvenanceError", raises(lambda: PV._append_raw(_log("big.jsonl"), {"x": "y" * (PV.MAX_RECORD_BYTES + 10)}), PV.ProvenanceError))
-SW = _log("sw.jsonl"); _rw = os.write
-os.write = lambda fd, b: _rw(fd, b[:3])
-try:
-    PV._append_raw(SW, {"attempt_id": "a", "n": 1})
-finally:
-    os.write = _rw
-check("partial write -> loop เขียนครบ", PV.read_provenance(SW)[0]["attempt_id"] == "a")
-os.write = lambda fd, b: 0
-try:
-    zero = raises(lambda: PV._append_raw(_log("zero.jsonl"), {"a": 1}), PV.ProvenanceError)
-finally:
-    os.write = _rw
-check("os.write คืน 0 -> ProvenanceError", zero)
+check("NaN -> ProvenanceError (allow_nan=False)", raises(lambda: PV._append_raw(_log("nan.db"), {"x": float("nan")}), PV.ProvenanceError))
+check("oversize -> ProvenanceError", raises(lambda: PV._append_raw(_log("big.db"), {"x": "y" * (PV.MAX_RECORD_BYTES + 10)}), PV.ProvenanceError))
 
-# ── strict reconcile ──────────────────────────────────────────────────────────
+# ── UNIQUE partial index (defense-in-depth) : raw bypass state machine -> integrity error ──
+UX = _log("ux.db")
+PV._append_raw(UX, _ev("u1", "r", "STARTED"))
+check("UNIQUE index: raw duplicate STARTED (bypass reducer) -> ProvenanceError (integrity)",
+      raises(lambda: PV._append_raw(UX, _ev("u1", "r", "STARTED")), PV.ProvenanceError))
+PV._append_raw(UX, _ev("u1", "r", "PUBLISHED", status="PUBLISHED"))
+check("UNIQUE index: raw duplicate terminal -> ProvenanceError (integrity)",
+      raises(lambda: PV._append_raw(UX, _ev("u1", "r", "FAILED", status="FAILED")), PV.ProvenanceError))
+
+# ── strict reconcile (order-sensitive) ────────────────────────────────────────
 check("reconcile STARTED-only -> INCOMPLETE", PV.reconcile([_ev("x", "r", "STARTED")]) == {"x": "INCOMPLETE"})
 check("reconcile terminal-only -> ProvenanceError", raises(lambda: PV.reconcile([_ev("y", "r", "PUBLISHED", status="PUBLISHED")]), PV.ProvenanceError))
 check("reconcile duplicate terminal -> ProvenanceError", raises(lambda: PV.reconcile([_ev("z", "r", "STARTED"), _ev("z", "r", "PUBLISHED", status="PUBLISHED"), _ev("z", "r", "FAILED", status="FAILED")]), PV.ProvenanceError))
-
-# ── B3.1-R: reconcile order-sensitive (ลำดับ/run/status) ──────────────────────
 check("reconcile PUBLISHED-ก่อน-STARTED -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o1", "r", "PUBLISHED", status="PUBLISHED"), _ev("o1", "r", "STARTED")]), PV.ProvenanceError))
 check("reconcile terminal run_id != STARTED -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o2", "r1", "STARTED"), _ev("o2", "r2", "FAILED", status="FAILED")]), PV.ProvenanceError))
 check("reconcile status != event -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o3", "r", "STARTED"), _ev("o3", "r", "PUBLISHED", status="FAILED")]), PV.ProvenanceError))
-check("append_event = reducer เดียวกับ reconcile (status != event) -> ProvenanceError", raises(lambda: PV.append_event(_log("se.jsonl"), _ev("se1", "r", "STARTED")) or PV.append_event(_log("se.jsonl"), _ev("se1", "r", "PUBLISHED", status="FAILED")), PV.ProvenanceError))
+check("append_event = reducer เดียวกับ reconcile (status != event) -> ProvenanceError", raises(lambda: PV.append_event(_log("se.db"), _ev("se1", "r", "STARTED")) or PV.append_event(_log("se.db"), _ev("se1", "r", "PUBLISHED", status="FAILED")), PV.ProvenanceError))
 
 # ── M3.2-A: ledger enforce terminal schema (PUBLISHED ต้องมี binding) ──────────
-MA = _log("m32a.jsonl")
+MA = _log("m32a.db")
 PV.append_event(MA, _ev("m1", "r", "STARTED"))
 check("M3.2-A: PUBLISHED ไม่มี binding -> ProvenanceError (ledger enforce schema)", raises(lambda: PV.append_event(MA, {"attempt_id": "m1", "run_id": "r", "event": "PUBLISHED", "status": "PUBLISHED", "finished_at": "2026-08-06T09:03:00+07:00"}), PV.ProvenanceError))
 check("M3.2-A: reconcile minimal PUBLISHED (raw) -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "z", "run_id": "r", "event": "STARTED", "started_at": "2026-08-06T09:00:00+07:00"}, {"attempt_id": "z", "run_id": "r", "event": "PUBLISHED", "status": "PUBLISHED", "finished_at": "2026-08-06T09:03:00+07:00"}]), PV.ProvenanceError))
 
-# ── B3.2-P: record commit fsync fail (intent ok, rollback confirmed) -> UNCOMMITTED -> retry ปิด attempt ได้ ─
-# WAI: fsync call 1 = intent (ต้องผ่าน) · call 2 = record commit (ให้ล้ม) · call 3 = rollback (ผ่าน)
-_rfs = os.fsync
-F = _log("fsyncfail.jsonl")
-PV.append_event(F, _ev("f1", "r", "STARTED"))
-_n = {"c": 0}
-def _fsync_2nd_fail(fd):
-    _n["c"] += 1
-    if _n["c"] == 2:
-        raise OSError("record commit fsync fail")
-    return _rfs(fd)
-os.fsync = _fsync_2nd_fail
+# ── durability: _connect ตั้ง synchronous=FULL + journal (rollback) ────────────
+DB = _log("dur.db")
+PV.append_event(DB, _ev("d0", "r", "STARTED"))
+_c = PV._connect(DB)
 try:
-    unc = raises(lambda: PV.append_event(F, _ev("f1", "r", "PUBLISHED", status="PUBLISHED")), OSError)
+    _sync = _c.execute("PRAGMA synchronous").fetchone()[0]
+    _jm = _c.execute("PRAGMA journal_mode").fetchone()[0]
 finally:
-    os.fsync = _rfs
-check("B3.2-P: record commit fsync fail + rollback confirmed -> UNCOMMITTED (reader เห็นแค่ STARTED, intent เคลียร์)", unc and [r["event"] for r in PV.read_provenance(F)] == ["STARTED"] and not os.path.exists(F + ".intent"))
-PV.append_event(F, _ev("f1", "r", "FAILED", status="FAILED"))
-check("B3.2-P: retry terminal หลัง rollback -> ปิด attempt ได้", PV.reconcile(PV.read_provenance(F))["f1"] == "FAILED")
+    _c.close()
+check("durability: _connect -> synchronous=FULL(2) + journal_mode=delete", _sync == 2 and _jm == "delete")
 
-# ── B1: write-ahead intent v2 — evidence-based recovery (ไม่ blind unlink) ─
-# committed replay: crash หลัง record+\n durable ก่อน clear intent -> recover เห็น digest ตรง -> COMMITTED (re-fsync ยืนยัน)
-IL = _log("intent.jsonl")
-PV.append_event(IL, _ev("i1", "r", "STARTED"))
-_cut = os.path.getsize(IL)
-_term = _ev("i1", "r", "PUBLISHED", status="PUBLISHED"); _line = PV._serialize(_term)
-with open(IL, "ab") as f: f.write(_line)                   # full line + \n อยู่ครบ (page cache) แต่ intent ยังไม่ clear
-PV._write_intent(IL, _term, _line, _cut)                   # intent v2 bind cut + record digest
-_sc = {"n": 0}
-def _fsync_spy(fd): _sc["n"] += 1; return _rfs(fd)
-os.fsync = _fsync_spy
+# ── SQLite crash recovery: corrupt db file -> ProvenanceError (ไม่ crash) ──────
+CR = _log("corruptdb.db")
+with open(CR, "wb") as f: f.write(b"NOT-A-SQLITE-DATABASE-just-garbage-bytes-" * 8)
+check("corrupt db file -> ProvenanceError", raises(lambda: PV.read_provenance(CR), PV.ProvenanceError))
+
+# ── B2 (file identity): hard-link alias -> inode เดียว -> SQLite ล็อก inode เดียวกัน (ปิด alias-bypass เดิม) ──
+AL = _log("alias_real.db")
+PV.append_event(AL, _ev("al0", "r", "STARTED"))                # สร้าง db ก่อน
+ALIAS = _log("alias_link.db")
+_alias_ok = True
 try:
-    _oc = PV.recover(IL)
-finally:
-    os.fsync = _rfs
-check("B1: recover(committed replay, digest ตรง) -> COMMITTED + re-fsync (ยืนยัน durable ไม่ใช่ blind unlink)", _oc == "COMMITTED" and _sc["n"] >= 1)
-check("B1: หลัง recover committed -> record durable + reconcile ปิด attempt + intent เคลียร์", PV.reconcile(PV.read_provenance(IL))["i1"] == "PUBLISHED" and not os.path.exists(IL + ".intent"))
+    os.link(AL, ALIAS)                                          # hard link -> inode เดียวกับ AL
+except (OSError, NotImplementedError, AttributeError):
+    _alias_ok = False
+if _alias_ok:
+    def _wr(path, pfx):
+        for j in range(5):
+            PV.append_event(path, _ev(f"{pfx}-{j}", "r", "STARTED"))
+    _ta = threading.Thread(target=_wr, args=(AL, "real"))
+    _tb = threading.Thread(target=_wr, args=(ALIAS, "alias"))
+    _ta.start(); _tb.start(); _ta.join(); _tb.join()
+    check("B2(file identity): hard-link alias เขียนพร้อมกัน -> serialize ที่ inode เดียว, records ครบ 11 ไม่ corrupt",
+          len(PV.read_provenance(AL)) == 11 and len(PV.read_provenance(ALIAS)) == 11)
+else:
+    check("B2(file identity): hard link ไม่รองรับบน fs นี้ -> skip (SQLite ล็อก inode by design)", True)
 
-# uncommitted: crash กลาง write (partial line, digest ไม่ตรง) -> recover truncate กลับ cut -> UNCOMMITTED
-IL2 = _log("intent2.jsonl")
-PV.append_event(IL2, _ev("j1", "r", "STARTED"))
-_cut2 = os.path.getsize(IL2)
-_term2 = _ev("j1", "r", "PUBLISHED", status="PUBLISHED"); _line2 = PV._serialize(_term2)
-with open(IL2, "ab") as f: f.write(_line2[:len(_line2) // 2])   # เขียนไม่ครบ (ไม่ปิด \n)
-PV._write_intent(IL2, _term2, _line2, _cut2)               # intent bind digest ของ full line
-check("B1: recover(partial record, digest ไม่ตรง) -> UNCOMMITTED + truncate กลับ cut", PV.recover(IL2) == "UNCOMMITTED" and os.path.getsize(IL2) == _cut2)
-check("B1: หลัง recover uncommitted -> reader เห็นแค่ STARTED + intent เคลียร์", [r["event"] for r in PV.read_provenance(IL2)] == ["STARTED"] and not os.path.exists(IL2 + ".intent"))
-
-# corrupt intent (ไม่มี binding/protocol) -> recover เองไม่ได้ = ProvenanceIndeterminate (fail-closed, ไม่ blind-accept)
-IL3 = _log("intent3.jsonl")
-PV.append_event(IL3, _ev("k1", "r", "STARTED"))
-open(IL3 + ".intent", "w").close()
-check("B1: corrupt intent -> recover/read/append = ProvenanceIndeterminate (ต้อง operator, ไม่ auto-heal)",
-      raises(lambda: PV.recover(IL3), PV.ProvenanceIndeterminate) and raises(lambda: PV.read_provenance(IL3), PV.ProvenanceIndeterminate) and raises(lambda: PV.append_event(IL3, _ev("k2", "r", "STARTED")), PV.ProvenanceIndeterminate))
-os.unlink(IL3 + ".intent")
-
-# auto-recover: append_event/read_provenance ถัดไป resolve intent เอง (ใต้ lock) โดยไม่ต้องเรียก recover() ตรง
-IL4 = _log("intent4.jsonl")
-PV.append_event(IL4, _ev("l1", "r", "STARTED"))
-_cut4 = os.path.getsize(IL4)
-_term4 = _ev("l1", "r", "PUBLISHED", status="PUBLISHED"); _line4 = PV._serialize(_term4)
-with open(IL4, "ab") as f: f.write(_line4)
-PV._write_intent(IL4, _term4, _line4, _cut4)
-check("B1: read_provenance auto-recover intent (committed) ใต้ lock -> เห็น terminal + intent เคลียร์", PV.reconcile(PV.read_provenance(IL4))["l1"] == "PUBLISHED" and not os.path.exists(IL4 + ".intent"))
-
-# ── B2: parent directory ต้อง pre-exist (durability boundary) — ไม่ auto-create ─
-_missing = _log("nodir/sub/led.jsonl")
-check("B2: parent ที่ยังไม่มี -> ProvenanceError (ไม่ auto-create) + ledger ไม่ถูกสร้าง", raises(lambda: PV.append_event(_missing, _ev("b1", "r", "STARTED")), PV.ProvenanceError) and not os.path.exists(_missing))
-
-# ── M1: clear-intent parent-fsync ล้ม (หลัง unlink สำเร็จ) -> committed + warning (ไม่ indeterminate, marker หายจริง) ─
-# call 1 = _write_intent parent fsync (ผ่าน) · call 2 = _clear_intent parent fsync (ให้ล้ม)
-M1 = _log("m1.jsonl")
-PV.append_event(M1, _ev("m1a", "r", "STARTED"))
-_rfp = PV._fsync_parent; _pc = {"n": 0}
-def _fp_2nd_fail(d):
-    _pc["n"] += 1
-    if _pc["n"] == 2:
-        raise OSError("parent fsync fail (clear step)")
-    return _rfp(d)
-PV._fsync_parent = _fp_2nd_fail
-try:
-    with warnings.catch_warnings(record=True) as _caught:
-        warnings.simplefilter("always")
-        PV.append_event(M1, _ev("m1a", "r", "PUBLISHED", status="PUBLISHED"))   # ต้องไม่ raise (committed)
-    _warned = any(issubclass(w.category, RuntimeWarning) for w in _caught)
-finally:
-    PV._fsync_parent = _rfp
-check("M1: clear-intent parent-fsync ล้ม -> append committed (record durable) + RuntimeWarning + marker หายจริง (ไม่ indeterminate)",
-      _warned and PV.reconcile(PV.read_provenance(M1))["m1a"] == "PUBLISHED" and not os.path.exists(M1 + ".intent"))
-
-# ── B3.2-P.2: post-commit release fail -> record ยัง durable (append ไม่ report fail) ─
-C2 = _log("postcommit.jsonl")
-PV.append_event(C2, _ev("c1", "r", "STARTED"))
-_rrel = PV._release
-def _rel_fail(fd):
-    _rrel(fd)                                   # ปล่อย lock จริง แล้วค่อยโยน cleanup error
-    raise OSError("release cleanup fail")
-PV._release = _rel_fail
-try:
-    PV.append_event(C2, _ev("c1", "r", "PUBLISHED", status="PUBLISHED"))   # committed แล้ว release ล้ม -> กลืน (warning)
-finally:
-    PV._release = _rrel
-check("B3.2-P.2: post-commit release fail -> record durable (reconcile PUBLISHED)", PV.reconcile(PV.read_provenance(C2))["c1"] == "PUBLISHED")
-
-# ── concurrent writers (lock mutual exclusion) ───────────────────────────────
-CC = _log("conc.jsonl")
+# ── concurrent writers -> serialize ใต้ write lock, records ครบ ไม่ corrupt ────
+CC = _log("conc.db")
 def _worker(i):
     for j in range(5):
         PV.append_event(CC, _ev(f"w{i}-{j}", "r", "STARTED"))
 ts = [threading.Thread(target=_worker, args=(i,)) for i in range(4)]
 for t in ts: t.start()
 for t in ts: t.join()
-check("concurrent 4x5 writers -> 20 records ครบ ไม่ corrupt", len(PV.read_provenance(CC)) == 20)
+_cc = PV.read_provenance(CC)
+check("concurrent 4x5 writers -> 20 records ครบ ไม่ corrupt", len(_cc) == 20 and len({r["attempt_id"] for r in _cc}) == 20)
 
-# ── M1.1: OS crash-safe lock (subprocess acquire → kill → parent acquire) ─────
-CL = _log("crash.jsonl"); SIG = _log("sig")
-open(CL, "w").close()
-_worker_code = ("import sys,time\nsys.path.insert(0,%r)\nimport p2_provenance as PV\n"
-                "fd=PV._lock(sys.argv[1])\nopen(sys.argv[2],'w').close()\ntime.sleep(60)\n" % os.path.dirname(os.path.abspath(__file__)))
-proc = subprocess.Popen([sys.executable, "-c", _worker_code, CL, SIG], cwd=os.path.dirname(os.path.abspath(__file__)))
+# ── lock contention: writer อื่นถือ write tx -> ProvenanceLocked (map จาก SQLITE_BUSY) ──
+LC = _log("lock.db")
+PV.append_event(LC, _ev("lc0", "r", "STARTED"))
+holder = sqlite3.connect(LC, isolation_level=None)
+holder.execute("PRAGMA busy_timeout=0")
+holder.execute("BEGIN IMMEDIATE")                              # ถือ RESERVED write lock
+_bt = PV._BUSY_TIMEOUT_MS; PV._BUSY_TIMEOUT_MS = 200
+try:
+    locked = raises(lambda: PV.append_event(LC, _ev("lc1", "r", "STARTED")), PV.ProvenanceLocked)
+finally:
+    PV._BUSY_TIMEOUT_MS = _bt
+check("lock contention: อีก writer ถือ write tx -> ProvenanceLocked", locked)
+holder.execute("ROLLBACK"); holder.close()                    # ปล่อย lock
+PV.append_event(LC, _ev("lc1", "r", "STARTED"))
+check("lock release: holder ปล่อย -> append สำเร็จ", PV.reconcile(PV.read_provenance(LC))["lc1"] == "INCOMPLETE")
+
+# ── crash-safe: subprocess ถือ write tx (uncommitted) -> parent ProvenanceLocked -> kill -> OS ปล่อย lock + SQLite rollback ──
+CL = _log("crash.db")
+PV.append_event(CL, _ev("cl0", "r", "STARTED"))
+SIG = _log("sig")
+_code = ("import sys,time,sqlite3\n"
+         "c=sqlite3.connect(sys.argv[1],isolation_level=None)\n"
+         "c.execute('PRAGMA busy_timeout=0')\n"
+         "c.execute('BEGIN IMMEDIATE')\n"
+         "c.execute(\"INSERT INTO events(attempt_id,run_id,event,body,body_sha256) VALUES('h','r','STARTED','{}','x')\")\n"
+         "open(sys.argv[2],'w').close()\n"
+         "time.sleep(60)\n")
+proc = subprocess.Popen([sys.executable, "-c", _code, CL, SIG], cwd=os.path.dirname(os.path.abspath(__file__)))
 for _ in range(300):
     if os.path.exists(SIG):
         break
     time.sleep(0.02)
 held = os.path.exists(SIG)
-locked_out = raises(lambda: PV._lock(CL, retries=3, delay=0.01), PV.ProvenanceLocked)   # child ถือ lock อยู่
+PV._BUSY_TIMEOUT_MS = 200
+try:
+    locked_out = raises(lambda: PV.append_event(CL, _ev("cl1", "r", "STARTED")), PV.ProvenanceLocked)
+finally:
+    PV._BUSY_TIMEOUT_MS = _bt
 proc.terminate()
 try:
     proc.wait(timeout=10)
 except Exception:
     proc.kill()
-_fd = None
+reacq = True
 try:
-    _fd = PV._lock(CL, retries=300, delay=0.02)          # ต้อง acquire ได้หลัง child ตาย (OS ปล่อย lock เอง)
-    reacquired = True
-finally:
-    if _fd is not None:
-        PV._release(_fd)
-check("M1.1: child ถือ lock -> parent ProvenanceLocked", held and locked_out)
-check("M1.1: crash-safe — parent acquire ได้หลัง child ตาย โดยไม่ลบ lock manual", reacquired)
+    PV.append_event(CL, _ev("cl1", "r", "STARTED"))            # OS ปล่อย lock + SQLite rollback child's tx (hot journal)
+except Exception:
+    reacq = False
+_clr = PV.read_provenance(CL)
+check("crash-safe: child ถือ write tx -> parent ProvenanceLocked", held and locked_out)
+check("crash-safe: child ตาย -> OS ปล่อย lock + rollback uncommitted -> parent เขียนได้ (ไม่มี row 'h')",
+      reacq and PV.reconcile(_clr)["cl1"] == "INCOMPLETE" and all(r["attempt_id"] != "h" for r in _clr))
+
+# ── evidence: export_jsonl หลัง commit — external M4 contract ยังเป็น JSONL ────
+EX = _log("ex.db"); EXOUT = _log("ex.evidence.jsonl")
+PV.append_event(EX, _ev("e1", "r", "STARTED"))
+PV.append_event(EX, _ev("e1", "r", "PUBLISHED", status="PUBLISHED"))
+PV.export_jsonl(EX, EXOUT)
+import json as _json
+_lines = [l for l in open(EXOUT, encoding="utf-8").read().split("\n") if l]
+check("evidence: export_jsonl -> JSONL ตามลำดับ + reconcile ตรงกับ db",
+      len(_lines) == 2 and _json.loads(_lines[0])["event"] == "STARTED" and PV.reconcile([_json.loads(l) for l in _lines])["e1"] == "PUBLISHED")
 
 shutil.rmtree(BASE, ignore_errors=True)
 print(f"\n{sum(res)}/{len(res)} passed")

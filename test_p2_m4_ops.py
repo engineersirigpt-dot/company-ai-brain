@@ -298,11 +298,11 @@ finally:
 check("B3: terminal append fail -> PROVENANCE_UNCONFIRMED (ไม่ clean PUBLISHED)", r["status"] == "PROVENANCE_UNCONFIRMED" and "evidence" not in r)
 shutil.rmtree(d, ignore_errors=True)
 
-# ── M2: provenance ไม่เก็บ raw exception text ─────────────────────────────────
+# ── M2: provenance ไม่เก็บ raw exception text (อ่าน db ดิบแบบ binary-safe) ─────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 r = _run(d, log, _ports(scorer=SecretScorer()))
-_body = open(log, encoding="utf-8").read()
-check("M2: exception มี secret -> FAILED(error_type=RuntimeError) + log ไม่มี TOP-SECRET/Bearer", r["status"] == "FAILED" and r["error_type"] == "RuntimeError" and "TOP-SECRET" not in _body and "Bearer" not in _body)
+_raw = open(log, "rb").read()                              # SQLite db เป็น binary — เช็ค secret ไม่โผล่ทั้งไฟล์
+check("M2: exception มี secret -> FAILED(error_type=RuntimeError) + db ไม่มี TOP-SECRET/Bearer", r["status"] == "FAILED" and r["error_type"] == "RuntimeError" and b"TOP-SECRET" not in _raw and b"Bearer" not in _raw)
 shutil.rmtree(d, ignore_errors=True)
 
 print(f"\n{sum(res)}/{len(res)} passed")
