@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -143,14 +144,75 @@ check("B3.2-P: record commit fsync fail + rollback confirmed -> UNCOMMITTED (rea
 PV.append_event(F, _ev("f1", "r", "FAILED", status="FAILED"))
 check("B3.2-P: retry terminal หลัง rollback -> ปิด attempt ได้", PV.reconcile(PV.read_provenance(F))["f1"] == "FAILED")
 
-# ── B3.2-P.1: write-ahead intent ค้าง (crash กลาง append) -> read/append fail-closed จน operator repair ─
+# ── B1: write-ahead intent v2 — evidence-based recovery (ไม่ blind unlink) ─
+# committed replay: crash หลัง record+\n durable ก่อน clear intent -> recover เห็น digest ตรง -> COMMITTED (re-fsync ยืนยัน)
 IL = _log("intent.jsonl")
 PV.append_event(IL, _ev("i1", "r", "STARTED"))
-open(IL + ".intent", "w").close()                          # จำลอง append ก่อนหน้าไม่ยืนยัน outcome (crash)
-check("B3.2-P.1: unresolved intent -> read fail-closed", raises(lambda: PV.read_provenance(IL), PV.ProvenanceIndeterminate))
-check("B3.2-P.1: unresolved intent -> append fail-closed (ใต้ lock)", raises(lambda: PV.append_event(IL, _ev("i2", "r", "STARTED")), PV.ProvenanceIndeterminate))
-os.unlink(IL + ".intent")                                  # operator repair
-check("B3.2-P.1: repair intent -> อ่านได้ปกติ", PV.reconcile(PV.read_provenance(IL))["i1"] == "INCOMPLETE")
+_cut = os.path.getsize(IL)
+_term = _ev("i1", "r", "PUBLISHED", status="PUBLISHED"); _line = PV._serialize(_term)
+with open(IL, "ab") as f: f.write(_line)                   # full line + \n อยู่ครบ (page cache) แต่ intent ยังไม่ clear
+PV._write_intent(IL, _term, _line, _cut)                   # intent v2 bind cut + record digest
+_sc = {"n": 0}
+def _fsync_spy(fd): _sc["n"] += 1; return _rfs(fd)
+os.fsync = _fsync_spy
+try:
+    _oc = PV.recover(IL)
+finally:
+    os.fsync = _rfs
+check("B1: recover(committed replay, digest ตรง) -> COMMITTED + re-fsync (ยืนยัน durable ไม่ใช่ blind unlink)", _oc == "COMMITTED" and _sc["n"] >= 1)
+check("B1: หลัง recover committed -> record durable + reconcile ปิด attempt + intent เคลียร์", PV.reconcile(PV.read_provenance(IL))["i1"] == "PUBLISHED" and not os.path.exists(IL + ".intent"))
+
+# uncommitted: crash กลาง write (partial line, digest ไม่ตรง) -> recover truncate กลับ cut -> UNCOMMITTED
+IL2 = _log("intent2.jsonl")
+PV.append_event(IL2, _ev("j1", "r", "STARTED"))
+_cut2 = os.path.getsize(IL2)
+_term2 = _ev("j1", "r", "PUBLISHED", status="PUBLISHED"); _line2 = PV._serialize(_term2)
+with open(IL2, "ab") as f: f.write(_line2[:len(_line2) // 2])   # เขียนไม่ครบ (ไม่ปิด \n)
+PV._write_intent(IL2, _term2, _line2, _cut2)               # intent bind digest ของ full line
+check("B1: recover(partial record, digest ไม่ตรง) -> UNCOMMITTED + truncate กลับ cut", PV.recover(IL2) == "UNCOMMITTED" and os.path.getsize(IL2) == _cut2)
+check("B1: หลัง recover uncommitted -> reader เห็นแค่ STARTED + intent เคลียร์", [r["event"] for r in PV.read_provenance(IL2)] == ["STARTED"] and not os.path.exists(IL2 + ".intent"))
+
+# corrupt intent (ไม่มี binding/protocol) -> recover เองไม่ได้ = ProvenanceIndeterminate (fail-closed, ไม่ blind-accept)
+IL3 = _log("intent3.jsonl")
+PV.append_event(IL3, _ev("k1", "r", "STARTED"))
+open(IL3 + ".intent", "w").close()
+check("B1: corrupt intent -> recover/read/append = ProvenanceIndeterminate (ต้อง operator, ไม่ auto-heal)",
+      raises(lambda: PV.recover(IL3), PV.ProvenanceIndeterminate) and raises(lambda: PV.read_provenance(IL3), PV.ProvenanceIndeterminate) and raises(lambda: PV.append_event(IL3, _ev("k2", "r", "STARTED")), PV.ProvenanceIndeterminate))
+os.unlink(IL3 + ".intent")
+
+# auto-recover: append_event/read_provenance ถัดไป resolve intent เอง (ใต้ lock) โดยไม่ต้องเรียก recover() ตรง
+IL4 = _log("intent4.jsonl")
+PV.append_event(IL4, _ev("l1", "r", "STARTED"))
+_cut4 = os.path.getsize(IL4)
+_term4 = _ev("l1", "r", "PUBLISHED", status="PUBLISHED"); _line4 = PV._serialize(_term4)
+with open(IL4, "ab") as f: f.write(_line4)
+PV._write_intent(IL4, _term4, _line4, _cut4)
+check("B1: read_provenance auto-recover intent (committed) ใต้ lock -> เห็น terminal + intent เคลียร์", PV.reconcile(PV.read_provenance(IL4))["l1"] == "PUBLISHED" and not os.path.exists(IL4 + ".intent"))
+
+# ── B2: parent directory ต้อง pre-exist (durability boundary) — ไม่ auto-create ─
+_missing = _log("nodir/sub/led.jsonl")
+check("B2: parent ที่ยังไม่มี -> ProvenanceError (ไม่ auto-create) + ledger ไม่ถูกสร้าง", raises(lambda: PV.append_event(_missing, _ev("b1", "r", "STARTED")), PV.ProvenanceError) and not os.path.exists(_missing))
+
+# ── M1: clear-intent parent-fsync ล้ม (หลัง unlink สำเร็จ) -> committed + warning (ไม่ indeterminate, marker หายจริง) ─
+# call 1 = _write_intent parent fsync (ผ่าน) · call 2 = _clear_intent parent fsync (ให้ล้ม)
+M1 = _log("m1.jsonl")
+PV.append_event(M1, _ev("m1a", "r", "STARTED"))
+_rfp = PV._fsync_parent; _pc = {"n": 0}
+def _fp_2nd_fail(d):
+    _pc["n"] += 1
+    if _pc["n"] == 2:
+        raise OSError("parent fsync fail (clear step)")
+    return _rfp(d)
+PV._fsync_parent = _fp_2nd_fail
+try:
+    with warnings.catch_warnings(record=True) as _caught:
+        warnings.simplefilter("always")
+        PV.append_event(M1, _ev("m1a", "r", "PUBLISHED", status="PUBLISHED"))   # ต้องไม่ raise (committed)
+    _warned = any(issubclass(w.category, RuntimeWarning) for w in _caught)
+finally:
+    PV._fsync_parent = _rfp
+check("M1: clear-intent parent-fsync ล้ม -> append committed (record durable) + RuntimeWarning + marker หายจริง (ไม่ indeterminate)",
+      _warned and PV.reconcile(PV.read_provenance(M1))["m1a"] == "PUBLISHED" and not os.path.exists(M1 + ".intent"))
 
 # ── B3.2-P.2: post-commit release fail -> record ยัง durable (append ไม่ report fail) ─
 C2 = _log("postcommit.jsonl")

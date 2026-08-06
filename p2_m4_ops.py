@@ -73,6 +73,10 @@ def _receipt_within(started_at, finished_at, receipt) -> bool:
         return False
 
 
+def _canon(p) -> str:
+    return os.path.realpath(p)                              # M2: indirection เดียว — canonicalize out_dir ครั้งเดียว (test hook ได้)
+
+
 def _bundle_path(out_dir: str, run_id) -> str:
     return os.path.join(out_dir, str(run_id) + ".bundle.json")
 
@@ -114,6 +118,7 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
                         attempt_id=None) -> dict:
     aid = _resolve_attempt_id(attempt_id)
     run_id = plan.get("run_id") if isinstance(plan, dict) else None
+    out_dir_real = _canon(out_dir)                          # M2: canonicalize **ครั้งเดียว** ก่อน STARTED → ใช้ค่าเดียวกันทุกจุด
     clock = ports.clock                                     # M3.1: authority เดียวกับ runner (receipt)
     try:
         started_at = _now(clock)
@@ -122,7 +127,7 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
 
     plan_errs = RP.validate_run_plan(plan) if isinstance(plan, dict) else ["plan ไม่ใช่ dict"]
     started = {"attempt_id": aid, "run_id": run_id, "event": "STARTED", "started_at": started_at,
-               "out_dir_realpath": os.path.realpath(out_dir), "plan_valid": not plan_errs}
+               "out_dir_realpath": out_dir_real, "plan_valid": not plan_errs}
     if not plan_errs:
         started.update({"run_manifest_sha256": RP.run_manifest_sha256(plan),
                         "m4_case_manifest_sha256": plan["m4_case_manifest_sha256"],
@@ -155,7 +160,7 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
         return _terminal("FAILED", "plan_invalid")
 
     try:
-        cap = FS.probe_output_fs(out_dir)
+        cap = FS.probe_output_fs(out_dir_real)             # M2: probe บน canonical เดียวกับ STARTED/runner
     except Exception as e:
         return _terminal("FAILED", "fs_probe", error_type=type(e).__name__)
     cap_sum = {"hardlink_no_clobber": cap["hardlink_no_clobber"], "cleanup_ok": cap["cleanup_ok"],
@@ -163,16 +168,19 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
 
     try:
         result = RUN.run_m4a(plan=plan, frozen=frozen, cases=cases, corpus=corpus, marker=marker,
-                             ports=ports, out_dir=out_dir, argv=argv, stdout=stdout, stderr=stderr)
+                             ports=ports, out_dir=out_dir_real, argv=argv, stdout=stdout, stderr=stderr)
     except (AT.CleanupUnconfirmed, AT.DurabilityUnconfirmed) as e:
-        art = _bundle_path(out_dir, run_id)
+        art = _bundle_path(out_dir_real, run_id)
         return _terminal("DEGRADED", "publish", capability=cap_sum, artifact=art,
                          artifact_sha256=_sha256_file(art), error_type=type(e).__name__)
     except Exception as e:
         return _terminal("FAILED", "run", capability=cap_sum, error_type=type(e).__name__)
 
-    # M3.2-B: validate exact runner-result shape/status/durability + **exact path ใต้ out_dir** (sanitized เดียว)
-    expected_path = os.path.join(os.path.realpath(out_dir), str(run_id) + ".bundle.json")
+    # M2: ยืนยัน out_dir ไม่ถูก retarget (symlink/junction swap) ระหว่าง run — artifact ต้องอยู่ใต้ canonical ที่ bind ใน STARTED
+    if _canon(out_dir) != out_dir_real:
+        return _terminal("FAILED", "out_dir_retargeted", capability=cap_sum)
+    # M3.2-B: validate exact runner-result shape/status/durability + **exact path ใต้ out_dir (frozen canonical)** (sanitized เดียว)
+    expected_path = os.path.join(out_dir_real, str(run_id) + ".bundle.json")
     if not (isinstance(result, dict) and result.get("status") == "PUBLISHED"
             and result.get("durability") in ("durable", "atomic-visibility-only")
             and isinstance(result.get("path"), str) and os.path.realpath(result["path"]) == expected_path):

@@ -209,6 +209,22 @@ finally:
 check("M3.2-B: path นอก out_dir -> FAILED/run_result_malformed + ไม่ verify + ไม่แนบ evidence/receipt", r["status"] == "FAILED" and r["phase"] == "run_result_malformed" and "evidence" not in r and "receipt" not in r and PV.reconcile(PV.read_provenance(log))[AID] == "FAILED")
 shutil.rmtree(d, ignore_errors=True); shutil.rmtree(outside, ignore_errors=True)
 
+# ── M2: out_dir ถูก retarget (symlink/junction swap) ระหว่าง run -> FAILED/out_dir_retargeted ──
+# _canon เรียกครั้งเดียวตอน STARTED (bind) + อีกครั้งตอน re-verify ; ให้ค่าต่างกัน = จำลอง swap
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+_rc = OPS._canon; _cc = {"n": 0}
+def _canon_swap(p):
+    _cc["n"] += 1
+    return _rc(p) if _cc["n"] == 1 else _rc(p) + "-SWAPPED"
+OPS._canon = _canon_swap
+try:
+    r = _run(d, log, _ports())
+finally:
+    OPS._canon = _rc
+check("M2: out_dir retarget ระหว่าง run -> FAILED/out_dir_retargeted (ไม่ bind artifact target ใหม่ + ไม่แนบ evidence)", r["status"] == "FAILED" and r["phase"] == "out_dir_retargeted" and "evidence" not in r and PV.reconcile(PV.read_provenance(log))[AID] == "FAILED")
+check("M2: STARTED bind out_dir_realpath = canonical ตอนเริ่ม (ค่าเดียวใช้ทั้ง probe/runner/verify)", PV.read_provenance(log)[0]["out_dir_realpath"] == _rc(d))
+shutil.rmtree(d, ignore_errors=True)
+
 # ── B3.1: attempt_id generate/validate ────────────────────────────────────────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 r = _run(d, log, _ports(), attempt_id=None)
