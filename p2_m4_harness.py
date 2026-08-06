@@ -19,10 +19,7 @@ import p2_eval as E
 
 
 def _id_hash(point_id) -> str:
-    if isinstance(point_id, bool) or not isinstance(point_id, (int, str)):
-        raise TypeError(f"point_id ต้องเป็น int/str: {point_id!r}")
-    tag = "i" if isinstance(point_id, int) else "s"
-    return hashlib.sha256(f"{tag}:{point_id}".encode("utf-8")).hexdigest()
+    return E.typed_id_sha256(point_id)     # leaf helper เดียวร่วมกับ evaluator (กัน drift — Codex constraint 4)
 
 
 def _text_hash(text) -> str:

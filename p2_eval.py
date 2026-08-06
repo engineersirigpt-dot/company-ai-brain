@@ -83,9 +83,20 @@ def _pair_sha256(point_id_sha256, text_sha256) -> str:
     return hashlib.sha256(f"{point_id_sha256}:{text_sha256}".encode("utf-8")).hexdigest()
 
 
+def typed_id_sha256(value) -> str:
+    """
+    **leaf helper เดียว** ของ typed-id hash (evaluator + harness เรียกร่วม กัน drift) — int→'i:' str→'s:'
+    (กัน 1 กับ '1' ชนกัน ; reject bool/ชนิดอื่น)
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise TypeError(f"typed id ต้องเป็น int/str (ไม่ bool): {value!r}")
+    tag = "i" if isinstance(value, int) else "s"
+    return hashlib.sha256(f"{tag}:{value}".encode("utf-8")).hexdigest()
+
+
 def _role_id_sha256(role) -> str:
-    """typed-id hash ของ role (str) — ต้องตรง harness `_id_hash` ('s:'+role) ; กัน role_identity ที่ forged (B2.1)"""
-    return hashlib.sha256(f"s:{role}".encode("utf-8")).hexdigest()
+    """typed-id hash ของ role (str) — กัน role_identity ที่ forged (B2.1) ; ใช้ leaf helper เดียวกับ harness"""
+    return typed_id_sha256(role)
 
 
 # exact hash-only schema (M1) — reject unknown/raw fields ทุกระดับ

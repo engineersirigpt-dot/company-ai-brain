@@ -195,6 +195,7 @@ check("M1: PinnedCrossEncoder revision ผิด -> raise", raises(lambda: HN.va
 # ── M1: schema v5 + run bind ตรวจซ้ำ ──────────────────────────────────────────────────────────
 check("M1: evidence schema_version = p2-m4-v5", EV["schema_version"] == "p2-m4-v5" and E.M4_SCHEMA_VERSION == "p2-m4-v5")
 check("M3: component(1,'x') != component('1','x')", HN.component(1, "x")["pair_sha256"] != HN.component("1", "x")["pair_sha256"])
+check("constraint4: _id_hash = leaf helper เดียวกับ evaluator (harness==E.typed_id_sha256==_role_id)", HN._id_hash("qc") == E.typed_id_sha256("qc") == E._role_id_sha256("qc") and HN._id_hash(1) == E.typed_id_sha256(1))
 check("M1: argv ambiguity", HN._argv_hash(["a b", "c"]) != HN._argv_hash(["a", "b c"]))
 check("M1: stdout ต้อง bytes", raises(lambda: HN._bytes_sha256("x"), TypeError))
 check("model_input == provider (จาก trace)", EV["per_case"][0]["model_input_pairs"] == EV["per_case"][0]["provider_pairs"])
