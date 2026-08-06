@@ -144,10 +144,12 @@ r = _run(d, log, pt)
 check("M3.1: STARTED clock ไม่ใช่ ISO+tz -> FAILED/clock + ไม่ provision + ไม่มี STARTED", r["status"] == "FAILED" and r["phase"] == "clock" and pt.isolation.calls == [] and PV.read_provenance(log) == [])
 shutil.rmtree(d, ignore_errors=True)
 
-# ── M3.1: terminal clock anomaly -> explicit clock_anomaly (ไม่ clean PUBLISHED เงียบ) ─
+# ── M3.1: terminal clock anomaly -> DEGRADED (load-bearing: status/reconcile ไม่ใช่ clean PUBLISHED) ─
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 r = _run(d, log, _ports2(clock=AnomalyClock()))
-check("M3.1: terminal clock invalid -> PUBLISHED + clock_anomaly=True (explicit)", r["status"] == "PUBLISHED" and r.get("clock_anomaly") is True and PV.read_provenance(log)[1].get("clock_anomaly") is True)
+_ae1 = PV.read_provenance(log)[1]
+check("M3.1: terminal clock invalid -> DEGRADED/clock_anomaly (ไม่ clean PUBLISHED + ไม่แนบ evidence)", r["status"] == "DEGRADED" and r["phase"] == "clock_anomaly" and r.get("clock_anomaly") is True and "evidence" not in r)
+check("M3.1: anomaly load-bearing ที่ ledger -> event/status=DEGRADED + reconcile=DEGRADED (gate ด้วย status พอ)", _ae1["event"] == "DEGRADED" and _ae1["status"] == "DEGRADED" and _ae1.get("clock_anomaly") is True and PV.reconcile(PV.read_provenance(log))[AID] == "DEGRADED")
 shutil.rmtree(d, ignore_errors=True)
 
 # ── M3.2: PUBLISHED fail-closed — verify final bundle จากดิสก์ ─────────────────
@@ -173,7 +175,8 @@ finally:
 check("M3.2: final bundle invalid บนดิสก์ -> FAILED/verify_publish (ไม่ clean PUBLISHED + ไม่แนบ evidence)", r["status"] == "FAILED" and r["phase"] == "verify_publish" and "evidence" not in r and PV.reconcile(PV.read_provenance(log))[AID] == "FAILED")
 shutil.rmtree(d, ignore_errors=True)
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
-RUN.run_m4a = lambda **kw: {"status": "PUBLISHED", "path": os.path.join(d, "nope.bundle.json"), "durability": "durable",
+# path ตรง run_id ใต้ out_dir (ผ่าน exact-path guard) แต่ไฟล์ไม่มี -> read fail ใน _verify_published
+RUN.run_m4a = lambda **kw: {"status": "PUBLISHED", "path": os.path.join(d, "run-1.bundle.json"), "durability": "durable",
                             "evidence": {"evidence_body_sha256": "a" * 64, "run_receipt_sha256": "a" * 64}, "receipt": {}}
 try:
     r = _run(d, log, _ports())
@@ -191,6 +194,20 @@ finally:
     RUN.run_m4a = _orig_run
 check("M3.2-B: result ไม่มี path -> FAILED/run_result_malformed (normalize, ไม่ crash + ปิด attempt)", r["status"] == "FAILED" and r["phase"] == "run_result_malformed" and PV.reconcile(PV.read_provenance(log))[AID] == "FAILED")
 shutil.rmtree(d, ignore_errors=True)
+
+# ── M3.2-B: bundle valid แต่ path นอก out_dir -> FAILED/run_result_malformed (isolation contract, ไม่แนบ payload) ──
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+outside = tempfile.mkdtemp(prefix="p2ops-out-")
+_ob = os.path.join(outside, "run-1.bundle.json")
+open(_ob, "w", encoding="utf-8").write('{"evidence":{"e":1},"receipt":{"r":1}}')   # valid bundle แต่ผิด directory
+RUN.run_m4a = lambda **kw: {"status": "PUBLISHED", "path": _ob, "durability": "durable",
+                            "evidence": {"evidence_body_sha256": "a" * 64, "run_receipt_sha256": "a" * 64}, "receipt": {"k": 1}}
+try:
+    r = _run(d, log, _ports())
+finally:
+    RUN.run_m4a = _orig_run
+check("M3.2-B: path นอก out_dir -> FAILED/run_result_malformed + ไม่ verify + ไม่แนบ evidence/receipt", r["status"] == "FAILED" and r["phase"] == "run_result_malformed" and "evidence" not in r and "receipt" not in r and PV.reconcile(PV.read_provenance(log))[AID] == "FAILED")
+shutil.rmtree(d, ignore_errors=True); shutil.rmtree(outside, ignore_errors=True)
 
 # ── B3.1: attempt_id generate/validate ────────────────────────────────────────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")

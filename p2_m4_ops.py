@@ -105,7 +105,9 @@ def _verify_published(plan, frozen, path) -> dict:
     ebs, rrs = ev.get("evidence_body_sha256"), ev.get("run_receipt_sha256")
     if not (E._is_sha256(ebs) and E._is_sha256(rrs)):
         raise ValueError("evidence_body/run_receipt digest ใน bundle ไม่ใช่ sha256")
-    return {"artifact_sha256": artifact_sha256, "evidence_body_sha256": ebs, "run_receipt_sha256": rrs}
+    # M3.2-B: คืน disk-loaded evidence+receipt (caller ต้องใช้ชุดนี้ ไม่ใช่ในหน่วยความจำ)
+    return {"artifact_sha256": artifact_sha256, "evidence_body_sha256": ebs, "run_receipt_sha256": rrs,
+            "evidence": ev, "receipt": rc}
 
 
 def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus, marker, ports, argv, stdout, stderr,
@@ -135,10 +137,12 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
         finished_at, anomaly = _finished(clock, started_at)
         if status == "PUBLISHED" and isinstance(receipt, dict) and not _receipt_within(started_at, finished_at, receipt):
             anomaly = True                                 # M3.1: PUBLISHED cross-check receipt interval
+        if status == "PUBLISHED" and anomaly:
+            status, phase = "DEGRADED", "clock_anomaly"    # M3.1: anomaly load-bearing → ไม่ใช่ clean PUBLISHED
         rec = {"attempt_id": aid, "run_id": run_id, "event": status, "status": status, "phase": phase,
                "finished_at": finished_at, **extra}
         if anomaly:
-            rec["clock_anomaly"] = True                    # explicit — ไม่ clean PUBLISHED โดยเงียบ
+            rec["clock_anomaly"] = True                    # explicit + status ถูก downgrade แล้ว
         try:
             PV.append_event(provenance_log, rec)
         except PV.ProvenanceIndeterminate as pe:
@@ -167,20 +171,23 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
     except Exception as e:
         return _terminal("FAILED", "run", capability=cap_sum, error_type=type(e).__name__)
 
-    # M3.2-B: validate runner-result shape ก่อนใช้ ; sanitized path เดียว (ไม่ dereference untrusted result ซ้ำใน error handler)
-    if not isinstance(result, dict) or not isinstance(result.get("path"), str) or not result["path"]:
+    # M3.2-B: validate exact runner-result shape/status/durability + **exact path ใต้ out_dir** (sanitized เดียว)
+    expected_path = os.path.join(os.path.realpath(out_dir), str(run_id) + ".bundle.json")
+    if not (isinstance(result, dict) and result.get("status") == "PUBLISHED"
+            and result.get("durability") in ("durable", "atomic-visibility-only")
+            and isinstance(result.get("path"), str) and os.path.realpath(result["path"]) == expected_path):
         return _terminal("FAILED", "run_result_malformed", capability=cap_sum)
-    path = result["path"]
-    receipt = result.get("receipt")
 
-    # M3.2: PUBLISHED ต้อง verify final bundle จากดิสก์ได้ก่อน (fail-closed) — ไม่งั้นไม่ใช่ clean PUBLISHED
+    # M3.2: verify final bundle จากดิสก์ (fail-closed) → คืน disk-loaded evidence/receipt (ไม่ใช้ในหน่วยความจำ)
     try:
-        binding = _verify_published(plan, frozen, path)
+        v = _verify_published(plan, frozen, expected_path)
     except Exception as e:
-        return _terminal("FAILED", "verify_publish", capability=cap_sum, path=path, error_type=type(e).__name__)
+        return _terminal("FAILED", "verify_publish", capability=cap_sum, path=expected_path, error_type=type(e).__name__)
 
-    term = _terminal("PUBLISHED", "complete", receipt=receipt, capability=cap_sum,
-                     durability_mode=result.get("durability"), path=path, **binding)
+    term = _terminal("PUBLISHED", "complete", receipt=v["receipt"], capability=cap_sum,
+                     durability_mode=result["durability"], path=expected_path,
+                     artifact_sha256=v["artifact_sha256"], evidence_body_sha256=v["evidence_body_sha256"],
+                     run_receipt_sha256=v["run_receipt_sha256"])
     if term.get("status") != "PUBLISHED":
         return term
-    return {**term, "evidence": result.get("evidence"), "receipt": receipt}
+    return {**term, "evidence": v["evidence"], "receipt": v["receipt"]}   # disk-loaded เท่านั้น

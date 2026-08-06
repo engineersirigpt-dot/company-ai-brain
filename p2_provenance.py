@@ -36,21 +36,55 @@ def _valid_iso_tz(x) -> bool:
     return dt.utcoffset() is not None
 
 
-def _poison_path(log_path: str) -> str:
-    return log_path + ".poison"
+def _intent_path(log_path: str) -> str:
+    return log_path + ".intent"
 
 
-def _poison(log_path: str) -> None:
+def _fsync_parent(d: str) -> None:
+    """POSIX: fsync directory (directory-entry durability) — fail → propagate (durability boundary, B3.2-P.2) ;
+    non-POSIX (Windows): dir fd fsync ไม่รองรับ → atomic-visibility only (no-op)"""
+    if not d or os.name != "posix":
+        return
+    dfd = os.open(d, os.O_RDONLY)
     try:
-        fd = os.open(_poison_path(log_path), os.O_CREAT | os.O_WRONLY, 0o644)
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+
+def _check_intent(log_path: str) -> None:
+    """write-ahead intent ค้าง = append ก่อนหน้าไม่ยืนยัน outcome → ledger indeterminate (fail-closed, ต้อง operator repair)"""
+    if os.path.exists(_intent_path(log_path)):
+        raise ProvenanceIndeterminate(f"unresolved write-ahead intent — ledger indeterminate: {_intent_path(log_path)}")
+
+
+def _write_intent(log_path: str, record: dict) -> None:
+    """สร้าง durable intent (no-clobber + fsync file + fsync parent) **ก่อนแตะ ledger** (B3.2-P.1a) ; ล้ม → propagate (ledger untouched)"""
+    ip = _intent_path(log_path)
+    fd = os.open(ip, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_BINARY, 0o644)
+    try:
+        body = json.dumps({"attempt_id": record.get("attempt_id"), "event": record.get("event")},
+                          ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        mv = memoryview(body)
+        while mv:
+            n = os.write(fd, mv)
+            if n <= 0:
+                raise ProvenanceError("intent write คืน 0")
+            mv = mv[n:]
+        os.fsync(fd)
+    finally:
         os.close(fd)
-    except OSError:
-        pass                        # best-effort ; ถ้าเขียน marker ไม่ได้ caller ก็ยังได้ ProvenanceIndeterminate
+    _fsync_parent(os.path.dirname(log_path))
 
 
-def _check_poison(log_path: str) -> None:
-    if os.path.exists(_poison_path(log_path)):
-        raise ProvenanceIndeterminate(f"ledger poisoned — ต้อง operator repair ก่อน: {_poison_path(log_path)}")
+def _clear_intent(log_path: str) -> None:
+    """ลบ intent + fsync parent เมื่อ outcome **ยืนยันแล้วเท่านั้น** ; ล้ม → ProvenanceIndeterminate (intent ค้าง = fail-closed)"""
+    ip = _intent_path(log_path)
+    try:
+        os.unlink(ip)
+        _fsync_parent(os.path.dirname(log_path))
+    except OSError as e:
+        raise ProvenanceIndeterminate(f"clear write-ahead intent ล้ม — ledger indeterminate: {ip}") from e
 
 
 def _read_all(fd) -> bytes:
@@ -169,6 +203,8 @@ def _validate_terminal_schema(r: dict) -> None:
             raise ProvenanceError("PUBLISHED ต้องมี capability (dict)")
         if not isinstance(r.get("path"), str) or not r["path"]:
             raise ProvenanceError("PUBLISHED ต้องมี path (str)")
+        if r.get("clock_anomaly"):                         # M3.1: clock anomaly load-bearing — PUBLISHED ต้อง clean
+            raise ProvenanceError("PUBLISHED ห้ามมี clock_anomaly (ต้อง downgrade เป็น DEGRADED)")
     elif ev == "DEGRADED":
         if not isinstance(r.get("capability"), dict):
             raise ProvenanceError("DEGRADED ต้องมี capability (dict)")
@@ -219,27 +255,31 @@ def _validate_transition(committed: list, record: dict) -> None:
 
 def _locked_append(log_path: str, record: dict, validate_state) -> None:
     """
-    commit boundary = `os.fsync(fd)` สำเร็จ (B3.2-P): exception ก่อน commit → **rollback ftruncate กลับ `cut`**
-    (record ที่ล้มไม่ปรากฏ ; retry ปิด attempt ได้) ; exception หลัง commit (close/release) = record durable แล้ว
-    (committed-with-cleanup-warning ไม่ใช่ uncommitted)
+    write-ahead intent protocol (Codex bf.../f602329) — outcome 3 สถานะ ที่ survive crash แบบ fail-closed:
+      1. `_write_intent` durable (fsync file+parent) **ก่อนแตะ ledger**
+      2. append record + fsync + **parent fsync (POSIX, ใน commit boundary)** ; fail → rollback ยืนยัน → UNCOMMITTED (retry) ;
+         rollback/parent ยืนยันไม่ได้ → intent ค้าง → INDETERMINATE
+      3. `_clear_intent` (fsync parent) เมื่อ COMMITTED หรือ rollback-confirmed เท่านั้น
+    check/clear intent ทำ **ใต้ lock** (B3.2-P.1b) ; close/release หลัง commit = cleanup warning (B3.2-P.2)
     """
-    _check_poison(log_path)                                # poisoned ledger → fail-closed ก่อน (B3.2-P.1)
     line = _serialize(record)
     d = os.path.dirname(log_path)
     if d:
         os.makedirs(d, exist_ok=True)
     lockfd = _lock(log_path)
-    committed = False
     try:
+        _check_intent(log_path)                            # B3.2-P.1b: ตรวจ intent ใต้ lock
         fd = os.open(log_path, os.O_RDWR | os.O_CREAT | _O_BINARY, 0o644)
         try:
             data = _read_all(fd)
             cut = data.rfind(b"\n") + 1                    # committed = ถึงหลัง \n สุดท้าย (B3.2)
-            if validate_state is not None:
+            if validate_state is not None:                 # pure read (ยังไม่ mutate) → reject ก่อนแตะ ledger/intent
                 validate_state(_parse_committed(data[:cut]), record)
+            _write_intent(log_path, record)                # durable intent **ก่อน** mutation แรก (truncate/append) (B3.2-P.1a)
             if cut != len(data):                           # uncommitted tail → ตัดทิ้งก่อน append
                 os.ftruncate(fd, cut)
                 os.fsync(fd)
+            new_log = (cut == 0)
             os.lseek(fd, cut, os.SEEK_SET)
             try:
                 mv = memoryview(line)
@@ -248,42 +288,32 @@ def _locked_append(log_path: str, record: dict, validate_state) -> None:
                     if n <= 0:
                         raise ProvenanceError("os.write คืน 0 (เขียนไม่คืบ)")
                     mv = mv[n:]
-                os.fsync(fd)                               # ← durable commit boundary
-                committed = True
+                os.fsync(fd)                               # record durable
+                if new_log:
+                    _fsync_parent(d)                       # parent durability ใน commit boundary (B3.2-P.2)
             except BaseException as werr:
-                # rollback ต้อง **ยืนยัน** (truncate + fsync) → UNCOMMITTED retry ได้ ; ยืนยันไม่ได้ → poison (B3.2-P.1)
-                try:
+                try:                                       # rollback ต้อง **ยืนยัน** (truncate + fsync)
                     os.ftruncate(fd, cut)
                     os.fsync(fd)
-                except OSError as rberr:
-                    _poison(log_path)
-                    raise ProvenanceIndeterminate("append commit ล้มและ rollback ยืนยันไม่ได้ — ledger poisoned") from rberr
-                raise werr                                 # UNCOMMITTED (rolled back confirmed)
-            created = (cut == 0)
+                except OSError as rberr:                   # rollback ยืนยันไม่ได้ → intent ค้าง = INDETERMINATE
+                    raise ProvenanceIndeterminate("append commit ล้มและ rollback ยืนยันไม่ได้ — ledger indeterminate") from rberr
+                _clear_intent(log_path)                    # rollback confirmed → outcome ยืนยัน → เคลียร์ intent
+                raise werr                                 # UNCOMMITTED (retry ได้)
+            _clear_intent(log_path)                        # COMMITTED (record+parent durable) → เคลียร์ intent
         finally:
             try:
                 os.close(fd)
             except OSError:
-                if not committed:
-                    raise                                  # pre-commit close fail = จริง ; post-commit = warning (กลืน, B3.2-P.2)
-        if committed and created and d and os.name == "posix":
-            try:
-                dfd = os.open(d, os.O_RDONLY)
-                try:
-                    os.fsync(dfd)                          # parent durability เมื่อสร้าง log ใหม่
-                finally:
-                    os.close(dfd)
-            except OSError:
-                pass                                       # post-commit parent fsync = cleanup warning
+                pass                                       # post-commit cleanup warning (record durable แล้ว, B3.2-P.2)
     finally:
         try:
             _release(lockfd)
         except OSError:
-            pass                                           # post-commit (หรือหลัง fail) release = best-effort (B3.2-P.2)
+            pass                                           # cleanup warning
 
 
-def append_provenance(log_path: str, record: dict) -> None:
-    """low-level append (lock + tail-truncate + full-write + fsync) — ไม่บังคับ state machine"""
+def _append_raw(log_path: str, record: dict) -> None:
+    """low-level append (WAI + lock + tail-truncate + full-write) — **ไม่บังคับ state machine** ; private (ไม่ใช่ authority path, M3.2-A)"""
     _locked_append(log_path, record, None)
 
 
@@ -293,15 +323,24 @@ def append_event(log_path: str, record: dict) -> None:
 
 
 def read_provenance(log_path: str) -> list:
-    """อ่าน records ที่ commit แล้ว (ปิดด้วย \\n) — tail ไม่มี newline = uncommitted → drop ; interior corrupt = raise ;
-    ledger poisoned → ProvenanceIndeterminate (fail-closed จน operator repair)"""
-    _check_poison(log_path)
-    if not os.path.exists(log_path):
+    """อ่าน records ที่ commit แล้ว **ใต้ lock + intent check** (B3.2-P.1b) — tail ไม่มี newline = drop ;
+    interior corrupt = ProvenanceError ; unresolved intent = ProvenanceIndeterminate (fail-closed)"""
+    if not os.path.exists(log_path) and not os.path.exists(_intent_path(log_path)):
         return []
-    with open(log_path, "rb") as f:
-        data = f.read()
-    cut = data.rfind(b"\n") + 1
-    return _parse_committed(data[:cut])
+    lockfd = _lock(log_path)
+    try:
+        _check_intent(log_path)                            # snapshot ต้องเสถียร: อ่านใต้ lock เดียวกับ writer
+        if not os.path.exists(log_path):
+            return []
+        with open(log_path, "rb") as f:
+            data = f.read()
+        cut = data.rfind(b"\n") + 1
+        return _parse_committed(data[:cut])
+    finally:
+        try:
+            _release(lockfd)
+        except OSError:
+            pass
 
 
 def reconcile(records: list) -> dict:

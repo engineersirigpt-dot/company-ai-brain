@@ -89,19 +89,19 @@ with open(C, "w", encoding="utf-8") as f:
 check("interior corruption (committed) -> ProvenanceError", raises(lambda: PV.read_provenance(C), PV.ProvenanceError))
 
 # ── M1: full-write / allow_nan / oversize ─────────────────────────────────────
-check("record ไม่ใช่ dict -> TypeError", raises(lambda: PV.append_provenance(L, ["x"]), TypeError))
-check("NaN -> ProvenanceError (allow_nan=False)", raises(lambda: PV.append_provenance(_log("nan.jsonl"), {"x": float("nan")}), PV.ProvenanceError))
-check("oversize -> ProvenanceError", raises(lambda: PV.append_provenance(_log("big.jsonl"), {"x": "y" * (PV.MAX_RECORD_BYTES + 10)}), PV.ProvenanceError))
+check("record ไม่ใช่ dict -> TypeError", raises(lambda: PV._append_raw(L, ["x"]), TypeError))
+check("NaN -> ProvenanceError (allow_nan=False)", raises(lambda: PV._append_raw(_log("nan.jsonl"), {"x": float("nan")}), PV.ProvenanceError))
+check("oversize -> ProvenanceError", raises(lambda: PV._append_raw(_log("big.jsonl"), {"x": "y" * (PV.MAX_RECORD_BYTES + 10)}), PV.ProvenanceError))
 SW = _log("sw.jsonl"); _rw = os.write
 os.write = lambda fd, b: _rw(fd, b[:3])
 try:
-    PV.append_provenance(SW, {"attempt_id": "a", "n": 1})
+    PV._append_raw(SW, {"attempt_id": "a", "n": 1})
 finally:
     os.write = _rw
 check("partial write -> loop เขียนครบ", PV.read_provenance(SW)[0]["attempt_id"] == "a")
 os.write = lambda fd, b: 0
 try:
-    zero = raises(lambda: PV.append_provenance(_log("zero.jsonl"), {"a": 1}), PV.ProvenanceError)
+    zero = raises(lambda: PV._append_raw(_log("zero.jsonl"), {"a": 1}), PV.ProvenanceError)
 finally:
     os.write = _rw
 check("os.write คืน 0 -> ProvenanceError", zero)
@@ -123,35 +123,34 @@ PV.append_event(MA, _ev("m1", "r", "STARTED"))
 check("M3.2-A: PUBLISHED ไม่มี binding -> ProvenanceError (ledger enforce schema)", raises(lambda: PV.append_event(MA, {"attempt_id": "m1", "run_id": "r", "event": "PUBLISHED", "status": "PUBLISHED", "finished_at": "2026-08-06T09:03:00+07:00"}), PV.ProvenanceError))
 check("M3.2-A: reconcile minimal PUBLISHED (raw) -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "z", "run_id": "r", "event": "STARTED", "started_at": "2026-08-06T09:00:00+07:00"}, {"attempt_id": "z", "run_id": "r", "event": "PUBLISHED", "status": "PUBLISHED", "finished_at": "2026-08-06T09:03:00+07:00"}]), PV.ProvenanceError))
 
-# ── B3.2-P: commit fsync fail + rollback ยืนยันได้ -> UNCOMMITTED -> retry ปิด attempt ได้ ─
+# ── B3.2-P: record commit fsync fail (intent ok, rollback confirmed) -> UNCOMMITTED -> retry ปิด attempt ได้ ─
+# WAI: fsync call 1 = intent (ต้องผ่าน) · call 2 = record commit (ให้ล้ม) · call 3 = rollback (ผ่าน)
 _rfs = os.fsync
 F = _log("fsyncfail.jsonl")
 PV.append_event(F, _ev("f1", "r", "STARTED"))
 _n = {"c": 0}
-def _fsync_once_fail(fd):
+def _fsync_2nd_fail(fd):
     _n["c"] += 1
-    if _n["c"] == 1:
-        raise OSError("commit fsync fail")
+    if _n["c"] == 2:
+        raise OSError("record commit fsync fail")
     return _rfs(fd)
-os.fsync = _fsync_once_fail
+os.fsync = _fsync_2nd_fail
 try:
     unc = raises(lambda: PV.append_event(F, _ev("f1", "r", "PUBLISHED", status="PUBLISHED")), OSError)
 finally:
     os.fsync = _rfs
-check("B3.2-P: commit fsync fail + rollback confirmed -> UNCOMMITTED (reader เห็นแค่ STARTED)", unc and [r["event"] for r in PV.read_provenance(F)] == ["STARTED"] and PV.reconcile(PV.read_provenance(F))["f1"] == "INCOMPLETE")
+check("B3.2-P: record commit fsync fail + rollback confirmed -> UNCOMMITTED (reader เห็นแค่ STARTED, intent เคลียร์)", unc and [r["event"] for r in PV.read_provenance(F)] == ["STARTED"] and not os.path.exists(F + ".intent"))
 PV.append_event(F, _ev("f1", "r", "FAILED", status="FAILED"))
 check("B3.2-P: retry terminal หลัง rollback -> ปิด attempt ได้", PV.reconcile(PV.read_provenance(F))["f1"] == "FAILED")
 
-# ── B3.2-P.1: rollback ยืนยันไม่ได้ -> ProvenanceIndeterminate + poison (fail-closed) ─
-P = _log("poison.jsonl")
-PV.append_event(P, _ev("p1", "r", "STARTED"))
-os.fsync = lambda fd: (_ for _ in ()).throw(OSError("fsync fail always"))
-try:
-    ind = raises(lambda: PV.append_event(P, _ev("p1", "r", "PUBLISHED", status="PUBLISHED")), PV.ProvenanceIndeterminate)
-finally:
-    os.fsync = _rfs
-check("B3.2-P.1: commit + rollback fsync ล้ม -> ProvenanceIndeterminate + poison marker", ind and os.path.exists(P + ".poison"))
-check("B3.2-P.1: poisoned ledger -> read/append fail-closed", raises(lambda: PV.read_provenance(P), PV.ProvenanceIndeterminate) and raises(lambda: PV.append_event(P, _ev("p2", "r", "STARTED")), PV.ProvenanceIndeterminate))
+# ── B3.2-P.1: write-ahead intent ค้าง (crash กลาง append) -> read/append fail-closed จน operator repair ─
+IL = _log("intent.jsonl")
+PV.append_event(IL, _ev("i1", "r", "STARTED"))
+open(IL + ".intent", "w").close()                          # จำลอง append ก่อนหน้าไม่ยืนยัน outcome (crash)
+check("B3.2-P.1: unresolved intent -> read fail-closed", raises(lambda: PV.read_provenance(IL), PV.ProvenanceIndeterminate))
+check("B3.2-P.1: unresolved intent -> append fail-closed (ใต้ lock)", raises(lambda: PV.append_event(IL, _ev("i2", "r", "STARTED")), PV.ProvenanceIndeterminate))
+os.unlink(IL + ".intent")                                  # operator repair
+check("B3.2-P.1: repair intent -> อ่านได้ปกติ", PV.reconcile(PV.read_provenance(IL))["i1"] == "INCOMPLETE")
 
 # ── B3.2-P.2: post-commit release fail -> record ยัง durable (append ไม่ report fail) ─
 C2 = _log("postcommit.jsonl")
