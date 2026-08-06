@@ -26,7 +26,7 @@ import p2_reranker as RK
 def _s(x): return hashlib.sha256(x.encode()).hexdigest()
 _M4_AID, _M4_ATX = _s("mA"), _s("mtA"); _M4_PA = E._pair_sha256(_M4_AID, _M4_ATX)
 _M4_SID, _M4_STX = _s("mS"), _s("mtS"); _M4_PS = E._pair_sha256(_M4_SID, _M4_STX)
-_M4_CASE, _M4_ROLE = _s("m4-case-qc"), _s("m4-qc")
+_M4_CASE, _M4_ROLE = _s("m4-case-qc"), _s("s:qc")   # B2.1: role_identity = typed-id hash('s:'+effective_role)
 _M4_QV = _s("m4-qv")
 _M4_QT = _s("m4-qt")
 M4_FROZEN = {"cases": {_M4_CASE: {"role_identity_sha256": _M4_ROLE, "effective_role": "qc", "category": "negation",

@@ -29,7 +29,7 @@ def _raw(pcs): return hashlib.sha256(E._canonical_json(pcs)).hexdigest()
 AID, ATX = _s("A"), _s("tA"); PA = _pair(AID, ATX)
 BID, BTX = _s("B"), _s("tB"); PB = _pair(BID, BTX)
 SID, STX = _s("S"), _s("tS"); PS = _pair(SID, STX)
-QC, SALES = _s("qc"), _s("sales")
+QC, SALES = _s("s:qc"), _s("s:sales")   # B2.1: role_identity = typed-id hash('s:'+role) ตรง harness _id_hash
 CQC, CSA = _s("case-qc"), _s("case-sales")
 QVC, QVS = _s("qv-" + CQC), _s("qv-" + CSA)
 QTC, QTS = _s("qt-" + CQC), _s("qt-" + CSA)
@@ -187,6 +187,14 @@ check("B3: run evidence กับ malformed frozen -> error (fail-closed)", V(_M
 check("B3: _safe_m4_manifest_digest(malformed) -> None", E._safe_m4_manifest_digest(FROZEN_BAD) is None)
 check("M2: mixed-type unknown keys -> error list (ไม่ TypeError)", E.validate_m4_frozen_manifest({None: 1, 5: 2, "cases": {}}) != [])
 check("B2: frozen authorized_pairs ซ้ำ -> error", any("ซ้ำ" in e for e in E.validate_m4_frozen_manifest({"cases": {CQC: fcase(QC, "qc", "negation", [PA, PA], [PS], QVC, QTC)}, "required_categories": ["negation"], "evaluated_roles": ["qc"]})))
+# ── B2.1: role_identity ต้อง = typed-id hash(effective_role) + reject embedded manifest digest ──
+_bad_rid = {"cases": {CQC: {**fcase(QC, "qc", "negation", [PA], [PS], QVC, QTC), "role_identity_sha256": "9" * 64}},
+            "required_categories": ["negation"], "evaluated_roles": ["qc"]}
+check("B2.1: role_identity != hash(effective_role) -> frozen error", any("role_identity_sha256 != hash" in e for e in E.validate_m4_frozen_manifest(_bad_rid)))
+check("B2.1: role_identity ที่ถูก (typed-id) -> ผ่าน", E.validate_m4_frozen_manifest(FROZEN1) == [], E.validate_m4_frozen_manifest(FROZEN1))
+_embed = {"cases": {CQC: fcase(QC, "qc", "negation", [PA], [PS], QVC, QTC)}, "required_categories": ["negation"],
+          "evaluated_roles": ["qc"], "m4_case_manifest_sha256": _H}
+check("B2.1: embedded m4_case_manifest_sha256 -> unknown field error (ตัด two-source)", any("unknown/raw" in e for e in E.validate_m4_frozen_manifest(_embed)))
 
 # ── M1: exact hash-only (reject raw/unknown) ──────────────────────────────────
 _leak = copy.deepcopy(PC1); _leak[0]["raw_text"] = "SECRET-QUERY"

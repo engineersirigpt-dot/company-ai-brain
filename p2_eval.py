@@ -83,6 +83,11 @@ def _pair_sha256(point_id_sha256, text_sha256) -> str:
     return hashlib.sha256(f"{point_id_sha256}:{text_sha256}".encode("utf-8")).hexdigest()
 
 
+def _role_id_sha256(role) -> str:
+    """typed-id hash ของ role (str) — ต้องตรง harness `_id_hash` ('s:'+role) ; กัน role_identity ที่ forged (B2.1)"""
+    return hashlib.sha256(f"s:{role}".encode("utf-8")).hexdigest()
+
+
 # exact hash-only schema (M1) — reject unknown/raw fields ทุกระดับ
 _M4_TOP_KEYS = frozenset({"schema_version", "status", "isolated_interlock", "independent_oracle", "sentinel_reached_model",
                           "unauthorized_in_model_inputs", "scorer_kind", "evidence_stage", "selected_n", "selection_digest",
@@ -109,7 +114,7 @@ _M4_CASE_KEYS = frozenset({"case_id_sha256", "role_identity_sha256", "effective_
                            "rerank_output_pairs", "model_call_count", "model_input_count", "score_count",
                            "all_scores_finite", "status"})
 _M4_COMP_KEYS = frozenset({"point_id_sha256", "rerank_text_sha256", "pair_sha256"})
-_M4_FROZEN_KEYS = frozenset({"cases", "required_categories", "evaluated_roles", "m4_case_manifest_sha256"})
+_M4_FROZEN_KEYS = frozenset({"cases", "required_categories", "evaluated_roles"})   # B2.1: ไม่รับ embedded m4_case_manifest_sha256 (two-source ambiguity)
 _M4_FCASE_KEYS = frozenset({"role_identity_sha256", "effective_role", "category", "query_text_sha256",
                             "query_vector_sha256", "authorized_pairs", "sentinel_pairs"})
 # M4 run request (frozen pin/image/index) — validate_m4_run_evidence เทียบ exact ทุก field (B2)
@@ -164,6 +169,8 @@ def validate_m4_frozen_manifest(frozen) -> list:
             errs.append(f"{tag}: effective_role ต้องเป็น str ใน evaluated_roles")
         else:
             seen_roles.add(er)
+            if fc.get("role_identity_sha256") != _role_id_sha256(er):     # B2.1: recompute typed-id (กัน forged role_identity)
+                errs.append(f"{tag}: role_identity_sha256 != hash(effective_role) (typed-id)")
         if not _good_str(cat) or cat not in req:
             errs.append(f"{tag}: category ต้องเป็น str ใน required_categories")
         else:
@@ -828,8 +835,7 @@ def validate_m4_run_evidence(m4, frozen, expected, eval_hash, corpus_hash, run_m
         return errs + ["frozen manifest canonicalize/hash ไม่ได้ (malformed)"]
     if m4.get("m4_case_manifest_sha256") != man_digest:
         errs.append("m4 m4_case_manifest_sha256 != frozen manifest (recompute)")
-    if frozen.get("m4_case_manifest_sha256") not in (None, man_digest):
-        errs.append("frozen m4_case_manifest_sha256 ไม่ตรง cases (manifest ปนเปื้อน)")
+    # (B2.1) frozen ไม่มี embedded m4_case_manifest_sha256 แล้ว — validate_m4_frozen_manifest reject ตั้งแต่ต้น
     required = frozen.get("required_categories") or []
 
     # B2/B3: run-level proof binding — interlock/oracle=PASS ต้องมาคู่ proof observation ที่ recompute + observed==frozen

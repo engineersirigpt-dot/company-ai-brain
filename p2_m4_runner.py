@@ -215,4 +215,6 @@ def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout
     evidence["run_receipt_sha256"] = E.m4_run_receipt_sha256(receipt)
     path = AT.publish_m4_bundle(out_dir=out_dir, run_id=plan["run_id"], evidence=evidence, receipt=receipt,
                                 validate=lambda: RP.validate_m4_preflight_bundle(plan, frozen, evidence, receipt))
-    return {"status": "PUBLISHED", "path": path, "evidence": evidence, "receipt": receipt}
+    # M3.1: persist durability mode ใน operational result (Windows = atomic-visibility-only, POSIX = durable)
+    return {"status": "PUBLISHED", "path": path, "durability": AT.durability_mode(),
+            "evidence": evidence, "receipt": receipt}

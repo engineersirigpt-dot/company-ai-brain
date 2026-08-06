@@ -156,6 +156,21 @@ check("provenance: write ก่อน read", ISO.calls.index("write") < ISO.call
 check("provenance: observe interlock ก่อน write/seed", max(ISO.calls.index("count"), ISO.calls.index("ports"), ISO.calls.index("prod")) < ISO.calls.index("write") < ISO.calls.index("seed"))
 check("provenance: readback มาจาก read_marker", RESULT["evidence"]["isolation_proof"]["marker_readback_sha256"] == HN._id_hash("m4-run-uuid"))
 check("teardown ถูกเรียก (happy)", ISO.torn)
+check("M3.1: happy result มี durability mode", RESULT.get("durability") in ("durable", "atomic-visibility-only"))
+
+# ── B2.1: forged role_identity / embedded manifest -> RunnerError ก่อน provision ──────────────
+def attempt_frozen(exc, frozen):
+    d = fresh(); pt = ports()
+    ok = raises(lambda: RUN.run_m4a(plan=PLAN, frozen=frozen, cases=CASES, corpus=CORPUS, marker="m4-run-uuid",
+                                    ports=pt, out_dir=d, argv=["x"], stdout=b"", stderr=b""), exc)
+    shutil.rmtree(d, ignore_errors=True)
+    return ok, pt
+_cid = HN._id_hash("case-qc")
+_forged = {**FROZEN, "cases": {**FROZEN["cases"], _cid: {**FROZEN["cases"][_cid], "role_identity_sha256": "9" * 64}}}
+ok, pt = attempt_frozen(RUN.RunnerError, _forged)
+check("B2.1: forged role_identity ใน frozen -> RunnerError ก่อน provision", ok and pt.isolation.calls == [] and pt.scorer.queries == [])
+ok, pt = attempt_frozen(RUN.RunnerError, {**FROZEN, "m4_case_manifest_sha256": _H})
+check("B2.1: embedded m4_case_manifest_sha256 -> RunnerError ก่อน provision", ok and pt.isolation.calls == [])
 
 # ── B1: interlock ผิด -> abort ก่อน write/seed/model (fail-before-mutate) ──────
 for label, iso in [("count!=0", FakeIso(initial_count=5)), ("ports!=0", FakeIso(published_ports=1)), ("production", FakeIso(is_prod=True))]:
