@@ -1,22 +1,26 @@
 """
-P2 M4a operational wrapper (Codex constraints 1/2/3 + reviews 0e04eb7/8066f0e) — **pure/offline** ; รัน M4a จริง = ยัง NO-GO
+P2 M4a operational wrapper (Codex constraints 1/2/3 + reviews 0e04eb7/8066f0e/bf0e9b7) — **pure/offline** ; รัน M4a จริง = ยัง NO-GO
 
-event-ledger + exception-authority + content binding:
-  - attempt_id: wrapper **สร้างเอง (crypto-random)** หรือ validate token ที่ส่งมา — ห้าม None/blank/control/oversize (B3.1)
-  - append **STARTED** (bind immutable RunPlan metadata หลัง pure validate) → run → **terminal** (attempt_id เดียว) ผ่าน
-    `append_event` state machine (create-once/first, terminal ครั้งเดียวตาม STARTED) ; STARTED เขียนไม่ได้ = abort (B3)
-  - terminal เขียนไม่ได้ = **PROVENANCE_UNCONFIRMED** (ไม่ report clean) ; Cleanup/Durability → DEGRADED (constraint 2)
-  - M3: STARTED bind run_manifest/m4_case_manifest/model/image + out_dir realpath ; terminal bind capability +
-    artifact/evidence/receipt digest (recompute ได้) ; started_at/finished_at แยกจาก trusted clock
+event-ledger + exception-authority + trusted clock + fail-closed content binding:
+  - attempt_id: wrapper สร้างเอง (crypto-random) หรือ validate token — ห้าม None/blank/control/oversize (B3.1)
+  - **trusted clock port**: wrapper เรียก `clock.now_iso()` เองที่ STARTED/terminal + validate ISO-8601+tz + monotonic
+    (ไม่รับ timestamp string จาก caller) (M3.1)
+  - append STARTED (bind immutable RunPlan metadata) → run → terminal ผ่าน `append_event` state machine ;
+    STARTED เขียนไม่ได้ = abort ; terminal เขียนไม่ได้ = PROVENANCE_UNCONFIRMED (B3)
+  - **PUBLISHED fail-closed** (M3.2): reload final bundle จากดิสก์ → recompute artifact/evidence/receipt digest +
+    **re-run public bundle validator** ก่อน terminal ; read/hash/validate ล้ม = ไม่ PUBLISHED (FAILED/verify_publish)
   - M2: provenance เก็บเฉพาะ sanitized (error_type) — ไม่เก็บ raw exception text
 """
 from __future__ import annotations
 import hashlib
+import json
 import os
 import re
 import secrets
+from datetime import datetime
 
 import p2_atomic as AT
+import p2_eval as E
 import p2_fs_probe as FS
 import p2_provenance as PV
 import p2_runplan as RP
@@ -33,6 +37,22 @@ def _resolve_attempt_id(attempt_id):
     return attempt_id
 
 
+def _now(clock) -> str:
+    t = clock.now_iso()                                     # M3.1: trusted clock (ไม่รับ string จาก caller)
+    if not E._valid_iso_tz(t):
+        raise ValueError(f"clock.now_iso() ไม่ใช่ ISO-8601+tz: {t!r}")
+    return t
+
+
+def _monotonic(started: str, candidate: str) -> str:
+    try:
+        s = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        c = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+        return candidate if c >= s else started            # clamp non-monotonic (clock ของ wrapper ไม่ควรถอยหลัง)
+    except ValueError:
+        return started
+
+
 def _bundle_path(out_dir: str, run_id) -> str:
     return os.path.join(out_dir, str(run_id) + ".bundle.json")
 
@@ -45,13 +65,39 @@ def _sha256_file(path):
         return None
 
 
+def _verify_published(plan, frozen, path) -> dict:
+    """
+    M3.2 fail-closed: โหลด final bundle จากดิสก์ → recompute artifact/evidence/receipt digest +
+    **re-run public bundle validator บน content ที่โหลด** (กัน TOCTOU/tamper/artifact หาย). ล้ม = raise
+    """
+    with open(path, "rb") as f:
+        raw = f.read()
+    artifact_sha256 = hashlib.sha256(raw).hexdigest()
+    if not (isinstance(artifact_sha256, str) and len(artifact_sha256) == 64):
+        raise ValueError("artifact_sha256 ไม่ใช่ 64-hex")
+    bundle = json.loads(raw.decode("utf-8"))
+    ev, rc = bundle.get("evidence"), bundle.get("receipt")
+    if not isinstance(ev, dict) or not isinstance(rc, dict):
+        raise ValueError("final bundle ไม่มี evidence/receipt dict")
+    berrs = RP.validate_m4_preflight_bundle(plan, frozen, ev, rc)
+    if berrs:
+        raise ValueError(f"final bundle ไม่ผ่าน public gate ({len(berrs)} errors): {berrs[:2]}")
+    ebs, rrs = ev.get("evidence_body_sha256"), ev.get("run_receipt_sha256")
+    if not (E._is_sha256(ebs) and E._is_sha256(rrs)):
+        raise ValueError("evidence_body/run_receipt digest ใน bundle ไม่ใช่ sha256")
+    return {"artifact_sha256": artifact_sha256, "evidence_body_sha256": ebs, "run_receipt_sha256": rrs}
+
+
 def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus, marker, ports, argv, stdout, stderr,
-                        started_at, finished_at, attempt_id=None) -> dict:
+                        clock, attempt_id=None) -> dict:
     aid = _resolve_attempt_id(attempt_id)
     run_id = plan.get("run_id") if isinstance(plan, dict) else None
-    plan_errs = RP.validate_run_plan(plan) if isinstance(plan, dict) else ["plan ไม่ใช่ dict"]
+    try:
+        started_at = _now(clock)
+    except Exception as e:                                  # clock ไม่น่าเชื่อ → abort ก่อน STARTED/provision
+        return {"attempt_id": aid, "run_id": run_id, "status": "FAILED", "phase": "clock", "error_type": type(e).__name__}
 
-    # B3: STARTED ก่อน run + M3: bind immutable RunPlan metadata (เมื่อ plan valid) + out_dir realpath + started_at
+    plan_errs = RP.validate_run_plan(plan) if isinstance(plan, dict) else ["plan ไม่ใช่ dict"]
     started = {"attempt_id": aid, "run_id": run_id, "event": "STARTED", "started_at": started_at,
                "out_dir_realpath": os.path.realpath(out_dir), "plan_valid": not plan_errs}
     if not plan_errs:
@@ -65,8 +111,12 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
                 "error_type": type(e).__name__}
 
     def _terminal(status, phase, **extra):
-        rec = {"attempt_id": aid, "run_id": run_id, "event": status, "status": status,
-               "phase": phase, "finished_at": finished_at, **extra}          # M2: sanitized fields เท่านั้น
+        try:
+            finished_at = _monotonic(started_at, _now(clock))   # trusted clock ครั้งเดียว/terminal (M3.1)
+        except Exception:
+            finished_at = started_at
+        rec = {"attempt_id": aid, "run_id": run_id, "event": status, "status": status, "phase": phase,
+               "finished_at": finished_at, **extra}
         try:
             PV.append_event(provenance_log, rec)
         except Exception as pe:
@@ -94,10 +144,14 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
     except Exception as e:
         return _terminal("FAILED", "run", capability=cap_sum, error_type=type(e).__name__)
 
-    ev = result["evidence"]
+    # M3.2: PUBLISHED ต้อง verify final bundle จากดิสก์ได้ก่อน (fail-closed) — ไม่งั้นไม่ใช่ clean PUBLISHED
+    try:
+        binding = _verify_published(plan, frozen, result["path"])
+    except Exception as e:
+        return _terminal("FAILED", "verify_publish", capability=cap_sum, path=result["path"], error_type=type(e).__name__)
+
     term = _terminal("PUBLISHED", "complete", capability=cap_sum, durability_mode=result.get("durability"),
-                     path=result["path"], artifact_sha256=_sha256_file(result["path"]),
-                     evidence_body_sha256=ev.get("evidence_body_sha256"), run_receipt_sha256=ev.get("run_receipt_sha256"))
+                     path=result["path"], **binding)
     if term.get("status") != "PUBLISHED":
         return term
-    return {**term, "evidence": ev, "receipt": result["receipt"]}
+    return {**term, "evidence": result["evidence"], "receipt": result["receipt"]}

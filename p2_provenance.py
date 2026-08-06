@@ -111,32 +111,56 @@ def _parse_committed(committed: bytes) -> list:
     return out
 
 
-def _validate_transition(records: list, record: dict) -> None:
-    aid, ev = record.get("attempt_id"), record.get("event")
-    if not isinstance(aid, str) or not aid:
-        raise ProvenanceError("event record ต้องมี attempt_id (str)")
-    started = [r for r in records if r.get("attempt_id") == aid and r.get("event") == "STARTED"]
-    terminal = [r for r in records if r.get("attempt_id") == aid and r.get("event") in _TERMINALS]
-    if ev == "STARTED":
-        if started:
-            raise ProvenanceError(f"duplicate STARTED สำหรับ attempt {aid!r} (create-once)")
-    elif ev in _TERMINALS:
-        if not started:
-            raise ProvenanceError(f"terminal ก่อน STARTED สำหรับ attempt {aid!r}")
-        if terminal:
-            raise ProvenanceError(f"duplicate terminal สำหรับ attempt {aid!r}")
-        if record.get("run_id") != started[0].get("run_id"):
-            raise ProvenanceError(f"terminal run_id != STARTED สำหรับ attempt {aid!r}")
-    else:
-        raise ProvenanceError(f"event ไม่รู้จัก: {ev!r}")
+def _reduce(records: list) -> dict:
+    """
+    **reducer เดียว** (order-sensitive) ใช้ทั้ง append validation และ reconcile (B3.1-R) —
+    consume record ตามลำดับ: state ว่าง → รับเฉพาะ STARTED ; state STARTED → รับ terminal ครั้งเดียว
+    (run_id ตรง STARTED + `status == event`) ; state terminal → รับ event เพิ่มไม่ได้
+    คืน {attempt_id: terminal_status | 'INCOMPLETE'} ; ลำดับ/run/status ผิด → ProvenanceError
+    """
+    state = {}
+    for r in records:
+        if not isinstance(r, dict):
+            raise ProvenanceError("record ไม่ใช่ dict")
+        aid, ev, rid = r.get("attempt_id"), r.get("event"), r.get("run_id")
+        if not isinstance(aid, str) or not aid:
+            raise ProvenanceError("record ไม่มี attempt_id (str)")
+        cur = state.get(aid)
+        if ev == "STARTED":
+            if cur is not None:
+                raise ProvenanceError(f"STARTED ซ้ำ/ผิดลำดับ: {aid}")
+            state[aid] = {"run_id": rid, "terminal": None}
+        elif ev in _TERMINALS:
+            if cur is None:
+                raise ProvenanceError(f"terminal ก่อน STARTED: {aid}")
+            if cur["terminal"] is not None:
+                raise ProvenanceError(f"terminal ซ้ำ: {aid}")
+            if rid != cur["run_id"]:
+                raise ProvenanceError(f"terminal run_id != STARTED: {aid}")
+            if r.get("status") != ev:
+                raise ProvenanceError(f"status != event: {aid}")
+            cur["terminal"] = ev
+        else:
+            raise ProvenanceError(f"event ไม่รู้จัก: {ev!r}")
+    return {aid: (s["terminal"] or "INCOMPLETE") for aid, s in state.items()}
+
+
+def _validate_transition(committed: list, record: dict) -> None:
+    _reduce(committed + [record])          # reuse reducer เดียวกับ reconcile
 
 
 def _locked_append(log_path: str, record: dict, validate_state) -> None:
+    """
+    commit boundary = `os.fsync(fd)` สำเร็จ (B3.2-P): exception ก่อน commit → **rollback ftruncate กลับ `cut`**
+    (record ที่ล้มไม่ปรากฏ ; retry ปิด attempt ได้) ; exception หลัง commit (close/release) = record durable แล้ว
+    (committed-with-cleanup-warning ไม่ใช่ uncommitted)
+    """
     line = _serialize(record)
     d = os.path.dirname(log_path)
     if d:
         os.makedirs(d, exist_ok=True)
     lockfd = _lock(log_path)
+    committed = False
     try:
         fd = os.open(log_path, os.O_RDWR | os.O_CREAT | _O_BINARY, 0o644)
         try:
@@ -144,20 +168,33 @@ def _locked_append(log_path: str, record: dict, validate_state) -> None:
             cut = data.rfind(b"\n") + 1                    # committed = ถึงหลัง \n สุดท้าย (B3.2)
             if validate_state is not None:
                 validate_state(_parse_committed(data[:cut]), record)
-            if cut != len(data):                           # มี uncommitted tail → ตัดทิ้งก่อน append
+            if cut != len(data):                           # uncommitted tail → ตัดทิ้งก่อน append
                 os.ftruncate(fd, cut)
                 os.fsync(fd)
             os.lseek(fd, cut, os.SEEK_SET)
-            mv = memoryview(line)
-            while mv:
-                n = os.write(fd, mv)
-                if n <= 0:
-                    raise ProvenanceError("os.write คืน 0 (เขียนไม่คืบ)")
-                mv = mv[n:]
-            os.fsync(fd)
+            try:
+                mv = memoryview(line)
+                while mv:
+                    n = os.write(fd, mv)
+                    if n <= 0:
+                        raise ProvenanceError("os.write คืน 0 (เขียนไม่คืบ)")
+                    mv = mv[n:]
+                os.fsync(fd)                               # ← durable commit boundary
+                committed = True
+            except BaseException:
+                if not committed:                          # rollback: ลบ record ที่ล้ม (in-process มองไม่เห็น)
+                    try:
+                        os.ftruncate(fd, cut)
+                    except OSError:
+                        pass
+                    try:
+                        os.fsync(fd)
+                    except OSError:
+                        pass
+                raise
             created = (cut == 0)
         finally:
-            os.close(fd)
+            os.close(fd)                                   # หลัง commit: close ล้ม = cleanup warning (record durable แล้ว)
         if created and d and os.name == "posix":
             dfd = os.open(d, os.O_RDONLY)
             try:
@@ -189,27 +226,6 @@ def read_provenance(log_path: str) -> list:
 
 
 def reconcile(records: list) -> dict:
-    """map attempt_id → terminal status ; STARTED ไม่มี terminal = INCOMPLETE ; transition ผิด = ProvenanceError"""
-    st = {}
-    for r in records:
-        aid, ev = r.get("attempt_id"), r.get("event")
-        if not isinstance(aid, str):
-            raise ProvenanceError("record ไม่มี attempt_id (str)")
-        s = st.setdefault(aid, {"started": 0, "terminal": None, "tcount": 0})
-        if ev == "STARTED":
-            s["started"] += 1
-        elif ev in _TERMINALS:
-            s["terminal"] = ev
-            s["tcount"] += 1
-        else:
-            raise ProvenanceError(f"event ไม่รู้จัก: {ev!r}")
-    out = {}
-    for aid, s in st.items():
-        if s["started"] > 1:
-            raise ProvenanceError(f"duplicate STARTED: {aid}")
-        if s["tcount"] > 1:
-            raise ProvenanceError(f"duplicate terminal: {aid}")
-        if s["terminal"] and s["started"] == 0:
-            raise ProvenanceError(f"terminal ก่อน STARTED: {aid}")
-        out[aid] = s["terminal"] or ("INCOMPLETE" if s["started"] else "UNKNOWN")
-    return out
+    """map attempt_id → terminal status ; STARTED ไม่มี terminal = INCOMPLETE ; ลำดับ/run/status ผิด = ProvenanceError
+    (order-sensitive — ใช้ reducer เดียวกับ append validation, B3.1-R)"""
+    return _reduce(records)

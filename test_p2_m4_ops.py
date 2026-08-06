@@ -20,6 +20,7 @@ import p2_eval as E
 import p2_fs_probe as FS
 import p2_m4_harness as HN
 import p2_m4_ops as OPS
+import p2_m4_runner as RUN
 import p2_provenance as PV
 import p2_reranker as RK
 import p2_runplan as RP
@@ -106,9 +107,13 @@ def _ports(iso=None, scorer=None):
     return types.SimpleNamespace(scorer=scorer or PinnedScorer({"ta": 2.0, "tb": 2.0}), isolation=iso or FakeIso(),
                                  provider=FakeProvider(PROV), oracle=FakeOracle(UNFIL, VIS), clock=FakeClock())
 AID = "att-00000001"
-def _run(out_dir, log, ports, plan=PLAN, attempt_id=AID):
-    return OPS.run_m4a_operational(provenance_log=log, attempt_id=attempt_id, out_dir=out_dir,
-                                   started_at="2026-08-06T09:00:00+07:00", finished_at="2026-08-06T09:03:00+07:00",
+class OpsClock:                                        # trusted clock (M3.1) — deterministic ISO+tz เพิ่มขึ้น
+    def __init__(s, vals): s.vals = list(vals); s.i = 0
+    def now_iso(s):
+        v = s.vals[min(s.i, len(s.vals) - 1)]; s.i += 1; return v
+def _clk(): return OpsClock(["2026-08-06T09:00:00+07:00", "2026-08-06T09:03:00+07:00"])
+def _run(out_dir, log, ports, plan=PLAN, attempt_id=AID, clock=None):
+    return OPS.run_m4a_operational(provenance_log=log, attempt_id=attempt_id, out_dir=out_dir, clock=clock or _clk(),
                                    plan=plan, frozen=FROZEN, cases=CASES, corpus=CORPUS, marker="m4-run-uuid",
                                    ports=ports, argv=["python", "p2_m4_runner.py"], stdout=b"ok", stderr=b"")
 
@@ -122,6 +127,46 @@ check("ledger STARTED→PUBLISHED + reconcile", [x["event"] for x in _evs] == ["
 _st, _tm = _evs[0], _evs[1]
 check("M3: STARTED bind run_manifest/m4_manifest/model/image/out_dir + started_at", _st["run_manifest_sha256"] == RP.run_manifest_sha256(PLAN) and _st["m4_case_manifest_sha256"] == PLAN["m4_case_manifest_sha256"] and _st["model_revision"] == PLAN["model_commit"] and _st["image_digest"] == PLAN["image_digest"] and _st["out_dir_realpath"] == os.path.realpath(d) and _st["started_at"] == "2026-08-06T09:00:00+07:00")
 check("M3: terminal bind capability + artifact/evidence/receipt digest + finished_at (แยก)", _tm["capability"]["hardlink_no_clobber"] and _tm["artifact_sha256"] == __import__("hashlib").sha256(open(r["path"], "rb").read()).hexdigest() and _tm["evidence_body_sha256"] == r["evidence"]["evidence_body_sha256"] and _tm["run_receipt_sha256"] == r["evidence"]["run_receipt_sha256"] and _tm["finished_at"] == "2026-08-06T09:03:00+07:00")
+check("M3.1: started_at/finished_at มาจาก trusted clock (monotonic)", _st["started_at"] == "2026-08-06T09:00:00+07:00" and _tm["finished_at"] > _st["started_at"])
+shutil.rmtree(d, ignore_errors=True)
+
+# ── M3.1: clock ไม่น่าเชื่อ -> FAILED/clock ก่อน STARTED/provision ─────────────
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+pt = _ports()
+r = _run(d, log, pt, clock=OpsClock(["not-a-timestamp"]))
+check("M3.1: clock ให้ค่าไม่ใช่ ISO+tz -> FAILED/clock + ไม่ provision + ไม่มี STARTED", r["status"] == "FAILED" and r["phase"] == "clock" and pt.isolation.calls == [] and PV.read_provenance(log) == [])
+shutil.rmtree(d, ignore_errors=True)
+
+# ── M3.2: PUBLISHED fail-closed — verify final bundle จากดิสก์ ─────────────────
+# _verify_published: valid bundle -> 64-hex digests ; tampered/invalid -> ValueError
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+r = _run(d, log, _ports())
+_vb = OPS._verify_published(PLAN, FROZEN, r["path"])
+check("M3.2: _verify_published(valid) -> artifact 64-hex + digests", len(_vb["artifact_sha256"]) == 64 and E._is_sha256(_vb["evidence_body_sha256"]) and E._is_sha256(_vb["run_receipt_sha256"]))
+with open(r["path"], "w", encoding="utf-8") as f:
+    f.write('{"evidence":{"x":1},"receipt":{"y":2}}')     # tamper บนดิสก์
+check("M3.2: _verify_published(tampered) -> ValueError (re-run public gate จับ)", raises(lambda: OPS._verify_published(PLAN, FROZEN, r["path"]), ValueError))
+shutil.rmtree(d, ignore_errors=True)
+# wrapper: run สำเร็จแต่ final bundle invalid/หาย -> FAILED/verify_publish (ไม่ clean PUBLISHED)
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+_bad = os.path.join(d, "run-1.bundle.json"); open(_bad, "w", encoding="utf-8").write("{not a bundle}")
+_orig_run = RUN.run_m4a
+RUN.run_m4a = lambda **kw: {"status": "PUBLISHED", "path": _bad, "durability": "atomic-visibility-only",
+                            "evidence": {"evidence_body_sha256": "a" * 64, "run_receipt_sha256": "a" * 64}, "receipt": {}}
+try:
+    r = _run(d, log, _ports())
+finally:
+    RUN.run_m4a = _orig_run
+check("M3.2: final bundle invalid บนดิสก์ -> FAILED/verify_publish (ไม่ clean PUBLISHED + ไม่แนบ evidence)", r["status"] == "FAILED" and r["phase"] == "verify_publish" and "evidence" not in r and PV.reconcile(PV.read_provenance(log))[AID] == "FAILED")
+shutil.rmtree(d, ignore_errors=True)
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+RUN.run_m4a = lambda **kw: {"status": "PUBLISHED", "path": os.path.join(d, "nope.bundle.json"), "durability": "durable",
+                            "evidence": {"evidence_body_sha256": "a" * 64, "run_receipt_sha256": "a" * 64}, "receipt": {}}
+try:
+    r = _run(d, log, _ports())
+finally:
+    RUN.run_m4a = _orig_run
+check("M3.2: final bundle หาย (read fail) -> FAILED/verify_publish", r["status"] == "FAILED" and r["phase"] == "verify_publish")
 shutil.rmtree(d, ignore_errors=True)
 
 # ── B3.1: attempt_id generate/validate ────────────────────────────────────────

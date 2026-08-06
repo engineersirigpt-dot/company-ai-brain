@@ -96,6 +96,26 @@ check("reconcile STARTED-only -> INCOMPLETE", PV.reconcile([{"attempt_id": "x", 
 check("reconcile terminal-only -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "y", "event": "PUBLISHED"}]), PV.ProvenanceError))
 check("reconcile duplicate terminal -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "z", "event": "STARTED"}, {"attempt_id": "z", "event": "PUBLISHED"}, {"attempt_id": "z", "event": "FAILED"}]), PV.ProvenanceError))
 
+# ── B3.1-R: reconcile order-sensitive (ลำดับ/run/status) ──────────────────────
+check("reconcile PUBLISHED-ก่อน-STARTED -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o1", "r", "PUBLISHED", status="PUBLISHED"), _ev("o1", "r", "STARTED")]), PV.ProvenanceError))
+check("reconcile terminal run_id != STARTED -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o2", "r1", "STARTED"), _ev("o2", "r2", "FAILED", status="FAILED")]), PV.ProvenanceError))
+check("reconcile status != event -> ProvenanceError", raises(lambda: PV.reconcile([_ev("o3", "r", "STARTED"), _ev("o3", "r", "PUBLISHED", status="FAILED")]), PV.ProvenanceError))
+check("append_event = reducer เดียวกับ reconcile (status != event) -> ProvenanceError", raises(lambda: PV.append_event(_log("se.jsonl"), _ev("se1", "r", "STARTED")) or PV.append_event(_log("se.jsonl"), _ev("se1", "r", "PUBLISHED", status="FAILED")), PV.ProvenanceError))
+
+# ── B3.2-P: terminal fsync fail -> rollback (record ไม่ปรากฏ) -> retry ปิด attempt ได้ ─
+F = _log("fsyncfail.jsonl")
+PV.append_event(F, _ev("f1", "r", "STARTED"))
+_rfs = os.fsync
+os.fsync = lambda fd: (_ for _ in ()).throw(OSError("fsync fail"))
+try:
+    fsync_raised = raises(lambda: PV.append_event(F, _ev("f1", "r", "PUBLISHED", status="PUBLISHED")), OSError)
+finally:
+    os.fsync = _rfs
+check("B3.2-P: terminal fsync fail -> exception", fsync_raised)
+check("B3.2-P: rolled back — reader เห็นแค่ STARTED + reconcile INCOMPLETE (result ไม่ขัด disk)", [r["event"] for r in PV.read_provenance(F)] == ["STARTED"] and PV.reconcile(PV.read_provenance(F))["f1"] == "INCOMPLETE")
+PV.append_event(F, _ev("f1", "r", "FAILED", status="FAILED"))
+check("B3.2-P: retry terminal หลัง rollback -> ปิด attempt ได้", PV.reconcile(PV.read_provenance(F))["f1"] == "FAILED")
+
 # ── concurrent writers (lock mutual exclusion) ───────────────────────────────
 CC = _log("conc.jsonl")
 def _worker(i):
