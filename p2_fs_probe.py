@@ -26,6 +26,7 @@ def probe_output_fs(out_dir: str) -> dict:
     """
     probe_dir = None
     ok = False
+    primary = None
     try:
         os.makedirs(out_dir, exist_ok=True)
         probe_dir = tempfile.mkdtemp(prefix=".fsprobe.", dir=out_dir)
@@ -53,14 +54,18 @@ def probe_output_fs(out_dir: str) -> dict:
                   "durability_mode": durability, "out_dir": os.path.realpath(out_dir)}
         ok = True
         return result
-    except CapabilityError:
+    except CapabilityError as e:
+        primary = e
         raise
     except OSError as e:                                    # B2: normalize operational fs error ทุกชนิด
-        raise CapabilityError(f"filesystem operation ล้มบน output fs: {e!r}") from e
+        primary = CapabilityError(f"filesystem operation ล้มบน output fs: {e!r}")
+        raise primary from e
     finally:
         if probe_dir is not None:
             try:
                 shutil.rmtree(probe_dir)                    # B2: ไม่ ignore_errors เป็น authority
             except OSError as ce:
-                if ok:                                     # success path เท่านั้น (ไม่กลบ error เดิม)
+                if ok:                                     # success path: cleanup fail → probe fail
                     raise CapabilityError(f"cleanup probe dir ล้ม (ตรวจ manual: {probe_dir}): {ce!r}") from ce
+                elif primary is not None:                  # M1.2: failure path — แนบ cleanup + path ไม่กลบ primary
+                    primary.add_note(f"cleanup probe dir ล้ม (ตรวจ manual: {probe_dir}): {ce!r}")

@@ -28,6 +28,11 @@ res = []
 def check(name, cond, detail=""):
     res.append(bool(cond))
     print(("PASS " if cond else "FAIL ") + name + ("" if cond else f"  :: {detail}"))
+def raises(fn, exc=Exception):
+    try:
+        fn(); return False
+    except exc:
+        return True
 
 _H = "a" * 64
 IC = {"model_name": RK.RERANKER_MODEL, "max_length": 512, "batch_size": 16, "device": "cpu", "dtype": "float32"}
@@ -100,30 +105,47 @@ class SecretScorer:                                   # metadata() raise excepti
 def _ports(iso=None, scorer=None):
     return types.SimpleNamespace(scorer=scorer or PinnedScorer({"ta": 2.0, "tb": 2.0}), isolation=iso or FakeIso(),
                                  provider=FakeProvider(PROV), oracle=FakeOracle(UNFIL, VIS), clock=FakeClock())
-def _run(out_dir, log, ports, attempt_id="att-1"):
-    return OPS.run_m4a_operational(provenance_log=log, attempt_id=attempt_id, now="2026-08-06T09:00:00+07:00", out_dir=out_dir,
-                                   plan=PLAN, frozen=FROZEN, cases=CASES, corpus=CORPUS, marker="m4-run-uuid",
+AID = "att-00000001"
+def _run(out_dir, log, ports, plan=PLAN, attempt_id=AID):
+    return OPS.run_m4a_operational(provenance_log=log, attempt_id=attempt_id, out_dir=out_dir,
+                                   started_at="2026-08-06T09:00:00+07:00", finished_at="2026-08-06T09:03:00+07:00",
+                                   plan=plan, frozen=FROZEN, cases=CASES, corpus=CORPUS, marker="m4-run-uuid",
                                    ports=ports, argv=["python", "p2_m4_runner.py"], stdout=b"ok", stderr=b"")
 
 
-# ── PUBLISHED + STARTED→terminal ledger ───────────────────────────────────────
+# ── PUBLISHED + ledger + M3 metadata binding ──────────────────────────────────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 r = _run(d, log, _ports())
-check("PUBLISHED status + durability + path + evidence/receipt", r["status"] == "PUBLISHED" and r["durability_mode"] in ("durable", "atomic-visibility-only") and os.path.isfile(r["path"]) and "evidence" in r)
-_ev = PV.read_provenance(log)
-check("ledger: STARTED ก่อน terminal PUBLISHED (attempt เดียว)", [x["event"] for x in _ev] == ["STARTED", "PUBLISHED"])
-check("reconcile -> PUBLISHED", PV.reconcile(_ev)["att-1"] == "PUBLISHED")
+check("PUBLISHED + durability + path + evidence/receipt", r["status"] == "PUBLISHED" and r["durability_mode"] in ("durable", "atomic-visibility-only") and os.path.isfile(r["path"]) and "evidence" in r)
+_evs = PV.read_provenance(log)
+check("ledger STARTED→PUBLISHED + reconcile", [x["event"] for x in _evs] == ["STARTED", "PUBLISHED"] and PV.reconcile(_evs)[AID] == "PUBLISHED")
+_st, _tm = _evs[0], _evs[1]
+check("M3: STARTED bind run_manifest/m4_manifest/model/image/out_dir + started_at", _st["run_manifest_sha256"] == RP.run_manifest_sha256(PLAN) and _st["m4_case_manifest_sha256"] == PLAN["m4_case_manifest_sha256"] and _st["model_revision"] == PLAN["model_commit"] and _st["image_digest"] == PLAN["image_digest"] and _st["out_dir_realpath"] == os.path.realpath(d) and _st["started_at"] == "2026-08-06T09:00:00+07:00")
+check("M3: terminal bind capability + artifact/evidence/receipt digest + finished_at (แยก)", _tm["capability"]["hardlink_no_clobber"] and _tm["artifact_sha256"] == __import__("hashlib").sha256(open(r["path"], "rb").read()).hexdigest() and _tm["evidence_body_sha256"] == r["evidence"]["evidence_body_sha256"] and _tm["run_receipt_sha256"] == r["evidence"]["run_receipt_sha256"] and _tm["finished_at"] == "2026-08-06T09:03:00+07:00")
+shutil.rmtree(d, ignore_errors=True)
+
+# ── B3.1: attempt_id generate/validate ────────────────────────────────────────
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+r = _run(d, log, _ports(), attempt_id=None)
+check("B3.1: attempt_id=None -> generate (crypto-random) + PUBLISHED", r["status"] == "PUBLISHED" and r["attempt_id"].startswith("att-") and len(r["attempt_id"]) >= 12)
+check("B3.1: generated attempt_id ใน ledger ตรงกัน", PV.read_provenance(log)[0]["attempt_id"] == r["attempt_id"])
+check("B3.1: attempt_id ไม่ปลอดภัย -> ValueError", raises(lambda: _run(tempfile.mkdtemp(prefix="p2ops-"), os.path.join(d, "x.jsonl"), _ports(), attempt_id="bad id!"), ValueError))
 shutil.rmtree(d, ignore_errors=True)
 
 # ── FAILED (interlock ผิด → RunnerError) ──────────────────────────────────────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 r = _run(d, log, _ports(iso=FakeIso(initial_count=5)))
-check("FAILED status + phase run + ไม่มี artifact", r["status"] == "FAILED" and r["phase"] == "run" and not os.path.exists(os.path.join(d, "run-1.bundle.json")))
-check("FAILED ledger: STARTED + FAILED(error_type)", [x["event"] for x in PV.read_provenance(log)] == ["STARTED", "FAILED"] and PV.read_provenance(log)[1]["error_type"] == "RunnerError")
+check("FAILED phase run + ไม่มี artifact + ledger", r["status"] == "FAILED" and r["phase"] == "run" and not os.path.exists(os.path.join(d, "run-1.bundle.json")) and PV.reconcile(PV.read_provenance(log))[AID] == "FAILED")
 shutil.rmtree(d, ignore_errors=True)
 
-# ── DEGRADED (durability fail หลัง publish — treat exception เป็น authority) ───
-# probe เรียก AT._fsync_dir ครั้งแรก (ต้องผ่าน) แล้ว publish เรียกครั้งสอง (ให้ล้ม → DurabilityUnconfirmed)
+# ── plan invalid -> FAILED/plan_invalid (STARTED plan_valid=False, ไม่ provision) ──
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
+pt = _ports()
+r = _run(d, log, pt, plan={**PLAN, "run_id": "bad id!"})
+check("plan invalid -> FAILED/plan_invalid + ไม่ provision + STARTED plan_valid=False", r["status"] == "FAILED" and r["phase"] == "plan_invalid" and pt.isolation.calls == [] and PV.read_provenance(log)[0]["plan_valid"] is False)
+shutil.rmtree(d, ignore_errors=True)
+
+# ── DEGRADED (durability fail หลัง publish) ───────────────────────────────────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 _orig = AT._fsync_dir; _fc = {"n": 0}
 def _fsync_2nd(p):
@@ -136,8 +158,7 @@ try:
     r = _run(d, log, _ports())
 finally:
     AT._fsync_dir = _orig
-check("DEGRADED (จาก DurabilityUnconfirmed) + artifact ปรากฏแต่ไม่ report PUBLISHED", r["status"] == "DEGRADED" and r["error_type"] == "DurabilityUnconfirmed" and os.path.isfile(os.path.join(d, "run-1.bundle.json")))
-check("DEGRADED ledger terminal", PV.reconcile(PV.read_provenance(log))["att-1"] == "DEGRADED")
+check("DEGRADED (DurabilityUnconfirmed) + artifact ปรากฏแต่ไม่ report PUBLISHED", r["status"] == "DEGRADED" and r["error_type"] == "DurabilityUnconfirmed" and os.path.isfile(os.path.join(d, "run-1.bundle.json")) and PV.reconcile(PV.read_provenance(log))[AID] == "DEGRADED")
 shutil.rmtree(d, ignore_errors=True)
 
 # ── CapabilityError (fs_probe fail → ไม่ provision/model) ──────────────────────
@@ -149,38 +170,38 @@ try:
     r = _run(d, log, pt)
 finally:
     FS.probe_output_fs = _op
-check("CapabilityError -> FAILED phase fs_probe + ไม่ provision/model", r["status"] == "FAILED" and r["phase"] == "fs_probe" and pt.isolation.calls == [] and pt.scorer.queries == [])
+check("CapabilityError -> FAILED/fs_probe + ไม่ provision/model", r["status"] == "FAILED" and r["phase"] == "fs_probe" and pt.isolation.calls == [] and pt.scorer.queries == [])
 
-# ── B3: STARTED-append fail -> abort ก่อน run ; terminal-append fail -> PROVENANCE_UNCONFIRMED ──
+# ── B3: STARTED-append fail -> abort ; terminal-append fail -> PROVENANCE_UNCONFIRMED ──
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
-_ap = PV.append_provenance
-PV.append_provenance = lambda l, rec: (_ for _ in ()).throw(OSError("log write fail"))
+_ae = PV.append_event
+PV.append_event = lambda l, rec: (_ for _ in ()).throw(OSError("log write fail"))
 pt = _ports()
 try:
     r = _run(d, log, pt)
 finally:
-    PV.append_provenance = _ap
-check("B3: STARTED append fail -> FAILED/provenance_started + ไม่ provision/model", r["status"] == "FAILED" and r["phase"] == "provenance_started" and pt.isolation.calls == [])
+    PV.append_event = _ae
+check("B3: STARTED append fail -> FAILED/provenance_started + ไม่ provision", r["status"] == "FAILED" and r["phase"] == "provenance_started" and pt.isolation.calls == [])
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 _cnt = {"n": 0}
 def _fail_terminal(l, rec):
     _cnt["n"] += 1
     if _cnt["n"] == 2:
         raise OSError("log disk full")
-    return _ap(l, rec)
-PV.append_provenance = _fail_terminal
+    return _ae(l, rec)
+PV.append_event = _fail_terminal
 try:
     r = _run(d, log, _ports())
 finally:
-    PV.append_provenance = _ap
-check("B3: terminal append fail หลัง publish -> PROVENANCE_UNCONFIRMED (ไม่ clean PUBLISHED)", r["status"] == "PROVENANCE_UNCONFIRMED" and "evidence" not in r)
+    PV.append_event = _ae
+check("B3: terminal append fail -> PROVENANCE_UNCONFIRMED (ไม่ clean PUBLISHED)", r["status"] == "PROVENANCE_UNCONFIRMED" and "evidence" not in r)
 shutil.rmtree(d, ignore_errors=True)
 
-# ── M2: provenance ไม่เก็บ raw exception text (กัน credential/query leak) ──────
+# ── M2: provenance ไม่เก็บ raw exception text ─────────────────────────────────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.jsonl")
 r = _run(d, log, _ports(scorer=SecretScorer()))
 _body = open(log, encoding="utf-8").read()
-check("M2: exception ที่มี secret -> FAILED (error_type=RuntimeError) + log ไม่มี TOP-SECRET", r["status"] == "FAILED" and r["error_type"] == "RuntimeError" and "TOP-SECRET" not in _body and "Bearer" not in _body)
+check("M2: exception มี secret -> FAILED(error_type=RuntimeError) + log ไม่มี TOP-SECRET/Bearer", r["status"] == "FAILED" and r["error_type"] == "RuntimeError" and "TOP-SECRET" not in _body and "Bearer" not in _body)
 shutil.rmtree(d, ignore_errors=True)
 
 print(f"\n{sum(res)}/{len(res)} passed")

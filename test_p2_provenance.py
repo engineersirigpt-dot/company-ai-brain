@@ -1,17 +1,18 @@
 """
-Unit test ของ p2_provenance — event ledger ข้าม process (pure/offline)
-STARTED→terminal · single-writer lock · full-write/short-write · allow_nan/oversize · truncated-tail recovery ·
-reconcile INCOMPLETE · concurrent writers serialize
+Unit test ของ p2_provenance — crash-safe event ledger (pure/offline)
+append_event state machine · newline-commit + tail repair · OS crash-safe lock (subprocess) ·
+full-write/allow_nan/oversize · strict reconcile · concurrent writers
 
     python test_p2_provenance.py
 """
 import io
-import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -29,68 +30,108 @@ def raises(fn, exc=Exception):
         return True
 
 BASE = tempfile.mkdtemp(prefix="p2prov-")
-LOG = os.path.join(BASE, "sub", "prov.jsonl")
+def _log(n): return os.path.join(BASE, n)
+def _ev(aid, rid, event, **kw): return {"attempt_id": aid, "run_id": rid, "event": event, **kw}
 
-# ── STARTED → terminal ledger + reconcile ─────────────────────────────────────
-PV.append_provenance(LOG, {"attempt_id": "att-1", "run_id": "run-1", "event": "STARTED"})
-PV.append_provenance(LOG, {"attempt_id": "att-1", "run_id": "run-1", "event": "PUBLISHED", "status": "PUBLISHED"})
-PV.append_provenance(LOG, {"attempt_id": "att-2", "run_id": "run-2", "event": "STARTED"})   # ตายกลางทาง (ไม่มี terminal)
-recs = PV.read_provenance(LOG)
-check("append + read ตามลำดับ (3 events)", [r["event"] for r in recs] == ["STARTED", "PUBLISHED", "STARTED"])
-check("dir สร้างเอง + log เป็นไฟล์", os.path.isfile(LOG))
+
+# ── ledger STARTED → terminal + reconcile ─────────────────────────────────────
+L = _log("led.jsonl")
+PV.append_event(L, _ev("att-00000001", "run-1", "STARTED"))
+PV.append_event(L, _ev("att-00000001", "run-1", "PUBLISHED", status="PUBLISHED"))
+PV.append_event(L, _ev("att-00000002", "run-2", "STARTED"))          # ตายกลางทาง (ไม่มี terminal)
+recs = PV.read_provenance(L)
+check("ledger read ตามลำดับ", [r["event"] for r in recs] == ["STARTED", "PUBLISHED", "STARTED"])
 rc = PV.reconcile(recs)
-check("reconcile: att-1 -> PUBLISHED", rc["att-1"] == "PUBLISHED")
-check("reconcile: att-2 (STARTED ไม่มี terminal) -> INCOMPLETE", rc["att-2"] == "INCOMPLETE")
-check("read log ที่ไม่มี -> []", PV.read_provenance(os.path.join(BASE, "nope.jsonl")) == [])
-check("record ไม่ใช่ dict -> TypeError", raises(lambda: PV.append_provenance(LOG, ["x"]), TypeError))
+check("reconcile att-1 -> PUBLISHED, att-2 -> INCOMPLETE", rc["att-00000001"] == "PUBLISHED" and rc["att-00000002"] == "INCOMPLETE")
 
-# ── M1: allow_nan / oversize / short-write handling ───────────────────────────
-check("NaN ใน record -> ProvenanceError (allow_nan=False)", raises(lambda: PV.append_provenance(LOG, {"x": float("nan")}), PV.ProvenanceError))
-check("record ใหญ่เกิน -> ProvenanceError", raises(lambda: PV.append_provenance(LOG, {"x": "y" * (PV.MAX_RECORD_BYTES + 10)}), PV.ProvenanceError))
-LOG2 = os.path.join(BASE, "sw.jsonl")
-_rw = os.write
-os.write = lambda fd, b: _rw(fd, b[:3])          # partial write ทีละ 3 byte — loop ต้องเขียนครบ
-try:
-    PV.append_provenance(LOG2, {"attempt_id": "a", "event": "STARTED"})
-finally:
-    os.write = _rw
-check("short write (partial) -> loop เขียนครบ + record อ่านได้ปกติ", PV.read_provenance(LOG2)[0]["attempt_id"] == "a")
-LOG3 = os.path.join(BASE, "zero.jsonl")
-os.write = lambda fd, b: 0                        # ไม่คืบ
-try:
-    zero = raises(lambda: PV.append_provenance(LOG3, {"a": 1}), PV.ProvenanceError)
-finally:
-    os.write = _rw
-check("os.write คืน 0 (ไม่คืบ) -> ProvenanceError", zero)
+# ── B3.1: state machine ───────────────────────────────────────────────────────
+S = _log("sm.jsonl")
+PV.append_event(S, _ev("s1", "r", "STARTED"))
+check("duplicate STARTED -> ProvenanceError", raises(lambda: PV.append_event(S, _ev("s1", "r", "STARTED")), PV.ProvenanceError))
+check("terminal without STARTED -> ProvenanceError", raises(lambda: PV.append_event(S, _ev("s2", "r", "PUBLISHED", status="PUBLISHED")), PV.ProvenanceError))
+PV.append_event(S, _ev("s1", "r", "PUBLISHED", status="PUBLISHED"))
+check("duplicate terminal -> ProvenanceError", raises(lambda: PV.append_event(S, _ev("s1", "r", "FAILED", status="FAILED")), PV.ProvenanceError))
+R = _log("rid.jsonl")
+PV.append_event(R, _ev("a1", "r1", "STARTED"))
+check("terminal run_id != STARTED -> ProvenanceError", raises(lambda: PV.append_event(R, _ev("a1", "r2", "PUBLISHED", status="PUBLISHED")), PV.ProvenanceError))
+check("attempt_id reuse ข้าม run -> duplicate STARTED error", raises(lambda: PV.append_event(R, _ev("a1", "r3", "STARTED")), PV.ProvenanceError))
 
-# ── lock: reject writer ที่สอง ────────────────────────────────────────────────
-_lk = LOG + ".lock"
-fd = os.open(_lk, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.close(fd)   # จำลอง lock ถูกถือ
-check("lock ถูกถือ -> ProvenanceLocked (bounded retry)", raises(lambda: PV._acquire_lock(_lk, retries=2, delay=0.001), PV.ProvenanceLocked))
-os.unlink(_lk)
-check("ปล่อย lock แล้ว acquire ได้", (PV._acquire_lock(_lk, retries=2, delay=0.001), PV._release_lock(_lk)) and not os.path.exists(_lk))
-
-# ── truncated tail recovery / interior corruption ────────────────────────────
-LOG4 = os.path.join(BASE, "tail.jsonl")
-PV.append_provenance(LOG4, {"attempt_id": "t1", "event": "STARTED"})
-with open(LOG4, "a", encoding="utf-8") as f:
-    f.write('{"attempt_id": "t1", "event": "PUBL')      # partial tail (process ตายกลางเขียน)
-check("truncated tail -> drop, คืน record ที่สมบูรณ์", [r["attempt_id"] for r in PV.read_provenance(LOG4)] == ["t1"])
-LOG5 = os.path.join(BASE, "corrupt.jsonl")
-with open(LOG5, "w", encoding="utf-8") as f:
+# ── B3.2: newline = commit marker + tail repair ก่อน append ───────────────────
+N = _log("nl.jsonl")
+PV.append_event(N, _ev("n1", "r", "STARTED"))
+with open(N, "a", encoding="utf-8") as f:
+    f.write('{"attempt_id":"n1","run_id":"r","event":"PUBLISHED","status":"PUBLISHED"}')   # valid JSON แต่ไม่มี \n
+check("valid JSON ไม่มี newline -> uncommitted -> drop", [r["event"] for r in PV.read_provenance(N)] == ["STARTED"])
+T = _log("repair.jsonl")
+PV.append_event(T, _ev("t1", "r", "STARTED"))
+with open(T, "a", encoding="utf-8") as f:
+    f.write('{"attempt_id":"t1","event":"PUBL')                                            # partial tail (crash กลางเขียน)
+PV.append_event(T, _ev("t1", "r", "PUBLISHED", status="PUBLISHED"))                        # ต้องตัด tail ก่อน append
+check("partial tail ถูกตัดก่อน append -> terminal อ่าน/reconcile ได้", PV.reconcile(PV.read_provenance(T))["t1"] == "PUBLISHED")
+C = _log("corrupt.jsonl")
+with open(C, "w", encoding="utf-8") as f:
     f.write('{"a":1}\nGARBAGE-INTERIOR\n{"b":2}\n')
-check("interior corruption -> ProvenanceError", raises(lambda: PV.read_provenance(LOG5), PV.ProvenanceError))
+check("interior corruption (committed) -> ProvenanceError", raises(lambda: PV.read_provenance(C), PV.ProvenanceError))
 
-# ── concurrent writers serialize (lock mutual exclusion) ─────────────────────
-LOG6 = os.path.join(BASE, "conc.jsonl")
+# ── M1: full-write / allow_nan / oversize ─────────────────────────────────────
+check("record ไม่ใช่ dict -> TypeError", raises(lambda: PV.append_provenance(L, ["x"]), TypeError))
+check("NaN -> ProvenanceError (allow_nan=False)", raises(lambda: PV.append_provenance(_log("nan.jsonl"), {"x": float("nan")}), PV.ProvenanceError))
+check("oversize -> ProvenanceError", raises(lambda: PV.append_provenance(_log("big.jsonl"), {"x": "y" * (PV.MAX_RECORD_BYTES + 10)}), PV.ProvenanceError))
+SW = _log("sw.jsonl"); _rw = os.write
+os.write = lambda fd, b: _rw(fd, b[:3])
+try:
+    PV.append_provenance(SW, {"attempt_id": "a", "n": 1})
+finally:
+    os.write = _rw
+check("partial write -> loop เขียนครบ", PV.read_provenance(SW)[0]["attempt_id"] == "a")
+os.write = lambda fd, b: 0
+try:
+    zero = raises(lambda: PV.append_provenance(_log("zero.jsonl"), {"a": 1}), PV.ProvenanceError)
+finally:
+    os.write = _rw
+check("os.write คืน 0 -> ProvenanceError", zero)
+
+# ── strict reconcile ──────────────────────────────────────────────────────────
+check("reconcile STARTED-only -> INCOMPLETE", PV.reconcile([{"attempt_id": "x", "event": "STARTED"}]) == {"x": "INCOMPLETE"})
+check("reconcile terminal-only -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "y", "event": "PUBLISHED"}]), PV.ProvenanceError))
+check("reconcile duplicate terminal -> ProvenanceError", raises(lambda: PV.reconcile([{"attempt_id": "z", "event": "STARTED"}, {"attempt_id": "z", "event": "PUBLISHED"}, {"attempt_id": "z", "event": "FAILED"}]), PV.ProvenanceError))
+
+# ── concurrent writers (lock mutual exclusion) ───────────────────────────────
+CC = _log("conc.jsonl")
 def _worker(i):
     for j in range(5):
-        PV.append_provenance(LOG6, {"attempt_id": f"w{i}-{j}", "event": "STARTED"})
+        PV.append_event(CC, _ev(f"w{i}-{j}", "r", "STARTED"))
 ts = [threading.Thread(target=_worker, args=(i,)) for i in range(4)]
 for t in ts: t.start()
 for t in ts: t.join()
-_cr = PV.read_provenance(LOG6)
-check("concurrent 4x5 writers -> 20 records ครบ + ไม่มี corruption", len(_cr) == 20 and all(isinstance(r, dict) for r in _cr))
+check("concurrent 4x5 writers -> 20 records ครบ ไม่ corrupt", len(PV.read_provenance(CC)) == 20)
+
+# ── M1.1: OS crash-safe lock (subprocess acquire → kill → parent acquire) ─────
+CL = _log("crash.jsonl"); SIG = _log("sig")
+open(CL, "w").close()
+_worker_code = ("import sys,time\nsys.path.insert(0,%r)\nimport p2_provenance as PV\n"
+                "fd=PV._lock(sys.argv[1])\nopen(sys.argv[2],'w').close()\ntime.sleep(60)\n" % os.path.dirname(os.path.abspath(__file__)))
+proc = subprocess.Popen([sys.executable, "-c", _worker_code, CL, SIG], cwd=os.path.dirname(os.path.abspath(__file__)))
+for _ in range(300):
+    if os.path.exists(SIG):
+        break
+    time.sleep(0.02)
+held = os.path.exists(SIG)
+locked_out = raises(lambda: PV._lock(CL, retries=3, delay=0.01), PV.ProvenanceLocked)   # child ถือ lock อยู่
+proc.terminate()
+try:
+    proc.wait(timeout=10)
+except Exception:
+    proc.kill()
+_fd = None
+try:
+    _fd = PV._lock(CL, retries=300, delay=0.02)          # ต้อง acquire ได้หลัง child ตาย (OS ปล่อย lock เอง)
+    reacquired = True
+finally:
+    if _fd is not None:
+        PV._release(_fd)
+check("M1.1: child ถือ lock -> parent ProvenanceLocked", held and locked_out)
+check("M1.1: crash-safe — parent acquire ได้หลัง child ตาย โดยไม่ลบ lock manual", reacquired)
 
 shutil.rmtree(BASE, ignore_errors=True)
 print(f"\n{sum(res)}/{len(res)} passed")

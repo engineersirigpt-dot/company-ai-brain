@@ -82,6 +82,21 @@ finally:
     shutil.rmtree = _rt
 check("B2: cleanup (rmtree) fail บน success path -> CapabilityError (ไม่ ignore เงียบ)", rt)
 
+# ── M1.2: failure-path cleanup fail -> primary CapabilityError + note(path) ────
+_rl2, _rt2 = os.link, shutil.rmtree
+os.link = lambda a, b: (_ for _ in ()).throw(OSError("link fail"))
+shutil.rmtree = lambda p, **k: (_ for _ in ()).throw(OSError("cleanup fail"))
+try:
+    exc = None
+    try:
+        FS.probe_output_fs(BASE)
+    except FS.CapabilityError as e:
+        exc = e
+finally:
+    os.link, shutil.rmtree = _rl2, _rt2
+check("M1.2: failure path cleanup fail -> primary CapabilityError + note (cleanup+path)",
+      exc is not None and any("cleanup" in n and ".fsprobe." in n for n in getattr(exc, "__notes__", [])))
+
 shutil.rmtree(BASE, ignore_errors=True)
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)
