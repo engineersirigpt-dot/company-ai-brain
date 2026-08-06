@@ -1,14 +1,17 @@
 """
-P2 operational provenance ledger — **SQLite authority** (Codex round-7 REWORK `6721721`) — pure/offline
+P2 operational provenance ledger — **SQLite authority** (Codex round-7 REWORK, round-8 hardening `4444b1c`) — pure/offline
 
-authoritative append-only event ledger บน `sqlite3` (stdlib) แทน hand-rolled JSONL WAL:
-  - `PRAGMA synchronous=FULL` + rollback journal → **durable ต่อ event** ; SQLite จัดการ locking / rollback /
-    crash recovery เอง (แทน sidecar `.lock`/`.intent` + short-file recovery + tail-truncate + alias-lock ที่รีวิววนหลายรอบ)
-  - `BEGIN IMMEDIATE` ต่อ event → read state + validate transition + INSERT อยู่ใน **transaction เดียว** (writers serialize)
-  - **state machine** (reducer เดียวกับ `reconcile`, B3.1/M3.2-A): STARTED create-once + first ; terminal ครั้งเดียว +
-    ตาม STARTED + run_id ตรง + `status == event` + terminal schema ครบ ; ย้ำด้วย **UNIQUE partial index** (defense-in-depth)
-  - **file identity**: SQLite ล็อกที่ inode ของ db → hard-link/symlink alias ล็อกตัวเดียวกัน (ปิด alias-bypass ของ path sidecar เดิม)
-  - **evidence**: `export_jsonl()` หลัง commit — external M4 evidence contract (JSONL bundle) ไม่เปลี่ยน
+authoritative append-only event ledger บน `sqlite3` (stdlib):
+  - `PRAGMA synchronous=FULL` + rollback journal → durable ต่อ event ; SQLite จัดการ crash recovery/rollback เอง
+  - **canonical single-name db** (B1): reject symlink / `st_nlink != 1` — ไม่รับ hard-link/soft-link alias
+    (rollback journal ตั้งชื่อตาม pathname → alias = undefined/corruption ตามสเปก SQLite) ; ทุก op ใช้ realpath เดียว
+  - `BEGIN IMMEDIATE` → read state + validate transition (reducer เดียวกับ `reconcile`) + INSERT ; **แยก COMMIT phase**
+    ออกจาก pre-commit (B2): pre-commit fail → rollback/uncommitted ; COMMIT fail → resolve outcome จาก `in_transaction`
+    + verify row ผ่าน fresh connection → COMMITTED / uncommitted / `ProvenanceIndeterminate`
+  - **row decoder + checksum verify** (M1): อ่านทุกครั้ง verify `body_sha256`, canonical body และ column identity
+    (attempt_id/run_id/event) — mismatch = ProvenanceError (evidence ผูกกับ row จริง)
+  - **fail-closed open** (M2): existing zero-length / schema/version ผิด = ProvenanceError ; ตั้ง `user_version=SCHEMA_VERSION`
+  - **evidence**: `export_jsonl()` = temp + fsync + **atomic no-clobber** publish + parent fsync + receipt (digest/max_seq/row_count)
   - `reconcile`: STARTED ไม่มี terminal = INCOMPLETE ; transition ที่เป็นไปไม่ได้ = ProvenanceError
 """
 from __future__ import annotations
@@ -23,6 +26,7 @@ MAX_RECORD_BYTES = 65536
 SCHEMA_VERSION = 1
 _TERMINALS = ("PUBLISHED", "DEGRADED", "FAILED")
 _SHA_RE = re.compile(r"[0-9a-f]{64}")
+_O_BINARY = getattr(os, "O_BINARY", 0)
 _BUSY_TIMEOUT_MS = 5000                          # writers serialize ใต้ write lock ; เกินเวลา = ProvenanceLocked
 
 
@@ -41,7 +45,7 @@ def _valid_iso_tz(x) -> bool:
 
 
 class ProvenanceError(Exception):
-    """เขียน/อ่าน provenance ไม่สำเร็จ (bad transition / schema / serialize / db corruption / integrity)"""
+    """เขียน/อ่าน provenance ไม่สำเร็จ (bad transition / schema / serialize / corruption / integrity / alias)"""
 
 
 class ProvenanceLocked(Exception):
@@ -49,12 +53,46 @@ class ProvenanceLocked(Exception):
 
 
 class ProvenanceIndeterminate(Exception):
-    """commit/rollback ยืนยันไม่ได้ (เก็บไว้เพื่อ API compat) — SQLite transaction atomic ทำให้ไม่มี indeterminate
-    window ในทางปฏิบัติ ; ยังใช้กับ db-level durability failure ที่แยกผลไม่ได้"""
+    """COMMIT outcome พิสูจน์ไม่ได้ (ack lost + verify ไม่ได้) — caller ต้อง fail-closed จน operator/หลักฐานยืนยัน"""
 
 
-def _parent_dir(log_path: str) -> str:
-    return os.path.dirname(os.path.abspath(log_path))
+def _parent_dir(path: str) -> str:
+    return os.path.dirname(os.path.abspath(path))
+
+
+def _fsync_parent_dir(path: str) -> None:
+    """directory-entry durability (POSIX) — Windows: dir fd fsync ไม่รองรับ → atomic-visibility only (no-op)"""
+    if os.name != "posix":
+        return
+    dfd = os.open(_parent_dir(path), os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+
+def _write_all_fd(fd, data: bytes) -> None:
+    mv = memoryview(data)
+    while mv:
+        n = os.write(fd, mv)
+        if n <= 0:
+            raise ProvenanceError("os.write คืน 0 (เขียนไม่คืบ)")
+        mv = mv[n:]
+
+
+def _resolve_db_path(log_path: str) -> str:
+    """
+    B1: canonical single-name authority — realpath เดียวสำหรับทุก op ; reject symlink db และ hard-link (`st_nlink != 1`)
+    เพราะ SQLite rollback journal ตั้งชื่อตาม pathname (alias → journal คนละชื่อ → crash recovery undefined/corruption)
+    """
+    if os.path.islink(log_path):
+        raise ProvenanceError(f"provenance db ห้ามเป็น symlink (canonical single-name เท่านั้น): {log_path}")
+    canonical = os.path.realpath(os.path.abspath(log_path))
+    if os.path.exists(canonical):
+        st = os.stat(canonical)
+        if getattr(st, "st_nlink", 1) != 1:
+            raise ProvenanceError(f"provenance db มี hard link (st_nlink={st.st_nlink}) — ห้าม alias: {canonical}")
+    return canonical
 
 
 def _canonical(record: dict) -> str:
@@ -75,33 +113,87 @@ def _serialize(record: dict) -> bytes:
     return (_canonical(record) + "\n").encode("utf-8")
 
 
+def _apply_pragmas(conn: sqlite3.Connection) -> None:
+    conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+    conn.execute("PRAGMA synchronous=FULL")
+    conn.execute("PRAGMA journal_mode=DELETE")
+
+
+_DDL_TABLE = """CREATE TABLE IF NOT EXISTS events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id  TEXT,
+    run_id      TEXT,
+    event       TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    body_sha256 TEXT NOT NULL)"""
+
+
+def _schema_ok(conn: sqlite3.Connection) -> bool:
+    try:
+        t = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").fetchone()
+        i1 = conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='ux_started'").fetchone()
+        i2 = conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='ux_terminal'").fetchone()
+    except sqlite3.Error:
+        return False
+    return bool(t and i1 and i2)
+
+
 def _connect(log_path: str) -> sqlite3.Connection:
-    parent = _parent_dir(log_path)
+    canonical = _resolve_db_path(log_path)
+    parent = _parent_dir(canonical)
     if not os.path.isdir(parent):                # durability boundary: ไม่ auto-create directory
         raise ProvenanceError(f"provenance parent directory ต้องมีอยู่ก่อนเขียน: {parent}")
+    exists = os.path.exists(canonical)
+    if exists and os.path.getsize(canonical) == 0:   # M2: existing zero-length authority = corruption (fail-closed)
+        raise ProvenanceError(f"existing provenance db เป็น 0 bytes — corruption (fail-closed): {canonical}")
     try:
-        conn = sqlite3.connect(log_path, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
-        conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-        conn.execute("PRAGMA journal_mode=DELETE")   # rollback journal + synchronous=FULL = durable ต่อ commit
-        conn.execute("PRAGMA synchronous=FULL")
-        conn.execute("""CREATE TABLE IF NOT EXISTS events (
-            seq INTEGER PRIMARY KEY AUTOINCREMENT,
-            attempt_id  TEXT,
-            run_id      TEXT,
-            event       TEXT NOT NULL,
-            body        TEXT NOT NULL,
-            body_sha256 TEXT NOT NULL)""")
+        conn = sqlite3.connect(canonical, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
+        _apply_pragmas(conn)
+        conn.execute(_DDL_TABLE)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_started ON events(attempt_id) WHERE event='STARTED'")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_terminal ON events(attempt_id) "
                      "WHERE event IN ('PUBLISHED','DEGRADED','FAILED')")
+        uv = conn.execute("PRAGMA user_version").fetchone()[0]
+        if uv == 0:
+            conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")   # M2: fresh/legacy → stamp
+        elif uv != SCHEMA_VERSION:
+            conn.close()
+            raise ProvenanceError(f"provenance schema version ไม่ตรง: {uv} != {SCHEMA_VERSION}")
+        if not _schema_ok(conn):
+            conn.close()
+            raise ProvenanceError("provenance schema/index หาย — fail-closed")
     except sqlite3.Error as e:
         raise ProvenanceError(f"เปิด provenance db ไม่ได้: {e}") from e
     return conn
 
 
+def _decode_row(aid, rid, ev, body, bsha) -> dict:
+    """
+    M1: central row decoder — verify checksum, canonical body และ column identity ทุกครั้งที่อ่าน
+    (body_sha256/columns ที่ index/state ใช้ ต้องผูกกับ body จริง มิฉะนั้น evidence ปลอมได้)
+    """
+    if not isinstance(body, str) or hashlib.sha256(body.encode("utf-8")).hexdigest() != bsha:
+        raise ProvenanceError("body_sha256 ไม่ตรงกับ body (tamper/corruption)")
+    try:
+        rec = json.loads(body)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ProvenanceError(f"provenance body corrupt: {e!r}") from e
+    if not isinstance(rec, dict):
+        raise ProvenanceError("provenance body ไม่ใช่ JSON object")
+    if _canonical(rec) != body:
+        raise ProvenanceError("provenance body ไม่ canonical (tamper)")
+    if rec.get("attempt_id") != aid or rec.get("run_id") != rid or rec.get("event") != ev:
+        raise ProvenanceError("provenance body ไม่ตรงกับ column identity (attempt_id/run_id/event)")
+    return rec
+
+
+def _select_records(conn: sqlite3.Connection, where: str = "", params=()) -> list:
+    sql = "SELECT attempt_id, run_id, event, body, body_sha256 FROM events " + where + " ORDER BY seq"
+    return [_decode_row(*row) for row in conn.execute(sql, params).fetchall()]
+
+
 def _attempt_records(conn: sqlite3.Connection, aid) -> list:
-    cur = conn.execute("SELECT body FROM events WHERE attempt_id IS ? ORDER BY seq", (aid,))
-    return [json.loads(b) for (b,) in cur.fetchall()]
+    return _select_records(conn, "WHERE attempt_id IS ?", (aid,))
 
 
 def _validate_terminal_schema(r: dict) -> None:
@@ -137,9 +229,8 @@ def _validate_terminal_schema(r: dict) -> None:
 def _reduce(records: list) -> dict:
     """
     **reducer เดียว** (order-sensitive + terminal schema) ใช้ทั้ง append validation และ reconcile (B3.1-R/M3.2-A) —
-    consume record ตามลำดับ: state ว่าง → รับเฉพาะ STARTED ; state STARTED → รับ terminal ครั้งเดียว
-    (run_id ตรง + `status == event` + terminal schema ครบ) ; state terminal → รับเพิ่มไม่ได้
-    คืน {attempt_id: terminal_status | 'INCOMPLETE'} ; ลำดับ/run/status/schema ผิด → ProvenanceError
+    state ว่าง → รับเฉพาะ STARTED ; state STARTED → รับ terminal ครั้งเดียว (run_id ตรง + `status == event` + schema ครบ) ;
+    state terminal → รับเพิ่มไม่ได้ ; คืน {attempt_id: terminal_status | 'INCOMPLETE'} ; ผิด → ProvenanceError
     """
     state = {}
     for r in records:
@@ -174,35 +265,74 @@ def _validate_transition(committed: list, record: dict) -> None:
     _reduce(committed + [record])                # reuse reducer เดียวกับ reconcile (per-attempt state)
 
 
+def _do_commit(conn: sqlite3.Connection) -> None:
+    conn.execute("COMMIT")                       # แยกเป็น hook เดียว (test inject COMMIT failure/ack-loss ได้)
+
+
+def _row_exists(canonical: str, aid, ev, bsha) -> bool:
+    conn = sqlite3.connect(canonical, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
+    try:
+        conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+        cur = conn.execute("SELECT 1 FROM events WHERE attempt_id IS ? AND event=? AND body_sha256=? LIMIT 1",
+                           (aid, ev, bsha))
+        return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def _resolve_commit_outcome(conn, canonical, record, bsha) -> str:
+    """B2: COMMIT ล้ม → จำแนก outcome — active tx (retryable) → uncommitted ; ack lost → verify row → committed/uncommitted/indeterminate"""
+    try:
+        active = bool(conn.in_transaction)
+    except sqlite3.Error:
+        active = False
+    if active:                                   # COMMIT ไม่ apply (เช่น SQLITE_BUSY) → transaction ยังเปิด
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        return "uncommitted"
+    try:                                          # transaction ปิดแล้ว (ack ambiguous) → verify ผ่าน fresh connection
+        found = _row_exists(canonical, record.get("attempt_id"), record.get("event"), bsha)
+    except sqlite3.Error:
+        return "indeterminate"
+    return "committed" if found else "uncommitted"
+
+
 def _locked_write(log_path: str, record: dict, validate_state) -> None:
-    """
-    append 1 event ใน transaction เดียว (durable) — validate_state=None = raw (ไม่บังคับ state machine, private) ;
-    validate_state=_validate_transition = event ledger (บังคับ state machine ที่ ledger boundary)
-    """
     body = _canonical(record)                    # raises TypeError/ProvenanceError ก่อนแตะ db
     bsha = hashlib.sha256(body.encode("utf-8")).hexdigest()
     aid = record.get("attempt_id")
     conn = _connect(log_path)
+    canonical = _resolve_db_path(log_path)
     try:
         try:
             conn.execute("BEGIN IMMEDIATE")      # write lock ทันที → read-validate-insert atomic (serialize writers)
         except sqlite3.OperationalError as e:
-            raise ProvenanceLocked(f"provenance db ถูก lock: {log_path} :: {e}") from e
-        try:
+            raise ProvenanceLocked(f"provenance db ถูก lock: {canonical} :: {e}") from e
+        try:                                      # ── pre-commit phase (transaction ยัง active → rollback ได้) ──
             if validate_state is not None:
-                validate_state(_attempt_records(conn, aid), record)   # bad transition = ProvenanceError (ก่อน insert)
+                validate_state(_attempt_records(conn, aid), record)   # bad transition = ProvenanceError
             try:
                 conn.execute("INSERT INTO events(attempt_id, run_id, event, body, body_sha256) VALUES(?,?,?,?,?)",
                              (aid, record.get("run_id"), record.get("event"), body, bsha))
-            except sqlite3.IntegrityError as e:  # UNIQUE STARTED/terminal (กันเชิงลึก เผื่อ logic รั่ว)
+            except sqlite3.IntegrityError as e:  # UNIQUE STARTED/terminal (กันเชิงลึก)
                 raise ProvenanceError(f"ledger integrity (duplicate STARTED/terminal): {e}") from e
-            conn.execute("COMMIT")               # durable (synchronous=FULL)
         except BaseException:
             try:
                 conn.execute("ROLLBACK")
             except sqlite3.Error:
                 pass
-            raise
+            raise                                 # pre-commit fail = uncommitted (ประเภท exception เดิม)
+        try:                                      # ── commit phase (แยก outcome, B2) ──
+            _do_commit(conn)
+        except BaseException as ce:
+            outcome = _resolve_commit_outcome(conn, canonical, record, bsha)
+            if outcome == "committed":
+                return                            # row durable จริง (ack หายเฉยๆ) → success
+            if outcome == "uncommitted":
+                raise                             # retryable (re-raise ประเภทเดิม)
+            raise ProvenanceIndeterminate(f"COMMIT outcome พิสูจน์ไม่ได้: {canonical}") from ce
     finally:
         conn.close()
 
@@ -218,23 +348,19 @@ def _append_raw(log_path: str, record: dict) -> None:
 
 
 def read_provenance(log_path: str) -> list:
-    """อ่าน committed events ตามลำดับ append — db ไม่มี = [] ; db corrupt/body corrupt = ProvenanceError"""
-    if not os.path.exists(log_path):
+    """อ่าน committed events ตามลำดับ append (verify checksum/identity ทุก row, M1) — db ไม่มี = [] ; corrupt/tamper = ProvenanceError"""
+    if os.path.islink(log_path):
+        raise ProvenanceError(f"provenance db ห้ามเป็น symlink: {log_path}")
+    canonical = os.path.realpath(os.path.abspath(log_path))
+    if not os.path.exists(canonical):
         return []
     conn = _connect(log_path)
     try:
-        rows = conn.execute("SELECT body FROM events ORDER BY seq").fetchall()
+        return _select_records(conn)
     except sqlite3.DatabaseError as e:
         raise ProvenanceError(f"provenance db corrupt: {e}") from e
     finally:
         conn.close()
-    out = []
-    for (body,) in rows:
-        try:
-            out.append(json.loads(body))
-        except (json.JSONDecodeError, ValueError) as e:
-            raise ProvenanceError(f"provenance body corrupt: {e!r}") from e
-    return out
 
 
 def reconcile(records: list) -> dict:
@@ -243,36 +369,48 @@ def reconcile(records: list) -> dict:
     return _reduce(records)
 
 
-def _fsync_parent_dir(path: str) -> None:
-    """directory-entry durability (POSIX) — Windows: dir fd fsync ไม่รองรับ → atomic-visibility only (no-op)"""
-    if os.name != "posix":
-        return
-    dfd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
+def _db_stats(canonical: str):
+    conn = sqlite3.connect(canonical, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
     try:
-        os.fsync(dfd)
+        row = conn.execute("SELECT COALESCE(MAX(seq),0), COUNT(*) FROM events").fetchone()
+        return int(row[0]), int(row[1])
     finally:
-        os.close(dfd)
+        conn.close()
 
 
-def export_jsonl(log_path: str, out_path: str) -> str:
+def export_jsonl(db_path: str, out_path: str) -> dict:
     """
-    export committed events → JSONL bundle (evidence artifact) ตามลำดับ canonical — durable (fsync file+parent) ;
-    external M4 evidence contract ยังเป็น JSONL แม้ authority ย้ายไป SQLite แล้ว
+    B3: export committed events → **immutable JSONL evidence** (atomic no-clobber) + receipt —
+    validate ทุก row (checksum/identity) ก่อน ; temp + fsync → `os.link` no-clobber → parent fsync ;
+    คืน receipt {source_db, schema_version, max_seq, row_count, jsonl_sha256, path} ผูก snapshot กับ source
     """
-    parent = _parent_dir(out_path)
-    if not os.path.isdir(parent):
-        raise ProvenanceError(f"export parent directory ต้องมีอยู่ก่อน: {parent}")
-    data = "".join(_canonical(r) + "\n" for r in read_provenance(log_path)).encode("utf-8")
-    fd = os.open(out_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o644)
-    try:
-        mv = memoryview(data)
-        while mv:
-            n = os.write(fd, mv)
-            if n <= 0:
-                raise ProvenanceError("export write คืน 0")
-            mv = mv[n:]
-        os.fsync(fd)                             # file durable (write fd)
+    canonical = _resolve_db_path(db_path)
+    records = read_provenance(canonical)         # verify checksum/identity (M1)
+    body = "".join(_canonical(r) + "\n" for r in records).encode("utf-8")
+    jsonl_sha = hashlib.sha256(body).hexdigest()
+    out_parent = _parent_dir(out_path)
+    if not os.path.isdir(out_parent):
+        raise ProvenanceError(f"export parent directory ต้องมีอยู่ก่อน: {out_parent}")
+    if os.path.exists(out_path):                 # immutable: ห้าม overwrite artifact เดิม
+        raise ProvenanceError(f"export target มีอยู่แล้ว (no-clobber): {out_path}")
+    tmp = out_path + ".tmp-" + jsonl_sha[:16]
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_BINARY, 0o644)
+    try:                                         # temp → fsync → atomic no-clobber publish ; cleanup tmp ทุกกรณี
+        try:
+            _write_all_fd(fd, body)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            os.link(tmp, out_path)               # atomic no-clobber publish (final ไม่ถูกแตะจนกว่าจะ link สำเร็จ)
+        except FileExistsError as e:
+            raise ProvenanceError(f"export collision (no-clobber): {out_path}") from e
+        _fsync_parent_dir(out_path)
     finally:
-        os.close(fd)
-    _fsync_parent_dir(out_path)                  # directory-entry durable (POSIX)
-    return out_path
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    max_seq, row_count = _db_stats(canonical)
+    return {"source_db": canonical, "schema_version": SCHEMA_VERSION, "max_seq": max_seq,
+            "row_count": row_count, "jsonl_sha256": jsonl_sha, "path": out_path}

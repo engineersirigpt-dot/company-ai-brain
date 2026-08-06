@@ -114,7 +114,7 @@ def _verify_published(plan, frozen, path) -> dict:
             "evidence": ev, "receipt": rc}
 
 
-def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus, marker, ports, argv, stdout, stderr,
+def run_m4a_operational(*, provenance_db, out_dir, plan, frozen, cases, corpus, marker, ports, argv, stdout, stderr,
                         attempt_id=None) -> dict:
     aid = _resolve_attempt_id(attempt_id)
     run_id = plan.get("run_id") if isinstance(plan, dict) else None
@@ -133,7 +133,7 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
                         "m4_case_manifest_sha256": plan["m4_case_manifest_sha256"],
                         "model_revision": plan["model_commit"], "image_digest": plan["image_digest"]})
     try:
-        PV.append_event(provenance_log, started)
+        PV.append_event(provenance_db, started)
     except Exception as e:
         return {"attempt_id": aid, "run_id": run_id, "status": "FAILED", "phase": "provenance_started",
                 "error_type": type(e).__name__}
@@ -149,11 +149,16 @@ def run_m4a_operational(*, provenance_log, out_dir, plan, frozen, cases, corpus,
         if anomaly:
             rec["clock_anomaly"] = True                    # explicit + status ถูก downgrade แล้ว
         try:
-            PV.append_event(provenance_log, rec)
+            PV.append_event(provenance_db, rec)
         except PV.ProvenanceIndeterminate as pe:
             return {**rec, "status": "PROVENANCE_INDETERMINATE", "provenance_error_type": type(pe).__name__}
         except Exception as pe:
             return {**rec, "status": "PROVENANCE_UNCONFIRMED", "recorded": False, "provenance_error_type": type(pe).__name__}
+        # B3: export immutable JSONL evidence snapshot ของ ledger (best-effort — authority = db ; export ล้มไม่เปลี่ยน terminal)
+        try:
+            rec["provenance_export"] = PV.export_jsonl(provenance_db, os.path.join(out_dir_real, str(run_id) + ".provenance.jsonl"))
+        except Exception as ee:
+            rec["provenance_export_error"] = type(ee).__name__
         return rec
 
     if plan_errs:
