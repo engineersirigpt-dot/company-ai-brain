@@ -1,0 +1,182 @@
+"""
+Unit test ของ p2_m4_runner — pure/injectable M4a runner (offline, fake ports)
+happy path publish bundle ที่ผ่าน public gate · fail-closed ทุกเส้น (mock scorer / sentinel leak /
+interlock ผิด / oracle visibility ไม่ตรง / marker readback ไม่ตรง / production endpoint) → ไม่มี PASS artifact ·
+provenance: readback มาจาก read_marker (ไม่ reuse written) · แต่ละ observe ถูกเรียก · teardown เสมอ
+
+    python test_p2_m4_runner.py
+"""
+import io
+import os
+import shutil
+import sys
+import tempfile
+import types
+
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+import p2_atomic as AT
+import p2_eval as E
+import p2_m4_harness as HN
+import p2_m4_runner as RUN
+import p2_reranker as RK
+import p2_runplan as RP
+
+res = []
+def check(name, cond, detail=""):
+    res.append(bool(cond))
+    print(("PASS " if cond else "FAIL ") + name + ("" if cond else f"  :: {detail}"))
+def raises(fn, exc=Exception):
+    try:
+        fn(); return False
+    except exc:
+        return True
+
+
+_H = "a" * 64
+IC = {"model_name": RK.RERANKER_MODEL, "max_length": 512, "batch_size": 16, "device": "cpu", "dtype": "float32"}
+VEC1, VEC2 = [0.1, 0.2, 0.3], [0.4, 0.5, 0.6]
+QT1, QT2 = "คำถาม negation", "คำถาม table-row"
+def _pairs(items): return [HN.component(p, t)["pair_sha256"] for p, t in items]
+
+
+class PinnedScorer:
+    def __init__(self, smap): self.smap = smap; self.queries = []
+    def metadata(self):
+        return {"kind": "pinned-cross-encoder", "model_name": RK.RERANKER_MODEL, "model_revision": "a" * 40,
+                "tokenizer_revision": "a" * 40, "model_file_manifest_sha256": _H, "inference_config": dict(IC)}
+    def score(self, q, texts): self.queries.append(q); return [self.smap.get(t, 0.0) for t in texts]
+class MockScorer:
+    def __init__(self, smap): self.smap = smap
+    def score(self, q, texts): return [self.smap.get(t, 0.0) for t in texts]
+
+
+class FakeIso:
+    def __init__(self, *, initial_count=0, published_ports=0, is_prod=False, readback=None):
+        self._ic, self._pp, self._prod, self._rb = initial_count, published_ports, is_prod, readback
+        self.calls = []; self._marker = None; self.torn = False; self.seeded = False
+    def provision(self):
+        self.calls.append("provision")
+        return {"project_id": "proj-u", "network_id": "net-u", "volume_id": "vol-u",
+                "collection_id": "coll-u", "endpoint": "http://isolated-m4:6333"}
+    def observe_initial_count(self): self.calls.append("count"); return self._ic
+    def observe_published_ports(self): self.calls.append("ports"); return self._pp
+    def observe_endpoint_is_production(self): self.calls.append("prod"); return self._prod
+    def write_marker(self, m): self.calls.append("write"); self._marker = m
+    def read_marker(self): self.calls.append("read"); return self._rb if self._rb is not None else self._marker
+    def seed(self, corpus): self.calls.append("seed"); self.seeded = True
+    def teardown(self): self.calls.append("teardown"); self.torn = True
+
+class FakeProvider:
+    def __init__(self, by_role): self.by_role = by_role; self.seen = []
+    def filtered_candidates(self, role, qv, limit): self.seen.append((role, tuple(qv))); return list(self.by_role.get(role, []))
+
+class FakeOracle:
+    def __init__(self, unfiltered_by_qv, vis_by_role): self.u = unfiltered_by_qv; self.v = vis_by_role
+    def unfiltered_topn(self, qv, limit): return list(self.u.get(tuple(qv), []))
+    def observe_visibility(self, role): return self.v[role]
+
+class FakeClock:
+    def __init__(self): self.n = 0
+    def now_iso(self): self.n += 1; return "2026-08-05T05:0%d:00+07:00" % self.n
+
+
+# ── frozen manifest + plan (2 case: qc/negation, sales/table-row) ─────────────
+FROZEN = HN.build_frozen_manifest(
+    cases={"case-qc": HN.frozen_case(effective_role="qc", category="negation", query_text=QT1, query_vector=VEC1,
+                                     authorized_items=[("A", "ta")], sentinel_items=[("S", "ts")]),
+           "case-sales": HN.frozen_case(effective_role="sales", category="table-row", query_text=QT2, query_vector=VEC2,
+                                        authorized_items=[("B", "tb")], sentinel_items=[("S", "ts")])},
+    required_categories=["negation", "table-row"], evaluated_roles=["qc", "sales"])
+MAN = E.m4_case_manifest_sha256(FROZEN)
+PLAN = {"run_id": "run-1", "benchmark_contract_version": E.BENCHMARK_CONTRACT_VERSION,
+        "n_set": [10, 20, 30, 50], "seed": 1, "resamples": 10000, "primary_metric": "ndcg@5",
+        "intent_grouping": "intent_id", "thresholds": dict(RP.DEFAULT_THRESHOLDS),
+        "gate_tags": ["negation", "table-row"], "evaluated_roles": ["qc", "sales"],
+        "m4_case_manifest_sha256": MAN, "required_categories": ["negation", "table-row"],
+        "expected_counts": {"dev_intents": 1, "dev_queries": 1, "test_intents": 1, "test_queries": 1},
+        "artifact_digests": {"eval_set_sha256": _H, "corpus_manifest_sha256": _H, "retrieval_index_manifest_sha256": _H},
+        "model_commit": "a" * 40, "tokenizer_commit": "a" * 40, "model_file_manifest_sha256": _H,
+        "image_digest": "sha256:" + "e" * 64, "inference_config": dict(IC)}
+
+SMAP = {"ta": 2.0, "tb": 2.0}
+PROV = {"qc": [("A", "ta")], "sales": [("B", "tb")]}
+UNFIL = {tuple(VEC1): [("S", "ts"), ("A", "ta")], tuple(VEC2): [("S", "ts"), ("B", "tb")]}
+VIS = {"qc": {"authorized_pairs": _pairs([("A", "ta")]), "sentinel_pairs": _pairs([("S", "ts")])},
+       "sales": {"authorized_pairs": _pairs([("B", "tb")]), "sentinel_pairs": _pairs([("S", "ts")])}}
+CASES = [{"case_id": "case-qc", "effective_role": "qc", "query_text": QT1, "query_vector": VEC1},
+         {"case_id": "case-sales", "effective_role": "sales", "query_text": QT2, "query_vector": VEC2}]
+
+
+def ports(*, scorer=None, iso=None, provider=None, oracle=None):
+    return types.SimpleNamespace(scorer=scorer or PinnedScorer(SMAP), isolation=iso or FakeIso(),
+                                 provider=provider or FakeProvider(PROV), oracle=oracle or FakeOracle(UNFIL, VIS),
+                                 clock=FakeClock())
+def call(pt, out_dir):
+    return RUN.run_m4a(plan=PLAN, frozen=FROZEN, cases=CASES, corpus=["doc-a", "doc-b"], marker="m4-run-uuid",
+                       ports=pt, out_dir=out_dir, argv=["python", "p2_m4_runner.py", "--preflight"], stdout=b"ok", stderr=b"")
+def fresh(): return tempfile.mkdtemp(prefix="p2runner-")
+def refuses(*, iso=None, provider=None, oracle=None, scorer=None, exc=AT.PublishRefused):
+    d = fresh(); it = iso or FakeIso()
+    ok = raises(lambda: call(ports(scorer=scorer, iso=it, provider=provider, oracle=oracle), d), exc)
+    no_art = not os.path.exists(os.path.join(d, "run-1"))
+    shutil.rmtree(d, ignore_errors=True)
+    return ok, no_art, it
+
+
+# ── happy path ────────────────────────────────────────────────────────────────
+BASE = fresh()
+ISO = FakeIso()
+PT = ports(iso=ISO)
+RESULT = call(PT, BASE)
+check("run_m4a -> PUBLISHED", RESULT["status"] == "PUBLISHED")
+check("publish -> evidence.json + receipt.json มีจริง", os.path.isfile(os.path.join(RESULT["path"], "evidence.json")) and os.path.isfile(os.path.join(RESULT["path"], "receipt.json")))
+check("bundle re-validate ผ่าน public gate", RP.validate_m4_preflight_bundle(PLAN, FROZEN, RESULT["evidence"], RESULT["receipt"]) == [], RP.validate_m4_preflight_bundle(PLAN, FROZEN, RESULT["evidence"], RESULT["receipt"]))
+check("evidence status = PASS", RESULT["evidence"]["status"] == "PASS")
+check("scorer ได้ query จริงของ case (ไม่ใช่คงที่)", PT.scorer.queries == [QT1, QT2])
+check("provider เห็นเฉพาะ role ที่ authorize", PT.provider.seen == [("qc", tuple(VEC1)), ("sales", tuple(VEC2))])
+check("teardown ถูกเรียก (happy)", ISO.torn)
+
+# provenance ของ interlock observation
+check("provenance: write ก่อน read (read-after-write)", ISO.calls.index("write") < ISO.calls.index("read"))
+check("provenance: observe count/ports/prod อย่างละ 1 ครั้ง", ISO.calls.count("count") == 1 and ISO.calls.count("ports") == 1 and ISO.calls.count("prod") == 1)
+check("provenance: observe interlock ก่อน seed", max(ISO.calls.index("count"), ISO.calls.index("read")) < ISO.calls.index("seed"))
+check("provenance: readback = ค่าจาก read_marker (ไม่ reuse written)", RESULT["evidence"]["isolation_proof"]["marker_readback_sha256"] == HN._id_hash("m4-run-uuid"))
+
+# ── B1: scorer provenance — mock -> ไม่มี artifact ────────────────────────────
+ok, no_art, _ = refuses(scorer=MockScorer(SMAP), exc=TypeError)
+check("mock scorer (ไม่มี metadata) -> raise + ไม่มี PASS artifact", ok and no_art)
+
+# ── leak: provider ปล่อย sentinel ถึง model -> PermissionError + teardown ──────
+ok, no_art, it = refuses(provider=FakeProvider({"qc": [("S", "ts")], "sales": [("B", "tb")]}), exc=PermissionError)
+check("provider leak sentinel -> PermissionError + ไม่มี artifact", ok and no_art)
+check("leak -> teardown ยังถูกเรียก", it.torn)
+
+# ── interlock ผิด -> bundle invalid -> publish refused (ไม่มี artifact) ────────
+ok, na, it = refuses(iso=FakeIso(initial_count=5))
+check("collection ไม่ว่างก่อน seed (count=5) -> refuse + no artifact + teardown", ok and na and it.torn)
+ok, na, _ = refuses(iso=FakeIso(published_ports=1))
+check("network publish port -> refuse + no artifact", ok and na)
+ok, na, _ = refuses(iso=FakeIso(is_prod=True))
+check("production endpoint -> refuse + no artifact", ok and na)
+ok, na, _ = refuses(iso=FakeIso(readback="TAMPERED"))
+check("marker readback != written -> refuse + no artifact", ok and na)
+
+# ── oracle observation ไม่ตรง frozen -> refuse ────────────────────────────────
+_bad_vis = {"qc": {"authorized_pairs": _pairs([("B", "tb")]), "sentinel_pairs": _pairs([("S", "ts")])},
+            "sales": {"authorized_pairs": _pairs([("B", "tb")]), "sentinel_pairs": _pairs([("S", "ts")])}}
+ok, na, _ = refuses(oracle=FakeOracle(UNFIL, _bad_vis))
+check("oracle observed_authorized != frozen -> refuse + no artifact", ok and na)
+
+# ── immutable: รันซ้ำ run เดิม -> PublishRefused ──────────────────────────────
+check("รัน run_id เดิมซ้ำ -> PublishRefused (immutable)", raises(lambda: call(ports(), BASE), AT.PublishRefused))
+
+# ── case ผิด frozen / cases ว่าง -> RunnerError ───────────────────────────────
+check("cases ว่าง -> RunnerError", raises(lambda: RUN.run_m4a(plan=PLAN, frozen=FROZEN, cases=[], corpus=[], marker="m", ports=ports(), out_dir=fresh(), argv=["x"], stdout=b"", stderr=b""), RUN.RunnerError))
+_badrole = [{"case_id": "case-qc", "effective_role": "sales", "query_text": QT1, "query_vector": VEC1}]
+check("effective_role ไม่ตรง frozen -> RunnerError", raises(lambda: RUN.run_m4a(plan=PLAN, frozen=FROZEN, cases=_badrole, corpus=[], marker="m", ports=ports(), out_dir=fresh(), argv=["x"], stdout=b"", stderr=b""), RUN.RunnerError))
+
+shutil.rmtree(BASE, ignore_errors=True)
+print(f"\n{sum(res)}/{len(res)} passed")
+sys.exit(0 if all(res) else 1)
