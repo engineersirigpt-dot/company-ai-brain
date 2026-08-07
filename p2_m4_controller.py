@@ -172,7 +172,9 @@ class DockerM4Controller:
     def _git_identity(self) -> dict:
         try:
             commit = self._checked(["git", "-C", self._src, "rev-parse", "HEAD"])
-            porcelain = _text(self._run(["git", "-C", self._src, "status", "--porcelain"]))
+            # --untracked-files=no: dirty = มีแก้ **ไฟล์ที่ track** ต่างจาก HEAD (source ที่รันจริง) ;
+            # ไฟล์ untracked ข้าง ๆ (tmp/, docs, .p2_m4_out ที่ gitignore) ไม่นับ — .py ที่รัน track+commit หมด
+            porcelain = _text(self._run(["git", "-C", self._src, "status", "--porcelain", "--untracked-files=no"]))
             return {"git_commit": commit, "git_tree_dirty": bool(porcelain.strip())}
         except ControllerError:
             return {"git_commit": "", "git_tree_dirty": True}   # ระบุไม่ได้ = ถือว่า dirty (fail-safe)
