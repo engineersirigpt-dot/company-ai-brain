@@ -97,6 +97,60 @@ check("isolation: endpoint_is_production ไม่ใช่ bool -> IsolationErr
       raises(lambda: ISO.QdrantDockerIsolation(driver=_nb).provision(), ISO.IsolationError))
 check("isolation: ไม่ inject driver -> IsolationError", raises(lambda: ISO.QdrantDockerIsolation(driver=None), ISO.IsolationError))
 
+# adapter propagates driver cleanup failure (B2) — ไม่กลืน (runner ต้องเห็น -> ไม่ publish)
+class _RaiseTeardown(FakeDriver):
+    def teardown(s): s.calls.append("teardown"); raise ISO.CleanupUnconfirmed("cleanup ยืนยันไม่ได้")
+_rt = ISO.QdrantDockerIsolation(driver=_RaiseTeardown()); _rt.provision()
+check("isolation: driver teardown ล้ม -> adapter propagate CleanupUnconfirmed (ไม่กลืน)", raises(lambda: _rt.teardown(), ISO.CleanupUnconfirmed))
+
+# ── DockerQdrantDriver (real seam) — logic ที่ offline-testable: image pin / fail-before-mutate / cleanup accumulate ──
+_IMG = "qdrant/qdrant@sha256:" + "d" * 64
+class FakeSess:
+    def __init__(s, *, endpoint, collection, identity=None):
+        s._ep = endpoint; s._coll = collection; s._id = identity; s.recreated = False
+    def observed_target_identity(s): return s._id if s._id is not None else {"collection_id": s._coll, "endpoint": s._ep}
+    def recreate_collection(s): s.recreated = True
+    def count(s): return 0
+    def write_marker(s, m): s._m = m
+    def read_marker(s): return getattr(s, "_m", None)
+    def seed(s, c): pass
+def make_run(*, teardown_exc=None):
+    def run(cmd):
+        if "create" in cmd: return "net-1" if "network" in cmd else "vol-1"
+        if cmd[1] == "run": return "cont-1"
+        if cmd[1] == "inspect": return "0"
+        if "rm" in cmd:
+            if teardown_exc is not None: raise teardown_exc
+            return ""
+        return ""
+    return run
+
+check("B3: DockerQdrantDriver image ไม่ pin digest (:latest) -> IsolationError",
+      raises(lambda: ISO.DockerQdrantDriver(run=make_run(), session_factory=lambda e, c, v: FakeSess(endpoint=e, collection=c),
+             project_id="proj-1", image_digest="qdrant/qdrant:latest"), ISO.IsolationError))
+# B1 fail-before-mutate: session identity ไม่ตรง provisioned target -> abort ก่อน recreate_collection
+_bad_sess = {"holder": None}
+def _bad_factory(e, c, v):
+    s = FakeSess(endpoint=e, collection=c, identity={"collection_id": "WRONG", "endpoint": e}); _bad_sess["holder"] = s; return s
+_drv_bad = ISO.DockerQdrantDriver(run=make_run(), session_factory=_bad_factory, project_id="proj-1", image_digest=_IMG)
+check("B1: session target ไม่ตรง -> provision abort **ก่อน** Qdrant write (recreate ไม่ถูกเรียก)",
+      raises(lambda: _drv_bad.provision(), ISO.IsolationError) and _bad_sess["holder"].recreated is False)
+# B1 happy: identity ตรง -> recreate ถูกเรียก (mutation หลัง verify) + handle ครบ
+_good = {"holder": None}
+def _good_factory(e, c, v):
+    s = FakeSess(endpoint=e, collection=c); _good["holder"] = s; return s
+_drv = ISO.DockerQdrantDriver(run=make_run(), session_factory=_good_factory, project_id="proj-1", image_digest=_IMG)
+_h = _drv.provision()
+check("B1: identity ตรง -> recreate ถูกเรียกหลัง verify + handle 4 distinct ids + endpoint",
+      _good["holder"].recreated is True and len({_h["project_id"], _h["network_id"], _h["volume_id"], _h["collection_id"]}) == 4)
+# B2 cleanup: teardown ล้มแบบไม่ใช่ not-found -> CleanupUnconfirmed (ไม่กลืน)
+_drv2 = ISO.DockerQdrantDriver(run=make_run(teardown_exc=RuntimeError("docker daemon error")), session_factory=_good_factory, project_id="proj-1", image_digest=_IMG)
+_drv2.provision()
+check("B2: teardown ล้ม (docker error) -> CleanupUnconfirmed (สะสม error, ไม่กลืน)", raises(lambda: _drv2.teardown(), ISO.CleanupUnconfirmed))
+_drv3 = ISO.DockerQdrantDriver(run=make_run(teardown_exc=RuntimeError("Error: No such container: cont-1")), session_factory=_good_factory, project_id="proj-1", image_digest=_IMG)
+_drv3.provision()
+check("B2: teardown 'no such' -> idempotent OK (ไม่ raise)", _drv3.teardown() is None)
+
 # ── capstone: M4a synthetic run เต็ม (adapter จริง 4 ตัว) -> PUBLISHED/PASS ─────
 _H = "a" * 64
 IC = {"model_name": RK.RERANKER_MODEL, "max_length": 512, "batch_size": 16, "device": "cpu", "dtype": "float32"}
@@ -180,6 +234,8 @@ check("capstone: isolation lifecycle เต็ม (provision→observe→write�
       _isodrv.calls[0] == "provision" and "seed" in _isodrv.calls and _isodrv.torn == 1 and _isodrv.calls.index("write") < _isodrv.calls.index("read") < _isodrv.calls.index("seed"))
 check("capstone: IsolationProof + independent_oracle PASS ใน evidence", E.validate_m4_isolation_proof(r["evidence"]["isolation_proof"]) == [] and r["evidence"]["independent_oracle"] == "PASS" and r["evidence"]["isolated_interlock"] == "PASS")
 check("capstone: scorer เห็นเฉพาะ authorized query (ไม่มี sentinel ts ถึง model)", _scorer.queries == [QT1, QT2])
+check("B4: M4a synthetic evidence = decision_eligible False (mechanics เท่านั้น — ใช้เป็น decision ไม่ได้)",
+      r["evidence"]["decision_eligible"] is False)
 shutil.rmtree(d, ignore_errors=True)
 
 print(f"\n{sum(res)}/{len(res)} passed")

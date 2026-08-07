@@ -64,5 +64,17 @@ check("build_m4_scorer(loader คืน scorer ผิด pin) -> M4ScorerError (
       raises(lambda: SC.build_m4_scorer(PLAN, loader=lambda plan: FakePinned(revision="d" * 40)), SC.M4ScorerError))
 check("build_m4_scorer: plan ไม่มี run_id -> M4ScorerError", raises(lambda: SC.build_m4_scorer({}, loader=lambda plan: FakePinned()), SC.M4ScorerError))
 
+# ── M1: real PinnedCrossEncoder metadata (dtype canonical) ต้องตรง plan (regression ของ torch.float32 mismatch) ──
+check("M1: canonical_dtype('torch.float32') == 'float32'", RK.canonical_dtype("torch.float32") == "float32" and RK.canonical_dtype("float32") == "float32")
+_real = RK.PinnedCrossEncoder(None, None, model_name=RK.RERANKER_MODEL, model_commit="a" * 40, tokenizer_commit="a" * 40,
+                             file_manifest_sha256=_H, dtype=RK.canonical_dtype("torch.float32"),
+                             torch_version="2.x", transformers_version="4.x", device="cpu", max_length=512, batch_size=16)
+check("M1: real-shaped PinnedCrossEncoder (dtype จาก loader) ผ่าน plan pin (ไม่ใช่ fake ที่ copy IC)",
+      SC.assert_scorer_matches_plan(_real, PLAN)["scorer_kind"] == "pinned-cross-encoder")
+check("M1: ถ้า dtype ไม่ canonical (torch.float32) -> reject (พิสูจน์ normalize จำเป็น)",
+      raises(lambda: SC.assert_scorer_matches_plan(RK.PinnedCrossEncoder(None, None, model_name=RK.RERANKER_MODEL,
+             model_commit="a" * 40, tokenizer_commit="a" * 40, file_manifest_sha256=_H, dtype="torch.float32",
+             torch_version="2.x", transformers_version="4.x", device="cpu", max_length=512, batch_size=16), PLAN), SC.M4ScorerError))
+
 print(f"\n{sum(res)}/{len(res)} passed")
 sys.exit(0 if all(res) else 1)

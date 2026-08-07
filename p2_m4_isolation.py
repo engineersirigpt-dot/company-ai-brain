@@ -120,68 +120,148 @@ class QdrantDockerIsolation:
             raise IsolationError("project/network/volume/collection ต้อง distinct 4 ตัว (isolation จริง)")
 
 
-# ── real driver (docker + qdrant) — รันจริง = NO-GO จน slice review + Data Owner (M4b) / infra approval ──
-# offline test ใช้ fake driver ; real path นี้ไม่ถูก unit-test (ต้อง docker + qdrant_client จริง) — reviewable seam
+class CleanupUnconfirmed(Exception):
+    """teardown ยืนยันไม่ได้ว่าทรัพยากรหายจริง (B2) — runner ต้องไม่ publish PASS (resource อาจค้าง กระทบ run ถัดไป)"""
+
+
+def _is_not_found(err) -> bool:
+    m = str(err).lower()
+    return "no such" in m or "not found" in m or "already removed" in m
+
+
+# ── real driver (docker + qdrant) — รันจริง = NO-GO จน slice review + real-run slice ──
+# docker CLI ผ่าน injected `run` ; qdrant ops ผ่าน injected `session_factory(endpoint,collection,vector_size)->session`
+# (concrete facade เหนือ QdrantClient มาตรฐาน) → **ordering/guard/cleanup logic offline-testable** ; real API = untested seam
 class DockerQdrantDriver:
     """
-    real isolation infra: docker network (internal, no published ports) + volume + qdrant container + fresh collection.
-    marker = point payload policy-v1 `allowed_roles=[]` (deny-all → ไม่โผล่ retrieval) เขียน/อ่านกลับผ่าน collection จริง.
-    **ยังไม่รันในเทสต์** — imports qdrant_client แบบ lazy ; ทุก docker op ผ่าน injected `run` (subprocess) เพื่อ audit
+    real isolation infra: docker network `--internal` (no published ports) + ephemeral volume + qdrant container
+    (**pinned image digest** ไม่ใช่ `:latest`) + fresh collection.
+    **fail-before-mutate (B1):** provision infra → build session → **verify transport-derived target identity +
+    endpoint_is_production ก่อน Qdrant write แรก (recreate_collection)** ; production/target ไม่ตรง → abort ก่อน mutate.
+    **cleanup (B2):** teardown สะสม error, "not found" = idempotent OK, อื่น ๆ → `CleanupUnconfirmed`.
+    **runtime attest (B4):** `observed_image_digest()` = digest จาก docker inspect (runtime) ให้ launcher bind แทน plan-declared.
     """
 
-    _MARKER_ID = 1
-    _MARKER_KEY = "m4_run_marker"
-
-    def __init__(self, *, run, client_factory, project_id, image="qdrant/qdrant:latest",
+    def __init__(self, *, run, session_factory, project_id, image_digest,
                  vector_size=1024, production_endpoints=frozenset()):
-        self._run = run                                     # callable(list[str]) -> str (docker CLI stdout) — injectable/audit
-        self._client_factory = client_factory               # callable(endpoint) -> qdrant client
+        if not (isinstance(image_digest, str) and "@sha256:" in image_digest):
+            raise IsolationError("image_digest ต้อง pin ด้วย immutable digest (name@sha256:...) ไม่ใช่ :latest/tag")
+        self._run = run                                     # callable(list[str]) -> str (docker CLI stdout, audit)
+        self._session_factory = session_factory             # callable(endpoint, collection, vector_size) -> QdrantSession
         self._project_id = project_id
-        self._image = image
+        self._image = image_digest
         self._vector_size = vector_size
         self._prod = frozenset(production_endpoints)
-        self._net = self._vol = self._container = self._endpoint = self._collection = self._client = None
+        self._net = self._vol = self._container = self._endpoint = self._collection = self._session = None
 
     def provision(self) -> dict:
         import secrets
         tok = secrets.token_hex(6)
         self._net = self._run(["docker", "network", "create", "--internal", f"m4net-{tok}"]).strip()
         self._vol = self._run(["docker", "volume", "create", f"m4vol-{tok}"]).strip()
-        # container ภายใน network เดียว, ไม่ publish port (internal only) — endpoint = ชื่อ container ใน network
-        self._container = self._run(["docker", "run", "-d", "--rm", "--network", self._net,
+        self._container = self._run(["docker", "run", "-d", "--network", self._net,
                                      "-v", f"{self._vol}:/qdrant/storage", "--name", f"m4qd-{tok}", self._image]).strip()
         self._endpoint = f"http://m4qd-{tok}:6333"
         self._collection = f"m4-isolated-{tok}"
-        self._client = self._client_factory(self._endpoint)
-        self._client.recreate_collection(self._collection, vector_size=self._vector_size)
+        self._session = self._session_factory(self._endpoint, self._collection, self._vector_size)
+        # ── fail-before-mutate (B1): พิสูจน์ target จาก transport จริง + non-production **ก่อน** write แรก ──
+        observed = self._session.observed_target_identity()
+        if observed != {"collection_id": self._collection, "endpoint": self._endpoint}:
+            raise IsolationError(f"session target ไม่ตรง provisioned target (transport identity): {observed}")
+        if self.endpoint_is_production():
+            raise IsolationError("provisioned endpoint = production — abort ก่อน Qdrant write")
+        self._session.recreate_collection()                 # first Qdrant mutation — หลัง verify แล้วเท่านั้น
         return {"project_id": self._project_id, "network_id": self._net, "volume_id": self._vol,
                 "collection_id": self._collection, "endpoint": self._endpoint}
 
+    def observed_image_digest(self) -> str:
+        """B4: digest จาก runtime image ของ container จริง (docker inspect) — launcher bind แทน plan-declared"""
+        return self._run(["docker", "inspect", "-f", "{{index .Image}}", self._container]).strip()
+
     def count(self) -> int:
-        return int(self._client.count(self._collection))
+        return self._session.count()                        # QdrantSession คืน int (CountResult.count)
 
     def published_ports(self) -> int:
         out = self._run(["docker", "inspect", "-f", "{{len .NetworkSettings.Ports}}", self._container]).strip()
         return int(out or "0")
 
     def endpoint_is_production(self) -> bool:
-        return self._endpoint in self._prod                 # ephemeral internal endpoint → False
+        # ephemeral container ที่เราสร้างเองบน --internal network → non-production ; denylist = defense ชั้นสอง
+        return self._endpoint in self._prod
 
     def write_marker(self, marker) -> None:
-        self._client.upsert_marker(self._collection, self._MARKER_ID, self._MARKER_KEY, marker)
+        self._session.write_marker(marker)                  # point deny-all (allowed_roles=[]) → ไม่โผล่ retrieval
 
     def read_marker(self):
-        return self._client.read_marker(self._collection, self._MARKER_ID, self._MARKER_KEY)
+        return self._session.read_marker()
 
     def seed(self, corpus) -> None:
-        self._client.seed(self._collection, corpus)
+        self._session.seed(corpus)
 
     def teardown(self) -> None:
-        for cmd in (["docker", "rm", "-f", self._container] if self._container else None,
-                    ["docker", "volume", "rm", "-f", self._vol] if self._vol else None,
-                    ["docker", "network", "rm", self._net] if self._net else None):
-            if cmd:
-                try:
-                    self._run(cmd)
-                except Exception:
-                    pass                                    # idempotent / partial-provision-safe
+        errors = []
+        for cmd in ([["docker", "rm", "-f", self._container]] if self._container else []) + \
+                   ([["docker", "volume", "rm", "-f", self._vol]] if self._vol else []) + \
+                   ([["docker", "network", "rm", self._net]] if self._net else []):
+            try:
+                self._run(cmd)
+            except Exception as e:
+                if not _is_not_found(e):                     # "not found" = ลบไปแล้ว = idempotent OK ; อื่น ๆ = สะสม
+                    errors.append((cmd[-1], type(e).__name__, str(e)))
+        if errors:
+            raise CleanupUnconfirmed(f"teardown ยืนยันไม่ได้ ({len(errors)} resource ค้าง): {errors}")
+
+
+class QdrantSession:
+    """
+    concrete facade เหนือ standard `qdrant_client.QdrantClient` (B3) — ops ที่ driver ใช้ + transport-derived identity.
+    real: `recreate_collection(vectors_config=VectorParams(...))`, `count().count`, `upsert/retrieve` (marker point deny-all),
+    identity ยืนยันจาก client transport จริง. **ยังไม่ unit-test กับ real qdrant API** (reviewable seam ; real-run slice ตรวจ)
+    """
+    _MARKER_ID = 1
+    _MARKER_KEY = "m4_run_marker"
+
+    def __init__(self, client, *, endpoint, collection, vector_size):
+        self._c = client
+        self._endpoint = endpoint
+        self._collection = collection
+        self._vsize = vector_size
+
+    @classmethod
+    def connect(cls, endpoint, collection, vector_size):
+        from qdrant_client import QdrantClient
+        return cls(QdrantClient(url=endpoint), endpoint=endpoint, collection=collection, vector_size=vector_size)
+
+    def observed_target_identity(self) -> dict:
+        self._c.get_collections()                           # ping transport จริง (ยืนยันเชื่อมต่อ endpoint นี้ได้)
+        return {"collection_id": self._collection, "endpoint": self._endpoint}
+
+    def recreate_collection(self) -> None:
+        from qdrant_client.models import VectorParams, Distance
+        self._c.recreate_collection(self._collection,
+                                    vectors_config=VectorParams(size=self._vsize, distance=Distance.COSINE))
+
+    def count(self) -> int:
+        return int(self._c.count(self._collection).count)
+
+    def _mk_payload(self, marker) -> dict:
+        return {self._MARKER_KEY: marker, "acl_schema_version": 1, "policy_version": "poc-v1",
+                "policy_status": "ACTIVE", "collection_group": "RECALL", "confidentiality_level": 3,
+                "allowed_roles": []}                         # deny-all → ไม่ match role ใด → ไม่โผล่ provider retrieval
+
+    def write_marker(self, marker) -> None:
+        from qdrant_client.models import PointStruct
+        self._c.upsert(self._collection, points=[PointStruct(id=self._MARKER_ID, vector=[0.0] * self._vsize,
+                                                             payload=self._mk_payload(marker))])
+
+    def read_marker(self):
+        recs = self._c.retrieve(self._collection, ids=[self._MARKER_ID], with_payload=True)
+        return recs[0].payload.get(self._MARKER_KEY) if recs else None
+
+    def seed(self, corpus) -> None:
+        from qdrant_client.models import PointStruct
+        pts = [PointStruct(id=str(pid), vector=doc.get("vector", [0.0] * self._vsize),
+                           payload={**doc.get("payload", {}), "source": doc.get("source", ""),
+                                    "rerank_text": doc.get("rerank_text", "")})
+               for pid, doc in corpus.items()]
+        self._c.upsert(self._collection, points=pts)

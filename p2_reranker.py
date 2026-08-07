@@ -91,6 +91,12 @@ class PinnedCrossEncoder:
                 "max_length": self.max_length, "batch_size": self.batch_size}
 
 
+def canonical_dtype(dt) -> str:
+    """M1: canonical dtype representation จุดเดียว (RunPlan/loader/smoke ตรงกัน) — 'torch.float32' → 'float32'"""
+    s = str(dt)
+    return s[len("torch."):] if s.startswith("torch.") else s
+
+
 def _resolved_commit(snapshot_path: str) -> str:
     """
     M1: HF snapshot layout = <cache>/models--<org>--<name>/snapshots/<commit_sha>/
@@ -145,6 +151,6 @@ def load_pinned_cross_encoder(model_name: str = RERANKER_MODEL, *, revision: str
     model.eval().to(device)
     return PinnedCrossEncoder(
         model, tok, model_name=model_name, model_commit=resolved, tokenizer_commit=resolved,
-        file_manifest_sha256=_snapshot_manifest_sha256(snap), dtype=str(model.dtype),
+        file_manifest_sha256=_snapshot_manifest_sha256(snap), dtype=canonical_dtype(model.dtype),
         torch_version=torch.__version__, transformers_version=transformers.__version__,
         device=device, max_length=max_length, batch_size=batch_size)
