@@ -15,7 +15,7 @@
 > **🧭 P2/M4 decision (2026-08-07, เจ้าของงาน Suwat — บันทึกเป็นการตัดสินใจใหม่ ไม่ใช่เปลี่ยนเงียบ ๆ):**
 > หลัง safety-pieces ผ่าน Codex 12 รอบ (GO/SHIP) + provenance ย้าย SQLite + Qdrant provider/oracle adapter — **เปลี่ยนโหมดจาก "พิสูจน์ว่ากลไกกันพัง" → "พิสูจน์ว่าระบบสร้างผลลัพธ์จริง"** โดย:
 > 1. **ปิด adapter B1/B2/M1** (`a2c0f9e`) แล้วส่ง Codex **targeted re-review หนึ่งรอบ** — **Definition of Done:** (ก) client ถูกสร้าง/bind จาก endpoint ใน isolated handle จริง (ข) oracle observation ผูกราย **case** (ค) probe roles มาจาก **approved allowlist** ผูก RunPlan/frozen (ไม่ mint admin เอง) (ง) targeted tests ผ่าน
-> 2. **Freeze safety/provenance v1** หลัง DoD ผ่าน — **ห้ามขยาย hardening เพิ่ม** ; finding ใหม่จาก Codex → **backlog** เว้นแต่พิสูจน์ได้ว่าเกิดหนึ่งใน: **(1) ข้อมูลข้ามสิทธิ์ถึงโมเดล · (2) adapter แตะ production ได้ · (3) evidence รายงาน PASS เท็จ · (4) resource cleanup ล้มจนมีผลต่อการรันถัดไป**
+> 2. **Freeze safety/provenance v1** — **✅ DoD ผ่าน (Codex GO/SHIP @ `a2c0f9e`, `KB_P2_M4_QDRANT_ADAPTER_FIX_CODEX_REREVIEW_A2C0F9E.md`) → v1 FROZEN ตั้งแต่ 2026-08-07** — **ห้ามขยาย hardening เพิ่ม** ; finding ใหม่จาก Codex → **backlog** เว้นแต่พิสูจน์ได้ว่าเกิดหนึ่งใน: **(1) ข้อมูลข้ามสิทธิ์ถึงโมเดล · (2) adapter แตะ production ได้ · (3) evidence รายงาน PASS เท็จ · (4) resource cleanup ล้มจนมีผลต่อการรันถัดไป**
 > 3. **แยก gate (เปลี่ยนจากเดิมที่ล็อกว่า M4a ต้อง sign-off):**
 >    - **M4a synthetic mechanics = GO** — corpus สังเคราะห์บน isolated Qdrant เพื่อพิสูจน์ว่า pipeline รันจริงได้ ; **ไม่ต้องใช้เอกสารบริษัท / ไม่ต้อง Data Owner sign-off**
 >    - **M4b decision benchmark / ข้อมูลจริง + N-sweep = NO-GO** จน **Data Owner sign-off (hash-bound) + classification + human-reviewed labels**
