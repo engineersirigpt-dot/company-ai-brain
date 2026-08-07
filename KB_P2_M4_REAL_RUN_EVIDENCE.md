@@ -55,10 +55,42 @@ RBAC correct: qc={ta}=True | sales={tb}=True
 
 **ยืนยัน:** RBAC filter ทำงานบน **Qdrant จริง** (ไม่ใช่แค่ fake `matches_policy` model) — sentinel ที่คล้ายเชิง semantic ถูกกรองก่อน retrieval → **ปิดช่องว่าง "matches_policy เป็น model ไม่ใช่ Qdrant oracle"** ระดับ smoke (P5b conformance เต็มยังเป็นงานแยก)
 
-## ยังเหลือ (full M4a real execution)
+## 4. 🎯 FULL M4a real execution — runner ครบ pipeline ภายใน pinned container จริง
 
-- `controller.execute` จริง: `docker run/exec` runner ภายใน pinned evaluator container บน `--internal` network เดียวกับ Qdrant → รับ bundle + executed image digest → `run_m4a_locked` verify (B1/B4 execution)
-- point-id contract: synthetic corpus generator ต้องออก UUID/int ids + frozen ใช้ id เดียวกัน (ตาม `_valid_qdrant_id`)
-- teardown จริง (network/volume/container) + IsolationProof จาก Docker inspect จริง
+controller (host) provision network + volume + Qdrant container (no published ports) → รัน **evaluator ภายใน pinned
+reranker container** (`p2_m4_evaluator.py`, mount current source, `pip install qdrant-client` runtime) บน network เดียวกับ
+Qdrant → `run_m4a` ด้วย adapter จริงทั้ง 4 (real scorer + real Qdrant provider/oracle + container-side isolation):
 
-ทุก container ที่รันทดสอบ **teardown แล้ว** (ไม่มี m4qd ค้าง) ; ยังไม่แตะข้อมูลจริง
+```
+M4A_RESULT status=PUBLISHED  evidence=PASS
+  isolated_interlock=PASS   independent_oracle=PASS
+  sentinel_reached_model=FALSE   unauthorized_in_model_inputs=0   decision_eligible=False
+```
+
+validate bundle บน host (public gate):
+```
+evidence.status               PASS
+scorer_kind                   pinned-cross-encoder
+image_digest                  sha256:27768971905e...   (= evaluator container image)
+model_revision / dtype        953dc6f6... / float32     (real pin + M1 fix)
+isolation_proof errs          []                        (distinct ids + count 0 + published_ports 0 + non-production + marker round-trip)
+receipt.image_digest==evidence  True
+executed image == plan.image_digest  True               ← B4 attestation load-bearing (runner รันใน pinned image จริง)
+```
+
+**ยืนยัน:** M4 permission-leak proof ผ่านครบบน **infra จริง** — sentinel ไม่ถึง scorer, IsolationProof valid, independent
+oracle PASS, executed image = pinned evaluator image (B1/B4 execution ปิดด้วยการรันจริง)
+
+### บั๊กที่รันจริงจับได้ (offline/fake จับไม่ได้)
+1. `seed` str point id → Qdrant 400 (ต้อง uint/UUID) → `_valid_qdrant_id`
+2. **marker point pollute `unfiltered_topn`** (oracle เห็น marker payload ที่ไม่มี rerank_text → crash) → `QdrantSession.seed`
+   ลบ marker (`clear_marker`) หลัง interlock เสร็จ ก่อน seed corpus
+
+## ข้อจำกัดของ run นี้ (synthetic mechanics — ยังไม่ production)
+- network เป็น user-defined bridge (มี internet ให้ pip) + Qdrant **ไม่ publish port** (`published_ports=0`) ; production isolation
+  ควร `--internal` + bake `qdrant-client` เข้า image (ไม่ pip runtime) — เป็นงาน hardening ของ real-run pinned image
+- `qdrant-client` ยัง pip runtime ใน container (ไม่ baked) → reproducibility gap ของ image (executed image digest ยังตรง base)
+- vectors เป็น deterministic dummy (permission proof ไม่ขึ้นกับ ranking) ; embedder จริง (BGE-M3) = งานแยก
+- **synthetic corpus เท่านั้น** ; M4b/ข้อมูลจริง ยัง NO-GO จน Data Owner sign-off
+
+ทุก container **teardown แล้ว** (network/volume/qdrant ลบหมด ไม่มีค้าง) ; ไม่แตะข้อมูลจริง

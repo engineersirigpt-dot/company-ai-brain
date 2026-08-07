@@ -234,6 +234,47 @@ class DockerQdrantDriver:
             raise CleanupUnconfirmed(f"teardown ยืนยันไม่ได้ ({len(errors)} resource ค้าง): {errors}")
 
 
+class QdrantSessionDriver:
+    """
+    container-side isolation driver — Qdrant ops ผ่าน `QdrantSession` (ไม่มี docker CLI) ; Docker observations
+    (network/volume/published_ports/is_production) มาจาก controller ที่ verify ที่ host แล้ว (evaluator รันใน container
+    บน internal network → reach Qdrant ผ่าน DNS) ; provision สร้าง fresh collection, teardown = controller ลบ infra
+    """
+
+    def __init__(self, *, session, project_id, network_id, volume_id, collection_id, endpoint,
+                 published_ports=0, endpoint_is_production=False):
+        self._s = session
+        self._ids = {"project_id": project_id, "network_id": network_id, "volume_id": volume_id,
+                     "collection_id": collection_id, "endpoint": endpoint}
+        self._pp = published_ports
+        self._prod = endpoint_is_production
+
+    def provision(self) -> dict:
+        self._s.recreate_collection()                       # fresh empty collection (count 0 ก่อน marker/seed)
+        return dict(self._ids)
+
+    def count(self) -> int:
+        return self._s.count()
+
+    def published_ports(self) -> int:
+        return self._pp
+
+    def endpoint_is_production(self) -> bool:
+        return self._prod
+
+    def write_marker(self, marker) -> None:
+        self._s.write_marker(marker)
+
+    def read_marker(self):
+        return self._s.read_marker()
+
+    def seed(self, corpus) -> None:
+        self._s.seed(corpus)
+
+    def teardown(self) -> None:
+        pass                                                # controller (host) ลบ network/container/volume — collection หายกับ container
+
+
 class QdrantSession:
     """
     concrete facade เหนือ standard `qdrant_client.QdrantClient` (B3) — ops ที่ driver ใช้ + transport-derived identity.
@@ -280,9 +321,19 @@ class QdrantSession:
         recs = self._c.retrieve(self._collection, ids=[self._MARKER_ID], with_payload=True)
         return recs[0].payload.get(self._MARKER_KEY) if recs else None
 
+    def _dummy_vector(self, pid) -> list:
+        import hashlib
+        h = hashlib.sha256(str(pid).encode("utf-8")).digest()
+        return [(h[i % len(h)] / 255.0) + 0.01 for i in range(self._vsize)]   # non-zero deterministic (กัน zero-vector cosine)
+
+    def clear_marker(self) -> None:
+        from qdrant_client.models import PointIdsList
+        self._c.delete(self._collection, points_selector=PointIdsList(points=[self._MARKER_ID]))
+
     def seed(self, corpus) -> None:
         from qdrant_client.models import PointStruct
-        pts = [PointStruct(id=_valid_qdrant_id(pid), vector=doc.get("vector", [0.0] * self._vsize),
+        self.clear_marker()                                 # interlock (write→read) เสร็จแล้ว → ลบ marker กัน pollute retrieval (oracle unfiltered)
+        pts = [PointStruct(id=_valid_qdrant_id(pid), vector=doc.get("vector") or self._dummy_vector(pid),
                            payload={**doc.get("payload", {}), "source": doc.get("source", ""),
                                     "rerank_text": doc.get("rerank_text", "")})
                for pid, doc in corpus.items()]

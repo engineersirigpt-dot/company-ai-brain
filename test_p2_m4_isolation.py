@@ -145,6 +145,27 @@ check("B2: teardown docker error -> CleanupUnconfirmed (สะสม, ไม่�
 _d3 = _drv(run=make_run(teardown_exc=RuntimeError("Error: No such container: cont-1"))); _d3.provision()
 check("B2: teardown 'no such' -> idempotent OK (ไม่ raise)", _d3.teardown() is None)
 
+# ── QdrantSessionDriver (container-side, real-run) — delegate Qdrant ops ผ่าน session + Docker obs จาก controller ──
+class FakeSess2:
+    def __init__(s): s.recreated = False; s._m = None; s.seeded = False
+    def recreate_collection(s): s.recreated = True
+    def count(s): return 0
+    def write_marker(s, m): s._m = m
+    def read_marker(s): return s._m
+    def seed(s, c): s.seeded = True
+_fs = FakeSess2()
+_qsd = ISO.QdrantSessionDriver(session=_fs, project_id="p", network_id="n", volume_id="v", collection_id="c",
+                               endpoint="http://m4qd:6333", published_ports=0, endpoint_is_production=False)
+_iso3 = ISO.QdrantDockerIsolation(driver=_qsd)
+_h3 = _iso3.provision()
+check("QdrantSessionDriver: provision -> recreate collection + handle 4 distinct ids",
+      _fs.recreated and set(_h3) == {"project_id", "network_id", "volume_id", "collection_id", "endpoint"} and len({_h3[k] for k in ("project_id", "network_id", "volume_id", "collection_id")}) == 4)
+_iso3.write_marker("m4-run-uuid"); _iso3.seed({})
+check("QdrantSessionDriver: observe int-0/bool-False + marker round-trip + seed delegate",
+      _iso3.observe_initial_count() == 0 and _iso3.observe_published_ports() == 0 and _iso3.observe_endpoint_is_production() is False and _iso3.read_marker() == "m4-run-uuid" and _fs.seeded)
+_iso3.teardown()
+check("QdrantSessionDriver: teardown no-op (controller ลบ infra host)", True)
+
 # ── capstone: M4a synthetic run เต็ม (adapter จริง 4 ตัว) -> PUBLISHED/PASS ─────
 _H = "a" * 64
 IC = {"model_name": RK.RERANKER_MODEL, "max_length": 512, "batch_size": 16, "device": "cpu", "dtype": "float32"}
