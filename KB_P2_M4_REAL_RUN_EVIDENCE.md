@@ -94,3 +94,54 @@ oracle PASS, executed image = pinned evaluator image (B1/B4 execution ปิด�
 - **synthetic corpus เท่านั้น** ; M4b/ข้อมูลจริง ยัง NO-GO จน Data Owner sign-off
 
 ทุก container **teardown แล้ว** (network/volume/qdrant ลบหมด ไม่มีค้าง) ; ไม่แตะข้อมูลจริง
+
+---
+
+## 5. ✅ Outer receipt — host-authoritative closure (ปิด Codex real-run B1/B2/B3/M1)
+
+**ปัญหาที่ Codex ชี้ (review 7de8574):** ผลรอบ §4 capability ผ่าน แต่ค่าที่ยืนยัน image/isolation/cleanup เป็นค่าที่
+**evaluator ประกาศเองจาก env** (ปลอมได้ = false-PASS) และ PASS ถูก publish **ก่อน** cleanup → ต้องมี host controller
+สังเกต Docker เอง + ยืนยัน cleanup ก่อน resolve verdict แล้ว hash-bind กับ inner bundle
+
+**วิธีปิด:** `DockerM4Controller` (host) → provision → run evaluator (pinned image) → **observe จาก `docker inspect` จริง**
+→ teardown → **post-inspect ยืนยันหาย** → ประกอบ **outer receipt** (fail-closed) — terminal verdict คำนวณจาก
+observation (ไม่เชื่อค่าที่ evaluator/receipt เขียน)
+
+### ผลรัน evidence (clean tree)
+
+```
+attempt_id            oc-e02f8f38
+git_commit / dirty    5dade757702a / False        ← source ที่รันจริง = commit สะอาด (tracked ไม่แก้)
+TERMINAL_STATUS       PASS
+validate errs         []                          (validate_m4_outer_receipt fail-closed)
+bundle_sha256         d681d9d02c284abb386a5f8e78bab99714e6ef0341fc4432700f0f7cbd230577   (bind inner bundle ทั้งก้อน)
+outer_receipt_sha256  f08f4dbedfcaf854e6e954123abc2164174d98268733bdfa3337ec7a9df24b8e
+```
+
+หลักฐานเก็บ tracked: `KB_P2_M4_OUTER_RECEIPT.json` (outer) + `KB_P2_M4_INNER_BUNDLE.json` (inner ที่ถูก bind)
+
+### แต่ละ finding ปิดด้วย observation จริง (ไม่ใช่ declared)
+
+| Codex | ปิดด้วย (observed จาก Docker/subprocess) |
+|---|---|
+| **B1** image self-assert | `docker inspect {{index .Image}}` ของ evaluator container = `sha256:27768971…` **== pin == inner bundle image_digest** (evaluator ปลอม digest → mismatch → FAILED) |
+| **B2** isolation env | identity: `typed_id_sha256(docker network/volume/project/collection)` **== isolation_proof.*_sha256** ✓ ; host-published ports = **0** (นับเฉพาะ host-binding จริง ไม่ใช่ EXPOSE) == declared 0 |
+| **B3** PASS ก่อน cleanup | teardown → **post-inspect** ทุก resource → `residual=[]`, `confirmed=True` ; ถ้ายังค้าง → `DEGRADED` (ไม่ PASS) |
+| **M1** synthetic receipt | บันทึกจริง: `command` (docker argv เต็ม), `exit_code=0`, `started/finished_utc`, `stdout/stderr_sha256`, `dependency_digest` (pip freeze ในคอนเทนเนอร์), `git_commit` |
+
+### negative proof (offline, Codex DoD #5 — ครบ 3)
+`test_p2_m4_receipt.py` 19/19 + `test_p2_m4_controller.py` 13/13:
+- **N1 image env ปลอม** → observed evaluator image ≠ pin/inner → `FAILED` (+ lying receipt terminal=PASS → validator จับ)
+- **N2 isolation env ปลอม** → observed published_ports≠0 / observed network id hash ≠ proof → `FAILED`
+- **N3 cleanup fail หลัง inner PASS** → residual≠[] → `DEGRADED` (ไม่ publish PASS)
+
+### บั๊กที่ real run จับได้ (offline จับไม่ได้)
+`{{len .NetworkSettings.Ports}}` นับ **EXPOSE** ด้วย (Qdrant image EXPOSE 6333/6334 → ได้ 2 ทั้งที่ไม่ publish) →
+รอบแรก terminal FAILED ผิด → แก้เป็นนับเฉพาะ port ที่มี **host binding จริง** (`.NetworkSettings.Ports` value ไม่ null)
+
+### ข้อจำกัดที่ **bind ไว้ใน receipt** (bounded rerun — Codex อนุญาต)
+- `network_internal=False` (bridge มี egress ให้ pip) ไม่ใช่ `--internal` ; host-published ports = 0 (Docker-observed) ยังจริง
+- `qdrant-client` pip runtime ไม่ baked → dependency identity bind ด้วย `dependency_digest` ; source ด้วย `git_commit`
+- synthetic corpus / dummy vectors เท่านั้น ; **M4b/ข้อมูลจริง ยัง NO-GO** จน Data Owner sign-off
+
+ทุก container **teardown + post-inspect ยืนยันหายจริง** ; ไม่มี resource ค้าง ; ไม่แตะข้อมูลจริง
