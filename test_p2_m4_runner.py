@@ -95,7 +95,7 @@ class FakeOracle:
     def observed_target_identity(self):
         return self._t if self._t is not None else {"collection_id": self._bound["collection_id"], "endpoint": self._bound["endpoint"]}
     def unfiltered_topn(self, qv, limit): return list(self.u.get(tuple(qv), []))
-    def observe_visibility(self, role): return self.v[role]
+    def observe_visibility(self, case_id, role): return self.v[role]
 
 class FakeClock:
     def __init__(self): self.n = 0

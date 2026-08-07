@@ -74,7 +74,7 @@ class FakeOracle:
     def bind(s, h): s._b = h
     def observed_target_identity(s): return {"collection_id": s._b["collection_id"], "endpoint": s._b["endpoint"]}
     def unfiltered_topn(s, qv, limit): return list(s.u.get(tuple(qv), []))
-    def observe_visibility(s, role): return s.v[role]
+    def observe_visibility(s, case_id, role): return s.v[role]
 class FakeClock:                                       # ISO+tz เพิ่มขึ้น (wrapper + runner ใช้ authority เดียวกัน)
     def __init__(s): s.n = 0
     def now_iso(s): s.n += 1; return "2026-08-05T05:0%d:00+07:00" % s.n

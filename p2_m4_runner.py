@@ -13,7 +13,7 @@ interlock/corpus/target ผิด → abort **ก่อน** write_marker/seed/m
   ports.provider : .bind(handle) ; .observed_target_identity() -> {collection_id,endpoint}       (B3)
                    .filtered_candidates(effective_role, query_vector, limit) -> [(point_id, rerank_text)]
   ports.oracle   : .bind(handle) ; .observed_target_identity() -> {collection_id,endpoint}        (B3, client แยก)
-                   .unfiltered_topn(query_vector, limit) ; .observe_visibility(effective_role)
+                   .unfiltered_topn(query_vector, limit) ; .observe_visibility(case_id, effective_role)
   ports.clock    : .now_iso() -> str
 
 flow: validate plan → M4RunRequest → **bind corpus↔RunPlan (B2)** → validate scorer pin → provision →
@@ -179,7 +179,7 @@ def run_m4a(*, plan, frozen, cases, corpus, marker, ports, out_dir, argv, stdout
                               unfiltered_items=unfiltered, sentinel_items=_sentinel_items(unfiltered, fc.get("sentinel_pairs")),
                               selected_n=M4A_SELECTED_N)         # sentinel ถึง model → PermissionError
             records.append(rec)
-            vis = orac.observe_visibility(role)
+            vis = orac.observe_visibility(cid, role)               # case-scoped (หลาย case ต่อ role ได้)
             observed.append({"case_id_sha256": HN._id_hash(cid),
                              "observed_authorized_pairs": vis["authorized_pairs"],
                              "observed_sentinel_pairs": vis["sentinel_pairs"]})
