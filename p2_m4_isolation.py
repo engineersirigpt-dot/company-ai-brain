@@ -155,22 +155,27 @@ class DockerQdrantDriver:
         self._net = self._vol = self._container = self._endpoint = self._collection = self._session = None
 
     def provision(self) -> dict:
+        import json
         import secrets
         tok = secrets.token_hex(6)
-        self._net = self._run(["docker", "network", "create", "--internal", f"m4net-{tok}"]).strip()
+        net_name = f"m4net-{tok}"
+        self._net = self._run(["docker", "network", "create", "--internal", net_name]).strip()
         self._vol = self._run(["docker", "volume", "create", f"m4vol-{tok}"]).strip()
         self._container = self._run(["docker", "run", "-d", "--network", self._net,
                                      "-v", f"{self._vol}:/qdrant/storage", "--name", f"m4qd-{tok}", self._image]).strip()
-        self._endpoint = f"http://m4qd-{tok}:6333"
+        # ── B1: identity จาก **Docker inspect จริง** (ไม่ใช่ค่า supplied) — container ต้องอยู่บน internal network ที่เราสร้าง ──
+        nets = json.loads(self._run(["docker", "inspect", "-f", "{{json .NetworkSettings.Networks}}", self._container]) or "{}")
+        info = nets.get(self._net) or nets.get(net_name)
+        if info is None:
+            raise IsolationError(f"container ไม่ได้อยู่บน internal network ที่สร้าง ({net_name}) — abort ก่อน mutate")
+        addr = (info.get("IPAddress") or "").strip() or net_name and f"m4qd-{tok}"   # address จาก Docker inspect
+        self._endpoint = f"http://{addr}:6333"                                       # derived จาก inspect ไม่ใช่ค่า supplied
         self._collection = f"m4-isolated-{tok}"
-        self._session = self._session_factory(self._endpoint, self._collection, self._vector_size)
-        # ── fail-before-mutate (B1): พิสูจน์ target จาก transport จริง + non-production **ก่อน** write แรก ──
-        observed = self._session.observed_target_identity()
-        if observed != {"collection_id": self._collection, "endpoint": self._endpoint}:
-            raise IsolationError(f"session target ไม่ตรง provisioned target (transport identity): {observed}")
+        # ── fail-before-mutate: non-production ก่อน Qdrant write แรก (endpoint เป็น container IP บน --internal network) ──
         if self.endpoint_is_production():
             raise IsolationError("provisioned endpoint = production — abort ก่อน Qdrant write")
-        self._session.recreate_collection()                 # first Qdrant mutation — หลัง verify แล้วเท่านั้น
+        self._session = self._session_factory(self._endpoint, self._collection, self._vector_size)
+        self._session.recreate_collection()                 # first Qdrant mutation — หลัง Docker-verify แล้วเท่านั้น
         return {"project_id": self._project_id, "network_id": self._net, "volume_id": self._vol,
                 "collection_id": self._collection, "endpoint": self._endpoint}
 

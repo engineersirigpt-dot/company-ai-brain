@@ -103,53 +103,47 @@ class _RaiseTeardown(FakeDriver):
 _rt = ISO.QdrantDockerIsolation(driver=_RaiseTeardown()); _rt.provision()
 check("isolation: driver teardown ล้ม -> adapter propagate CleanupUnconfirmed (ไม่กลืน)", raises(lambda: _rt.teardown(), ISO.CleanupUnconfirmed))
 
-# ── DockerQdrantDriver (real seam) — logic ที่ offline-testable: image pin / fail-before-mutate / cleanup accumulate ──
+# ── DockerQdrantDriver (real seam) — offline-testable: image pin / **Docker-inspect identity** / cleanup accumulate ──
+import json as _json
 _IMG = "qdrant/qdrant@sha256:" + "d" * 64
+_sess = {"s": None}
 class FakeSess:
-    def __init__(s, *, endpoint, collection, identity=None):
-        s._ep = endpoint; s._coll = collection; s._id = identity; s.recreated = False
-    def observed_target_identity(s): return s._id if s._id is not None else {"collection_id": s._coll, "endpoint": s._ep}
+    def __init__(s, endpoint, collection, size): s._ep = endpoint; s._coll = collection; s.recreated = False; _sess["s"] = s
     def recreate_collection(s): s.recreated = True
     def count(s): return 0
     def write_marker(s, m): s._m = m
     def read_marker(s): return getattr(s, "_m", None)
     def seed(s, c): pass
-def make_run(*, teardown_exc=None):
+def make_run(*, teardown_exc=None, networks=None):
+    _nets = _json.dumps({"net-1": {"IPAddress": "10.0.0.5"}} if networks is None else networks)
     def run(cmd):
         if "create" in cmd: return "net-1" if "network" in cmd else "vol-1"
         if cmd[1] == "run": return "cont-1"
-        if cmd[1] == "inspect": return "0"
+        if cmd[1] == "inspect": return _nets if "Networks" in " ".join(cmd) else "0"
         if "rm" in cmd:
             if teardown_exc is not None: raise teardown_exc
             return ""
         return ""
     return run
+def _drv(**kw): return ISO.DockerQdrantDriver(session_factory=FakeSess, project_id="proj-1", image_digest=_IMG, **kw)
 
 check("B3: DockerQdrantDriver image ไม่ pin digest (:latest) -> IsolationError",
-      raises(lambda: ISO.DockerQdrantDriver(run=make_run(), session_factory=lambda e, c, v: FakeSess(endpoint=e, collection=c),
-             project_id="proj-1", image_digest="qdrant/qdrant:latest"), ISO.IsolationError))
-# B1 fail-before-mutate: session identity ไม่ตรง provisioned target -> abort ก่อน recreate_collection
-_bad_sess = {"holder": None}
-def _bad_factory(e, c, v):
-    s = FakeSess(endpoint=e, collection=c, identity={"collection_id": "WRONG", "endpoint": e}); _bad_sess["holder"] = s; return s
-_drv_bad = ISO.DockerQdrantDriver(run=make_run(), session_factory=_bad_factory, project_id="proj-1", image_digest=_IMG)
-check("B1: session target ไม่ตรง -> provision abort **ก่อน** Qdrant write (recreate ไม่ถูกเรียก)",
-      raises(lambda: _drv_bad.provision(), ISO.IsolationError) and _bad_sess["holder"].recreated is False)
-# B1 happy: identity ตรง -> recreate ถูกเรียก (mutation หลัง verify) + handle ครบ
-_good = {"holder": None}
-def _good_factory(e, c, v):
-    s = FakeSess(endpoint=e, collection=c); _good["holder"] = s; return s
-_drv = ISO.DockerQdrantDriver(run=make_run(), session_factory=_good_factory, project_id="proj-1", image_digest=_IMG)
-_h = _drv.provision()
-check("B1: identity ตรง -> recreate ถูกเรียกหลัง verify + handle 4 distinct ids + endpoint",
-      _good["holder"].recreated is True and len({_h["project_id"], _h["network_id"], _h["volume_id"], _h["collection_id"]}) == 4)
-# B2 cleanup: teardown ล้มแบบไม่ใช่ not-found -> CleanupUnconfirmed (ไม่กลืน)
-_drv2 = ISO.DockerQdrantDriver(run=make_run(teardown_exc=RuntimeError("docker daemon error")), session_factory=_good_factory, project_id="proj-1", image_digest=_IMG)
-_drv2.provision()
-check("B2: teardown ล้ม (docker error) -> CleanupUnconfirmed (สะสม error, ไม่กลืน)", raises(lambda: _drv2.teardown(), ISO.CleanupUnconfirmed))
-_drv3 = ISO.DockerQdrantDriver(run=make_run(teardown_exc=RuntimeError("Error: No such container: cont-1")), session_factory=_good_factory, project_id="proj-1", image_digest=_IMG)
-_drv3.provision()
-check("B2: teardown 'no such' -> idempotent OK (ไม่ raise)", _drv3.teardown() is None)
+      raises(lambda: ISO.DockerQdrantDriver(run=make_run(), session_factory=FakeSess, project_id="proj-1", image_digest="qdrant/qdrant:latest"), ISO.IsolationError))
+# B1: identity จาก Docker inspect — container ไม่อยู่บน internal network ที่สร้าง -> abort ก่อน mutate (session ไม่ถูกสร้าง)
+_sess["s"] = None
+_bad = _drv(run=make_run(networks={"other-net": {"IPAddress": "1.2.3.4"}}))
+check("B1: container ไม่อยู่บน internal network (Docker inspect) -> abort ก่อน mutate (recreate ไม่ถูกเรียก)",
+      raises(lambda: _bad.provision(), ISO.IsolationError) and _sess["s"] is None)
+# B1 happy: อยู่บน network -> endpoint derive จาก Docker-inspect IP + recreate หลัง verify
+_sess["s"] = None
+_h = _drv(run=make_run()).provision()
+check("B1: identity จาก Docker inspect -> endpoint = container IP (ไม่ใช่ค่า supplied) + recreate หลัง verify + 4 distinct ids",
+      _h["endpoint"] == "http://10.0.0.5:6333" and _sess["s"].recreated is True and len({_h["project_id"], _h["network_id"], _h["volume_id"], _h["collection_id"]}) == 4)
+# B2 cleanup
+_d2 = _drv(run=make_run(teardown_exc=RuntimeError("docker daemon error"))); _d2.provision()
+check("B2: teardown docker error -> CleanupUnconfirmed (สะสม, ไม่กลืน)", raises(lambda: _d2.teardown(), ISO.CleanupUnconfirmed))
+_d3 = _drv(run=make_run(teardown_exc=RuntimeError("Error: No such container: cont-1"))); _d3.provision()
+check("B2: teardown 'no such' -> idempotent OK (ไม่ raise)", _d3.teardown() is None)
 
 # ── capstone: M4a synthetic run เต็ม (adapter จริง 4 ตัว) -> PUBLISHED/PASS ─────
 _H = "a" * 64
