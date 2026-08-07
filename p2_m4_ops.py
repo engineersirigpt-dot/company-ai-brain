@@ -142,7 +142,10 @@ def run_m4a_operational(*, provenance_db, out_dir, plan, frozen, cases, corpus, 
                         "model_revision": plan["model_commit"], "image_digest": plan["image_digest"]})
     try:
         PV.append_event(provenance_db, started)
-    except Exception as e:
+    except PV.ProvenanceIndeterminate as e:                 # B1.3: STARTED อาจถูก commit แล้ว → ห้ามเป็น retryable FAILED
+        return {"attempt_id": aid, "run_id": run_id, "status": "PROVENANCE_INDETERMINATE",
+                "phase": "provenance_started", "provenance_error_type": type(e).__name__}
+    except Exception as e:                                  # ledger ยังไม่ถูกแตะ (uncommitted) → FAILED ปลอดภัย
         return {"attempt_id": aid, "run_id": run_id, "status": "FAILED", "phase": "provenance_started",
                 "error_type": type(e).__name__}
 

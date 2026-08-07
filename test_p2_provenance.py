@@ -214,7 +214,7 @@ try:
     _gc = sqlite3.connect(TG); _tg_cnt = _gc.execute("SELECT count(*) FROM events").fetchone()[0]; _gc.close()
     check("B1.2: trigger RAISE(IGNORE) -> append fail-closed ก่อน mutation + ledger มีแค่ seed (ไม่ silent success)",
           _tg_fail and _tg_cnt == 1)
-    # B1.2 defense-in-depth: ถ้า trigger หลุด schema verify (จำลอง) -> post-commit row verify จับได้
+    # B1.3: ถ้า trigger หลุด schema verify (จำลอง) -> in-transaction row verify จับ **pre-commit** + rollback สะอาด
     TG2 = _log("trigger2.db")
     PV.append_event(TG2, _ev("s1", "r", "STARTED"))
     _gc = sqlite3.connect(TG2, isolation_level=None)
@@ -224,9 +224,25 @@ try:
         _def = raises(lambda: PV.append_event(TG2, _ev("s2", "r", "STARTED")), PV.ProvenanceError)
     finally:
         PV._verify_schema = _rvs
-    check("B1.2: post-commit row verify (defense) -> trigger ที่หลุด verify ยังถูกจับ (COMMIT ok แต่ row หาย)", _def)
+    _gc = sqlite3.connect(TG2); _tg2_cnt = _gc.execute("SELECT count(*) FROM events").fetchone()[0]; _gc.close()
+    check("B1.3: swallow ที่หลุด schema verify -> จับ pre-commit (ProvenanceError) + rollback สะอาด (ledger มีแค่ s1)",
+          _def and _tg2_cnt == 1)
 finally:
     PV._OPEN_RETRIES, PV._OPEN_DELAY = _rr, _rd
+
+# ── B1.3: normal append ไม่พึ่ง fresh post-COMMIT read — _row_exists ล้มไม่กระทบ success path ──
+FR = _log("freshfail.db")
+_rre2 = PV._row_exists
+PV._row_exists = lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError("fresh read fail"))
+try:
+    PV.append_event(FR, _ev("fr1", "r", "STARTED"))        # normal path ไม่เรียก _row_exists -> ต้องสำเร็จ
+    _frok = True
+except Exception:
+    _frok = False
+finally:
+    PV._row_exists = _rre2
+check("B1.3: normal append ไม่พึ่ง fresh post-COMMIT read (in-transaction verify) -> _row_exists ล้มไม่ทำ append fail",
+      _frok and PV.reconcile(PV.read_provenance(FR))["fr1"] == "INCOMPLETE")
 
 # ── M1: row decoder verify checksum + column identity (tamper via SQL) -> ProvenanceError ──
 TM = _log("tamper.db")

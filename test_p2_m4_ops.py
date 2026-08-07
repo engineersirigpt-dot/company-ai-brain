@@ -308,6 +308,17 @@ try:
 finally:
     PV.append_event = _ae
 check("B3: STARTED append fail -> FAILED/provenance_started + ไม่ provision", r["status"] == "FAILED" and r["phase"] == "provenance_started" and pt.isolation.calls == [])
+# B1.3: STARTED append indeterminate (COMMIT ambiguous) -> PROVENANCE_INDETERMINATE (ไม่ใช่ FAILED retryable) + ไม่ provision
+d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.db")
+PV.append_event = lambda l, rec: (_ for _ in ()).throw(PV.ProvenanceIndeterminate("commit ambiguous"))
+pt = _ports()
+try:
+    r = _run(d, log, pt)
+finally:
+    PV.append_event = _ae
+check("B1.3: STARTED indeterminate -> PROVENANCE_INDETERMINATE + ไม่ provision (ไม่ใช่ FAILED retryable)",
+      r["status"] == "PROVENANCE_INDETERMINATE" and r["phase"] == "provenance_started" and pt.isolation.calls == [])
+shutil.rmtree(d, ignore_errors=True)
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.db")
 _cnt = {"n": 0}
 def _fail_terminal(l, rec):

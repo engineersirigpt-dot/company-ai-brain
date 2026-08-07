@@ -419,24 +419,27 @@ def _locked_write(log_path: str, record: dict, validate_state) -> None:
                              (aid, record.get("run_id"), record.get("event"), body, bsha))
             except sqlite3.IntegrityError as e:  # UNIQUE STARTED/terminal (กันเชิงลึก)
                 raise ProvenanceError(f"ledger integrity (duplicate STARTED/terminal): {e}") from e
+            # B1.3: ยืนยัน row apply จริง **ในทรานแซกชันเดิม ก่อน COMMIT** (กัน trigger/constraint swallow เงียบ) —
+            # ทำใน tx → ไม่ผ่าน = rollback สะอาด (uncommitted) ; ไม่มี fresh read หลัง COMMIT = ตัด failure/ambiguity surface
+            seq = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            chk = conn.execute("SELECT body_sha256 FROM events WHERE seq=?", (seq,)).fetchone()
+            if chk is None or chk[0] != bsha:
+                raise ProvenanceError("INSERT ไม่ apply/ถูก swallow (trigger/constraint) — ledger ไม่มี row ตรง")
         except BaseException:
             try:
                 conn.execute("ROLLBACK")
             except sqlite3.Error:
                 pass
             raise                                 # pre-commit fail = uncommitted (ประเภท exception เดิม)
-        try:                                      # ── commit phase (แยก outcome, B2) ──
+        try:                                      # ── commit phase: COMMIT success = durability boundary (B1.3) ──
             _do_commit(conn)
         except BaseException as ce:
-            outcome = _resolve_commit_outcome(conn, canonical, record, bsha)
+            outcome = _resolve_commit_outcome(conn, canonical, record, bsha)   # ack-loss เท่านั้นที่ fresh-verify
             if outcome == "committed":
                 return                            # row durable จริง (ack หายเฉยๆ) → success
             if outcome == "uncommitted":
                 raise                             # retryable (re-raise ประเภทเดิม)
             raise ProvenanceIndeterminate(f"COMMIT outcome พิสูจน์ไม่ได้: {canonical}") from ce
-        # B1.2 defense-in-depth: COMMIT สำเร็จแล้วต้องมี row จริง (กัน silent-drop เช่น trigger RAISE(IGNORE) ที่หลุด verify)
-        if not _row_exists(canonical, aid, record.get("event"), bsha):
-            raise ProvenanceError("append COMMIT สำเร็จแต่ row ไม่ปรากฏ (swallowed insert / silent drop)")
     finally:
         conn.close()
 
