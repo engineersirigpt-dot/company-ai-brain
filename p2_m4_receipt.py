@@ -61,6 +61,27 @@ def _bool(x) -> bool:
     return x is True or x is False
 
 
+def _nonblank(x) -> bool:
+    return isinstance(x, str) and bool(x.strip())
+
+
+def _is_git_sha(x) -> bool:                                  # git sha1 (commit/tree) = 40 lowercase hex
+    return isinstance(x, str) and len(x) == 40 and all(c in "0123456789abcdef" for c in x)
+
+
+def _is_qdrant_ref(x) -> bool:
+    import re
+    return isinstance(x, str) and bool(re.fullmatch(r"[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}", x))
+
+
+def _iso_ordered(a, b) -> bool:
+    import datetime
+    try:
+        return datetime.datetime.fromisoformat(a) <= datetime.datetime.fromisoformat(b)
+    except (ValueError, TypeError):
+        return False
+
+
 # ── body ที่เข้า hash (ทุกฟิลด์ยกเว้น outer_receipt_sha256) ─────────────────────
 def _receipt_body(receipt: dict) -> dict:
     return {k: v for k, v in receipt.items() if k != "outer_receipt_sha256"}
@@ -118,6 +139,75 @@ def build_outer_receipt(*, attempt_id, run_id, inner_bundle_bytes, inner_evidenc
     receipt["terminal_status"] = _resolve_terminal(receipt)
     receipt["outer_receipt_sha256"] = outer_receipt_sha256(receipt)
     return receipt
+
+
+# ── required-field schema (B2/B3: field ต้อง "บังคับ verdict" ไม่ใช่แค่ "อยู่ใน JSON") ──
+_REQ_OBS_STR = ("evaluator_image", "expected_evaluator_image", "qdrant_image", "network_id",
+                "volume_id", "project_id", "collection_id", "endpoint")
+
+
+def _required_field_errors(receipt: dict) -> list:
+    """
+    presence/type/format ของทุกฟิลด์ที่ receipt อ้างเป็น authority — ขาด/malformed = validator error + terminal ไม่ PASS
+    (ปิด B2: ลบ M1 field แล้ว recompute hash ต้องไม่ผ่าน ; ปิด B3: run/qdrant/cleanup schema exact)
+    """
+    e = []
+    if not _nonblank(receipt.get("attempt_id")):
+        e.append("attempt_id ว่าง/ผิดชนิด")
+    if not _nonblank(receipt.get("run_id")):
+        e.append("run_id ว่าง/ผิดชนิด")
+    inner, obs = receipt.get("inner"), receipt.get("observed")
+    proc, cl = receipt.get("process"), receipt.get("cleanup")
+    if not isinstance(inner, dict) or not isinstance(inner.get("isolation"), dict):
+        return e + ["inner/inner.isolation ผิดรูป"]
+    if not isinstance(obs, dict) or not isinstance(proc, dict) or not isinstance(cl, dict):
+        return e + ["observed/process/cleanup ต้องเป็น dict"]
+    # observed (Docker authority)
+    for k in _REQ_OBS_STR:
+        if k in ("evaluator_image", "expected_evaluator_image", "qdrant_image"):
+            if not _is_image_id(obs.get(k)):
+                e.append(f"observed.{k} ต้องเป็น image id (sha256:<64hex>)")
+        elif not _nonblank(obs.get(k)):
+            e.append(f"observed.{k} ว่าง/ผิดชนิด")
+    if not _is_qdrant_ref(obs.get("qdrant_image_ref")):
+        e.append("observed.qdrant_image_ref ต้องเป็น repo@sha256:<64hex>")
+    rd = obs.get("qdrant_repo_digests")
+    if not (isinstance(rd, list) and rd and all(isinstance(x, str) and x for x in rd)):
+        e.append("observed.qdrant_repo_digests ต้องเป็น non-empty list ของ str (docker RepoDigests)")
+    if not _bool(obs.get("network_internal")):
+        e.append("observed.network_internal ต้องเป็น bool")
+    pp = obs.get("published_ports")
+    if isinstance(pp, bool) or not isinstance(pp, int):
+        e.append("observed.published_ports ต้องเป็น int")
+    if not _bool(obs.get("endpoint_is_production")):
+        e.append("observed.endpoint_is_production ต้องเป็น bool")
+    # process (M1 load-bearing: source/dependency/process identity)
+    cmd = proc.get("command")
+    if not (isinstance(cmd, list) and cmd and all(isinstance(x, str) for x in cmd)):
+        e.append("process.command ต้องเป็น non-empty list ของ str")
+    ec = proc.get("exit_code")
+    if isinstance(ec, bool) or not isinstance(ec, int):
+        e.append("process.exit_code ต้องเป็น int")
+    for k in ("stdout_sha256", "stderr_sha256", "dependency_digest"):
+        if not _is_sha256(proc.get(k)):
+            e.append(f"process.{k} ต้องเป็น lowercase sha256")
+    if not _is_git_sha(proc.get("git_commit")):
+        e.append("process.git_commit ต้องเป็น 40-hex git commit")
+    if not _is_git_sha(proc.get("source_tree_digest")):
+        e.append("process.source_tree_digest ต้องเป็น 40-hex git tree (source ที่รันจริง)")
+    if not _bool(proc.get("git_tree_dirty")):
+        e.append("process.git_tree_dirty ต้องเป็น bool")
+    if not (_nonblank(proc.get("started_utc")) and _nonblank(proc.get("finished_utc"))
+            and _iso_ordered(proc.get("started_utc"), proc.get("finished_utc"))):
+        e.append("process.started_utc/finished_utc ต้อง ISO parseable + started<=finished")
+    # cleanup schema exact (B1/B3)
+    if not _bool(cl.get("confirmed")):
+        e.append("cleanup.confirmed ต้องเป็น bool")
+    if not isinstance(cl.get("residual"), list):
+        e.append("cleanup.residual ต้องเป็น list")
+    if not isinstance(cl.get("unknown"), list):
+        e.append("cleanup.unknown ต้องเป็น list (UNKNOWN แยกจาก ABSENT — B1)")
+    return e
 
 
 # ── terminal resolution (หัวใจ fail-closed) ────────────────────────────────────
@@ -179,6 +269,19 @@ def false_pass_reasons(receipt: dict) -> list:
         if prod_obs != iso.get("endpoint_is_production"):
             r.append("observed.endpoint_is_production ≠ declared")
 
+    # B3: run identity — top-level run_id ต้องตรง inner (กัน receipt อ้าง run คนละตัว)
+    if receipt.get("run_id") != inner.get("run_id"):
+        r.append(f"top run_id ≠ inner.run_id: {receipt.get('run_id')!r} != {inner.get('run_id')!r}")
+
+    # B3: qdrant runtime identity — pinned ref ต้องอยู่ใน RepoDigests ที่ docker inspect เห็น (ไม่เทียบ manifest กับ image id)
+    rd = obs.get("qdrant_repo_digests") or []
+    if obs.get("qdrant_image_ref") not in rd:
+        r.append(f"qdrant_image_ref ไม่อยู่ใน observed RepoDigests (image ที่รัน ≠ pin): {obs.get('qdrant_image_ref')!r}")
+
+    # B2: source ต้องพิสูจน์ว่า == commit (tracked ไม่แก้) — dirty = certify ไม่ได้ว่า source ตรง commit
+    if proc.get("git_tree_dirty") is not False:
+        r.append("process.git_tree_dirty ≠ False (source ที่รันยืนยันไม่ได้ว่าตรง commit)")
+
     # inner verdict + process ต้อง healthy (false-PASS ถ้า inner ไม่ PASS แต่จะ mark PASS)
     if inner.get("evidence_status") != "PASS":
         r.append(f"inner evidence status = {inner.get('evidence_status')} (ไม่ PASS)")
@@ -189,10 +292,13 @@ def false_pass_reasons(receipt: dict) -> list:
 
 
 def _resolve_terminal(receipt: dict) -> str:
+    if _required_field_errors(receipt):
+        return FAILED       # evidence ไม่ครบ/ผิดรูป → ประเมินไม่ได้ = ไม่ PASS (ปิด B2/B3)
     if false_pass_reasons(receipt):
         return FAILED
     cl = receipt.get("cleanup") or {}
-    if cl.get("confirmed") is not True or (cl.get("residual") or []):
+    # B1: PASS ต่อเมื่อ confirmed + ไม่มี residual + ไม่มี unknown (inspect error = UNKNOWN → DEGRADED ไม่ใช่ PASS)
+    if cl.get("confirmed") is not True or (cl.get("residual") or []) or (cl.get("unknown") or []):
         return DEGRADED     # capability รันได้ แต่ยืนยัน teardown ไม่ได้ → ห้าม PASS (กระทบ run ถัดไป)
     return PASS
 
@@ -223,6 +329,9 @@ def validate_m4_outer_receipt(receipt, *, inner_bundle_bytes) -> list:
     inner = receipt["inner"]
     if not isinstance(inner, dict) or not isinstance(inner.get("isolation"), dict):
         return errs + ["inner/inner.isolation ผิดรูป"]
+
+    # required-field schema (B2/B3): ทุก field ที่อ้าง authority ต้องครบ/ถูก format — ขาด = error (ไม่ปล่อยผ่าน)
+    errs += _required_field_errors(receipt)
 
     # bundle sha256 ต้องตรงกับไฟล์ชั้นในจริง (bind หลักฐานทั้งก้อน)
     try:

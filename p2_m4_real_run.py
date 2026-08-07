@@ -13,8 +13,11 @@ import datetime
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 
 import p2_m4_controller as CTL
 
@@ -35,25 +38,40 @@ class Clock:
         return datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _stage_head(tok):
+    """git archive HEAD -> clean dir (space-free temp, ไม่มี untracked/.git) → mount :ro = provably committed tree (B2)"""
+    staging = tempfile.mkdtemp(prefix=f"m4src-{tok}-")
+    tarpath = os.path.join(staging, "_src.tar")
+    subprocess.run(["git", "-C", REPO, "archive", "--format=tar", "-o", tarpath, "HEAD"], check=True)
+    with tarfile.open(tarpath) as tf:
+        tf.extractall(os.path.join(staging, "src"))
+    os.remove(tarpath)
+    return staging, os.path.join(staging, "src").replace("\\", "/")
+
+
 def main() -> int:
     tok = secrets.token_hex(4)
     attempt = "oc-" + tok
     out_host = f"{REPO}/.p2_m4_out/{attempt}"
     os.makedirs(out_host, exist_ok=True)
+    staging, src_host = _stage_head(tok)                   # source ที่รัน = committed HEAD tree (clean)
 
     def read_bundle(container_path):                       # /out/run-1.bundle.json -> host out dir
         host = out_host + container_path[len("/out"):]
         with open(host, "rb") as f:
             return f.read()
 
-    ctl = CTL.DockerM4Controller(
-        run=run, source_dir_host=REPO, out_dir_host=out_host, read_bundle=read_bundle,
-        evaluator_image=EVAL_IMG, qdrant_image=QD_IMG, project_id="m4-real-" + tok,
-        attempt_id=attempt, token=tok, clock=Clock(), internal=False,     # bridge: egress ให้ runtime pip
-        eval_entrypoint=["sh", "-lc",
-                         "pip install --quiet --disable-pip-version-check qdrant-client "
-                         "&& python /host/p2_m4_evaluator.py"])
-    res = ctl.certify()
+    try:
+        ctl = CTL.DockerM4Controller(
+            run=run, source_dir_host=src_host, git_dir_host=REPO, out_dir_host=out_host, read_bundle=read_bundle,
+            evaluator_image=EVAL_IMG, qdrant_image=QD_IMG, project_id="m4-real-" + tok,
+            attempt_id=attempt, token=tok, clock=Clock(), internal=False,     # bridge: egress ให้ runtime pip
+            eval_entrypoint=["sh", "-lc",
+                             "pip install --quiet --disable-pip-version-check qdrant-client "
+                             "&& python /host/p2_m4_evaluator.py"])
+        res = ctl.certify()
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     print("=" * 70)
     print("TERMINAL_STATUS:", res["terminal_status"])
     print("RECEIPT_PATH:", res["path"])

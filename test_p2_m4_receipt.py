@@ -44,7 +44,8 @@ def mk_bundle(evidence):
 
 def mk_observed(**over):
     o = {"expected_evaluator_image": IMG, "evaluator_image": IMG, "qdrant_image_ref": QREF,
-         "qdrant_image": "sha256:" + "a" * 64, "network_id": RAW["network_id"], "volume_id": RAW["volume_id"],
+         "qdrant_image": "sha256:" + "a" * 64, "qdrant_repo_digests": [QREF], "network_internal": False,
+         "network_id": RAW["network_id"], "volume_id": RAW["volume_id"],
          "project_id": RAW["project_id"], "collection_id": RAW["collection_id"], "published_ports": 0,
          "endpoint": "http://m4qd-x:6333", "endpoint_is_production": False}
     o.update(over)
@@ -54,16 +55,23 @@ def mk_observed(**over):
 def mk_process(**over):
     p = {"command": ["docker", "run", "img"], "exit_code": 0, "started_utc": "2026-08-07T01:00:00+07:00",
          "finished_utc": "2026-08-07T02:00:00+07:00", "stdout_sha256": "a" * 64, "stderr_sha256": "b" * 64,
-         "git_commit": "c" * 40, "git_tree_dirty": False, "dependency_digest": "d" * 64}
+         "git_commit": "c" * 40, "source_tree_digest": "f" * 40, "git_tree_dirty": False,
+         "dependency_digest": "d" * 64}
     p.update(over)
     return p
 
 
-def build(evidence, bb, observed, *, cleanup=None, process=None, attempt="att-1"):
-    return RCPT.build_outer_receipt(attempt_id=attempt, run_id="run-1", inner_bundle_bytes=bb,
+def mk_cleanup(**over):
+    c = {"confirmed": True, "residual": [], "unknown": []}
+    c.update(over)
+    return c
+
+
+def build(evidence, bb, observed, *, cleanup=None, process=None, attempt="att-1", run_id="run-1"):
+    return RCPT.build_outer_receipt(attempt_id=attempt, run_id=run_id, inner_bundle_bytes=bb,
                                     inner_evidence=evidence, observed=observed,
                                     process=process or mk_process(),
-                                    cleanup=cleanup or {"confirmed": True, "residual": []})
+                                    cleanup=cleanup or mk_cleanup())
 
 
 # ── positive: observed==declared ครบ + inner PASS + cleanup confirmed -> PASS ──
@@ -104,11 +112,40 @@ check("N2c: evaluator ประกาศ ports=0 แต่ Docker เห็น 2
       r_n2c["terminal_status"] == RCPT.FAILED, r_n2c["terminal_status"])
 
 # ── N3: cleanup fail หลัง inner PASS — capability ok แต่ teardown ยืนยันไม่ได้ -> DEGRADED (ไม่ใช่ PASS) ──
-r_n3 = build(ev, bb, mk_observed(), cleanup={"confirmed": False, "residual": [{"kind": "container", "id": "m4qd-x"}]})
+r_n3 = build(ev, bb, mk_observed(), cleanup=mk_cleanup(confirmed=False, residual=[{"kind": "container", "id": "m4qd-x"}]))
 check("N3 cleanup fail: inner PASS + observed match แต่ residual != [] -> DEGRADED (ไม่ PASS)",
       r_n3["terminal_status"] == RCPT.DEGRADED, r_n3["terminal_status"])
 check("N3: validate ยังผ่าน (receipt ซื่อสัตย์ว่า DEGRADED)",
       RCPT.validate_m4_outer_receipt(r_n3, inner_bundle_bytes=bb) == [])
+
+# ── B1 (Codex re-review): cleanup UNKNOWN (inspect error) แยกจาก ABSENT -> DEGRADED ไม่ใช่ PASS ──
+r_unk = build(ev, bb, mk_observed(), cleanup=mk_cleanup(confirmed=False, unknown=[{"kind": "container", "id": "m4qd-x"}]))
+check("B1 cleanup UNKNOWN (ตรวจไม่ได้) -> DEGRADED (ไม่ยืนยัน clean จาก inspect error)",
+      r_unk["terminal_status"] == RCPT.DEGRADED, r_unk["terminal_status"])
+r_badcl = dict(r_pass); r_badcl["cleanup"] = {"confirmed": True, "residual": []}   # ขาด unknown
+r_badcl["outer_receipt_sha256"] = RCPT.outer_receipt_sha256(r_badcl)
+check("B1 cleanup schema: ขาด unknown -> validate error + terminal ไม่ PASS",
+      RCPT.validate_m4_outer_receipt(r_badcl, inner_bundle_bytes=bb) and RCPT.resolve_terminal_status(r_badcl) != RCPT.PASS)
+
+# ── B2 (Codex re-review): ลบ M1 field ทีละกลุ่ม -> validate error + terminal ไม่ PASS (field ต้อง load-bearing) ──
+for miss in ("dependency_digest", "git_commit", "source_tree_digest", "stdout_sha256", "started_utc"):
+    proc = mk_process(); proc.pop(miss)
+    rm = dict(r_pass); rm["process"] = proc; rm["terminal_status"] = RCPT._resolve_terminal(rm)
+    rm["outer_receipt_sha256"] = RCPT.outer_receipt_sha256(rm)
+    ok = RCPT.validate_m4_outer_receipt(rm, inner_bundle_bytes=bb) and rm["terminal_status"] != RCPT.PASS
+    check(f"B2 ลบ process.{miss} -> validate error + terminal != PASS", ok, rm["terminal_status"])
+r_dirty = build(ev, bb, mk_observed(), process=mk_process(git_tree_dirty=True))
+check("B2 git_tree_dirty=True -> FAILED (source ยืนยันไม่ได้ว่าตรง commit)", r_dirty["terminal_status"] == RCPT.FAILED)
+
+# ── B3 (Codex re-review): qdrant/run/network field ต้อง load-bearing ──
+r_qd = build(ev, bb, mk_observed(qdrant_repo_digests=["qdrant/qdrant@sha256:" + "9" * 64]))
+check("B3 qdrant_image_ref ไม่อยู่ใน observed RepoDigests -> FAILED", r_qd["terminal_status"] == RCPT.FAILED)
+r_run = build(ev, bb, mk_observed(), run_id="run-EVIL")
+check("B3 top run_id != inner.run_id -> FAILED", r_run["terminal_status"] == RCPT.FAILED)
+r_nomode = dict(r_pass); r_nomode["observed"] = {k: v for k, v in r_pass["observed"].items() if k != "network_internal"}
+r_nomode["terminal_status"] = RCPT._resolve_terminal(r_nomode); r_nomode["outer_receipt_sha256"] = RCPT.outer_receipt_sha256(r_nomode)
+check("B3 ลบ network_internal -> validate error + terminal != PASS",
+      RCPT.validate_m4_outer_receipt(r_nomode, inner_bundle_bytes=bb) and r_nomode["terminal_status"] != RCPT.PASS)
 
 # ── inner ไม่ PASS -> FAILED ──
 ev_fail = mk_evidence(status="FAIL"); bbf = mk_bundle(ev_fail)

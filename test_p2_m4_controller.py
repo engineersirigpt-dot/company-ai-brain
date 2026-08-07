@@ -38,10 +38,15 @@ class R:
     def __init__(s, stdout=b"", stderr=b"", rc=0): s.stdout = stdout; s.stderr = stderr; s.returncode = rc
 
 
+def _filter_name(j):
+    sel = j[j.index("--filter") + 1]                                # name=^NAME$
+    return sel[len("name=^"):-1]
+
+
 class FakeDocker:
     """
-    จำลอง docker CLI + evaluator run ; ค่าที่ inspect คืน = สิ่งที่ controller ถือเป็น authority
-    knobs: observed_eval_image, qd_ports, bake_wrong_network, eval_rc, eval_declared_ports, leak_container
+    จำลอง docker CLI + evaluator run ; ค่าที่ inspect/ls คืน = สิ่งที่ controller ถือเป็น authority
+    knobs: observed_eval_image, qd_ports, bake_wrong_network, eval_rc, eval_declared_ports, leak_container, probe_unknown
     """
     def __init__(s, **k):
         s.observed_eval_image = k.get("observed_eval_image", PIN)
@@ -50,10 +55,17 @@ class FakeDocker:
         s.eval_rc = k.get("eval_rc", 0)
         s.eval_declared_ports = k.get("eval_declared_ports", None)   # None = ตรงกับ observed
         s.leak_container = k.get("leak_container", False)
+        s.probe_unknown = k.get("probe_unknown", False)              # existence probe rc!=0 = daemon ล้มตอน cleanup (B1)
         s.removed = set()
         s.net = s.vol = None
         s.calls = []
         s.bundle_bytes = None
+
+    def _exists(s, name):
+        if s.probe_unknown:
+            return R(stderr=b"Cannot connect to the Docker daemon", rc=1)   # UNKNOWN
+        present = (s.leak_container and name == "m4qd-tok01") or (name not in s.removed)
+        return R(stdout=(name.encode() if present else b""))
 
     def run(self, argv, *, input_bytes=None):
         s = self
@@ -76,7 +88,10 @@ class FakeDocker:
             result = {"status": "PUBLISHED", "evidence_status": "PASS", "bundle_path": "/out/run-1.bundle.json",
                       "declared_image_digest": env["M4_EVAL_IMAGE_DIGEST"], "deps_sha256": "d" * 64}
             return R(stdout=b"M4A_RESULT " + json.dumps(result).encode(), rc=s.eval_rc)
-        # inspect
+        # image RepoDigests (B3)
+        if j[:3] == ["docker", "image", "inspect"]:
+            return R(stdout=json.dumps([QREF]).encode())
+        # container inspect (-f) — observe
         if j[:2] == ["docker", "inspect"]:
             fmt = j[3] if j[2] == "-f" else None
             ref = j[-1]
@@ -92,23 +107,22 @@ class FakeDocker:
                 for i in range(s.qd_ports):
                     pmap[f"{7000 + i}/tcp"] = [{"HostIp": "0.0.0.0", "HostPort": str(7000 + i)}]
                 return R(stdout=json.dumps(pmap).encode())
-            # post-teardown probe: inspect <ref> (no -f)
-            if s.leak_container and ref == "qd-container":
-                return R(stdout=b"[{}]", rc=0)                       # rm ไม่ได้ผล -> ยังอยู่ = residual
-            if ref in s.removed:
-                return R(stderr=b"No such object", rc=1)
             return R(stderr=b"No such object", rc=1)
-        if j[:2] == ["docker", "volume"] and j[2] == "inspect":
-            return R(stderr=b"No such volume", rc=1)
-        if j[:2] == ["docker", "network"] and j[2] == "inspect":
-            return R(stderr=b"No such network", rc=1)
+        # three-state existence probe (B1)
+        if j[:3] == ["docker", "ps", "-a"] and "--filter" in j:
+            return s._exists(_filter_name(j))
+        if j[:3] == ["docker", "network", "ls"] and "--filter" in j:
+            return s._exists(_filter_name(j))
+        if j[:3] == ["docker", "volume", "ls"] and "--filter" in j:
+            return s._exists(_filter_name(j))
         # teardown
         if j[:3] == ["docker", "rm", "-f"] or (j[:2] == ["docker", "volume"] and j[2] == "rm") or \
            (j[:2] == ["docker", "network"] and j[2] == "rm"):
             s.removed.add(j[-1]); return R()
-        # git identity
+        # git identity (rev-parse HEAD / HEAD^{tree} ; status --porcelain)
         if j[:2] == ["git", "-C"]:
-            if "rev-parse" in j: return R(stdout=(b"c" * 40))
+            if "rev-parse" in j:
+                return R(stdout=(b"f" * 40 if "HEAD^{tree}" in j else b"c" * 40))
             return R(stdout=b"")                                    # status --porcelain: clean
         return R(stderr=b"unhandled " + " ".join(j).encode(), rc=127)
 
@@ -165,6 +179,14 @@ o5 = mk(f5, attempt="att-5").certify()
 check("cleanup residual (container ค้าง) -> DEGRADED (ไม่ PASS)", o5["terminal_status"] == RCPT.DEGRADED,
       o5["terminal_status"])
 check("cleanup residual: receipt ระบุ residual", o5["receipt"]["cleanup"]["residual"] != [])
+
+# ── B1 (Codex re-review): daemon/inspect error ตอน cleanup verify -> UNKNOWN -> DEGRADED (ไม่ false-PASS) ──
+f5b = FakeDocker(probe_unknown=True)
+o5b = mk(f5b, attempt="att-5b").certify()
+check("cleanup probe UNKNOWN (daemon ล้มตอน verify) -> DEGRADED (ไม่ยืนยัน clean)",
+      o5b["terminal_status"] == RCPT.DEGRADED, o5b["terminal_status"])
+check("cleanup UNKNOWN: receipt แยก unknown ออกจาก residual",
+      o5b["receipt"]["cleanup"]["unknown"] != [] and o5b["receipt"]["cleanup"]["residual"] == [])
 
 # ── evaluator exit != 0 -> FAILED ──
 f6 = FakeDocker(eval_rc=1)

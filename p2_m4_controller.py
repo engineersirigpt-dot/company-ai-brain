@@ -58,7 +58,8 @@ class DockerM4Controller:
 
     def __init__(self, *, run, source_dir_host, out_dir_host, read_bundle,
                  evaluator_image, qdrant_image, project_id, attempt_id, token, clock,
-                 vector_size=4, internal=True, eval_entrypoint=("python", "/host/p2_m4_evaluator.py")):
+                 vector_size=4, internal=True, eval_entrypoint=("python", "/host/p2_m4_evaluator.py"),
+                 git_dir_host=None):
         if not (isinstance(evaluator_image, str) and evaluator_image.startswith("sha256:")
                 and len(evaluator_image) == 71):
             raise ControllerError("evaluator_image ต้อง pin เป็น sha256:<64hex> (image id ที่จะ run + attest)")
@@ -77,6 +78,7 @@ class DockerM4Controller:
         self._vs = vector_size
         self._internal = bool(internal)                     # False = bridge (มี egress ให้ runtime pip) — ต้องบันทึกเป็นข้อจำกัด
         self._entry = list(eval_entrypoint)                 # คำสั่งใน evaluator container (บันทึกใน receipt.process.command)
+        self._git = git_dir_host or source_dir_host         # repo จริงสำหรับ git identity (source_dir อาจเป็น staging สะอาด)
         self._net = self._vol = self._qd = self._evalc = None
         self._collection = f"m4coll-{token}"
         self._endpoint = None
@@ -120,6 +122,16 @@ class DockerM4Controller:
             raise ControllerError(f".NetworkSettings.Ports inspect ไม่ใช่ json: {raw!r}")
         return sum(1 for v in ports.values() if v)          # v truthy = มี host binding = publish จริง
 
+    def _qdrant_repo_digests(self) -> list:
+        """B3: RepoDigests ของ qdrant image (docker inspect) — validator require pinned ref อยู่ในชุดนี้
+        (พิสูจน์ image ที่รัน = pin ; ไม่เอา manifest digest ไปเทียบ image .Id ที่คนละชนิด)"""
+        raw = self._checked(["docker", "image", "inspect", self._qd_img, "--format", "{{json .RepoDigests}}"])
+        try:
+            digs = json.loads(raw or "[]") or []
+        except ValueError:
+            raise ControllerError(f"RepoDigests inspect ไม่ใช่ json: {raw!r}")
+        return [d for d in digs if isinstance(d, str)]
+
     def _observe(self) -> dict:
         qd_image = self._inspect(self._qd, "{{index .Image}}")           # docker-observed qdrant image id
         eval_image = self._inspect(self._evalc, "{{index .Image}}")      # B1 authority: image ที่ evaluator รันจริง
@@ -129,6 +141,7 @@ class DockerM4Controller:
             "evaluator_image": eval_image,
             "qdrant_image_ref": self._qd_img,
             "qdrant_image": qd_image,
+            "qdrant_repo_digests": self._qdrant_repo_digests(),
             "network_id": self._net,
             "volume_id": self._vol,
             "project_id": self._project,
@@ -147,7 +160,7 @@ class DockerM4Controller:
             "M4_COLLECTION_ID": self._collection, "M4_OUT": "/out",
         }
         argv = ["docker", "run", "--name", f"m4eval-{self._tok}", "--network", self._net,
-                "-v", f"{self._src}:/host", "-v", f"{self._out}:/out"]
+                "-v", f"{self._src}:/host:ro", "-v", f"{self._out}:/out"]     # :ro — source กันแก้ระหว่างรัน (B2)
         for k, v in env.items():
             argv += ["-e", f"{k}={v}"]
         argv += [self._eval_img] + self._entry
@@ -170,33 +183,55 @@ class DockerM4Controller:
         raise ControllerError("ไม่พบบรรทัด M4A_RESULT ใน stdout ของ evaluator")
 
     def _git_identity(self) -> dict:
+        """
+        bind source ที่รันจริง: git_commit + source_tree_digest (HEAD^{tree}) + git_tree_dirty (tracked-only)
+        source ที่ mount = git-archive ของ HEAD (สะอาด ไม่มี untracked/.git — real_run stage) → mounted == committed tree
+        --untracked-files=no: dirty = แก้ไฟล์ track ต่างจาก HEAD ; untracked ข้าง ๆ ไม่นับ (mount ไม่มี untracked อยู่แล้ว)
+        """
         try:
-            commit = self._checked(["git", "-C", self._src, "rev-parse", "HEAD"])
-            # --untracked-files=no: dirty = มีแก้ **ไฟล์ที่ track** ต่างจาก HEAD (source ที่รันจริง) ;
-            # ไฟล์ untracked ข้าง ๆ (tmp/, docs, .p2_m4_out ที่ gitignore) ไม่นับ — .py ที่รัน track+commit หมด
-            porcelain = _text(self._run(["git", "-C", self._src, "status", "--porcelain", "--untracked-files=no"]))
-            return {"git_commit": commit, "git_tree_dirty": bool(porcelain.strip())}
+            commit = self._checked(["git", "-C", self._git, "rev-parse", "HEAD"])
+            tree = self._checked(["git", "-C", self._git, "rev-parse", "HEAD^{tree}"])
+            porcelain = _text(self._run(["git", "-C", self._git, "status", "--porcelain", "--untracked-files=no"]))
+            return {"git_commit": commit, "source_tree_digest": tree, "git_tree_dirty": bool(porcelain.strip())}
         except ControllerError:
-            return {"git_commit": "", "git_tree_dirty": True}   # ระบุไม่ได้ = ถือว่า dirty (fail-safe)
+            return {"git_commit": "", "source_tree_digest": "", "git_tree_dirty": True}   # ระบุไม่ได้ = fail-safe
 
-    # ── teardown + ยืนยัน cleanup (post-inspect) ─────────────────────────────
+    # ── teardown + ยืนยัน cleanup (three-state existence — B1) ────────────────
+    def _existence(self, kind: str, name: str) -> str:
+        """
+        EXISTS / ABSENT / UNKNOWN — ใช้ `ls --filter name=^..$` ที่ **ต้อง rc==0** ก่อนถึงจะเชื่อ empty=ABSENT ;
+        rc!=0 (daemon/permission/pipe ล้ม) = **UNKNOWN** (ตรวจไม่ได้ ≠ หาย) → ห้ามยืนยัน cleanup จาก inspect error
+        """
+        sel = f"name=^{name}$"
+        if kind == "container":
+            argv = ["docker", "ps", "-a", "--filter", sel, "--format", "{{.Names}}"]
+        elif kind == "network":
+            argv = ["docker", "network", "ls", "--filter", sel, "--format", "{{.Name}}"]
+        else:
+            argv = ["docker", "volume", "ls", "--filter", sel, "--format", "{{.Name}}"]
+        res = self._run(argv)
+        if _rc(res) != 0:
+            return "UNKNOWN"
+        return "EXISTS" if _text(res).strip() else "ABSENT"
+
     def teardown_and_verify(self) -> dict:
         for argv in ([["docker", "rm", "-f", self._evalc]] if self._evalc else []) + \
-                    ([["docker", "rm", "-f", self._qd]] if self._qd else []) + \
-                    ([["docker", "volume", "rm", "-f", self._vol]] if self._vol else []) + \
+                    ([["docker", "rm", "-f", f"m4qd-{self._tok}"]] if self._qd else []) + \
+                    ([["docker", "volume", "rm", "-f", f"m4vol-{self._tok}"]] if self._vol else []) + \
                     ([["docker", "network", "rm", self._net]] if self._net else []):
-            self._run(argv)                                  # best-effort ; ยืนยันจริงด้วย post-inspect ข้างล่าง
-        residual = []
-        for kind, ref in (("container", self._evalc), ("container", self._qd),
-                          ("volume", self._vol), ("network", self._net)):
-            if not ref:
-                continue
-            probe = (["docker", "inspect", ref] if kind == "container" else
-                     ["docker", kind, "inspect", ref])
-            res = self._run(probe)
-            if _rc(res) == 0:                                # inspect สำเร็จ = resource ยังอยู่ = cleanup ไม่ยืนยัน
-                residual.append({"kind": kind, "id": ref})
-        return {"confirmed": len(residual) == 0, "residual": residual}
+            self._run(argv)                                  # best-effort ; ยืนยันจริงด้วย existence probe ข้างล่าง
+        residual, unknown = [], []
+        probes = ([("container", self._evalc)] if self._evalc else []) + \
+                 ([("container", f"m4qd-{self._tok}")] if self._qd else []) + \
+                 ([("volume", f"m4vol-{self._tok}")] if self._vol else []) + \
+                 ([("network", f"m4net-{self._tok}")] if self._net else [])
+        for kind, name in probes:
+            st = self._existence(kind, name)
+            if st == "EXISTS":
+                residual.append({"kind": kind, "id": name})
+            elif st == "UNKNOWN":
+                unknown.append({"kind": kind, "id": name})   # ตรวจไม่ได้ → DEGRADED (ไม่ยืนยัน clean)
+        return {"confirmed": not residual and not unknown, "residual": residual, "unknown": unknown}
 
     # ── entrypoint: certify (real-run authority) ─────────────────────────────
     def certify(self) -> dict:
