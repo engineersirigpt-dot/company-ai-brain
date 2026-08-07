@@ -142,14 +142,15 @@ class DockerQdrantDriver:
     **runtime attest (B4):** `observed_image_digest()` = digest จาก docker inspect (runtime) ให้ launcher bind แทน plan-declared.
     """
 
-    def __init__(self, *, run, session_factory, project_id, image_digest,
+    def __init__(self, *, run, session_factory, project_id, qdrant_image,
                  vector_size=1024, production_endpoints=frozenset()):
-        if not (isinstance(image_digest, str) and "@sha256:" in image_digest):
-            raise IsolationError("image_digest ต้อง pin ด้วย immutable digest (name@sha256:...) ไม่ใช่ :latest/tag")
+        # qdrant_image = **Qdrant** container image (แยกจาก plan.image_digest ที่เป็น scorer/evaluator image) — pin immutable
+        if not (isinstance(qdrant_image, str) and "@sha256:" in qdrant_image):
+            raise IsolationError("qdrant_image ต้อง pin ด้วย immutable digest (repo@sha256:...) ไม่ใช่ :latest/tag")
         self._run = run                                     # callable(list[str]) -> str (docker CLI stdout, audit)
         self._session_factory = session_factory             # callable(endpoint, collection, vector_size) -> QdrantSession
         self._project_id = project_id
-        self._image = image_digest
+        self._image = qdrant_image
         self._vector_size = vector_size
         self._prod = frozenset(production_endpoints)
         self._net = self._vol = self._container = self._endpoint = self._collection = self._session = None

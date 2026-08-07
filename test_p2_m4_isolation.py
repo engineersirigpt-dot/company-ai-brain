@@ -125,10 +125,10 @@ def make_run(*, teardown_exc=None, networks=None):
             return ""
         return ""
     return run
-def _drv(**kw): return ISO.DockerQdrantDriver(session_factory=FakeSess, project_id="proj-1", image_digest=_IMG, **kw)
+def _drv(**kw): return ISO.DockerQdrantDriver(session_factory=FakeSess, project_id="proj-1", qdrant_image=_IMG, **kw)
 
-check("B3: DockerQdrantDriver image ไม่ pin digest (:latest) -> IsolationError",
-      raises(lambda: ISO.DockerQdrantDriver(run=make_run(), session_factory=FakeSess, project_id="proj-1", image_digest="qdrant/qdrant:latest"), ISO.IsolationError))
+check("B3: DockerQdrantDriver qdrant_image ไม่ pin digest (:latest) -> IsolationError",
+      raises(lambda: ISO.DockerQdrantDriver(run=make_run(), session_factory=FakeSess, project_id="proj-1", qdrant_image="qdrant/qdrant:latest"), ISO.IsolationError))
 # B1: identity จาก Docker inspect — container ไม่อยู่บน internal network ที่สร้าง -> abort ก่อน mutate (session ไม่ถูกสร้าง)
 _sess["s"] = None
 _bad = _drv(run=make_run(networks={"other-net": {"IPAddress": "1.2.3.4"}}))
