@@ -17,9 +17,25 @@ driver protocol (duck-typed): `provision()->handle` · `count()->int` · `publis
 """
 from __future__ import annotations
 
+import re
+
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
 
 class IsolationError(Exception):
     """isolation adapter ใช้ผิด lifecycle / driver คืน handle/observation ผิด contract / provision บน production"""
+
+
+def _valid_qdrant_id(pid):
+    """Qdrant point id ต้องเป็น **unsigned int หรือ UUID string** (พบจริงตอนรัน real Qdrant — str 'A'/'0' โดน 400) ;
+    M4 corpus/frozen ต้องใช้ id ชนิดนี้ให้ตรงกันทั้ง seed/query/component (str-coerce ที่ build_candidates สอดคล้อง)"""
+    if isinstance(pid, bool):
+        raise IsolationError(f"point id เป็น bool ไม่ได้: {pid!r}")
+    if isinstance(pid, int) and pid >= 0:
+        return pid
+    if isinstance(pid, str) and _UUID_RE.fullmatch(pid):
+        return pid
+    raise IsolationError(f"point id ต้องเป็น unsigned int หรือ UUID string (Qdrant contract): {pid!r}")
 
 
 _HANDLE_KEYS = ("project_id", "network_id", "volume_id", "collection_id", "endpoint")
@@ -266,7 +282,7 @@ class QdrantSession:
 
     def seed(self, corpus) -> None:
         from qdrant_client.models import PointStruct
-        pts = [PointStruct(id=str(pid), vector=doc.get("vector", [0.0] * self._vsize),
+        pts = [PointStruct(id=_valid_qdrant_id(pid), vector=doc.get("vector", [0.0] * self._vsize),
                            payload={**doc.get("payload", {}), "source": doc.get("source", ""),
                                     "rerank_text": doc.get("rerank_text", "")})
                for pid, doc in corpus.items()]
