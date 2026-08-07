@@ -166,21 +166,65 @@ try:
     _uv = _fc.execute("PRAGMA user_version").fetchone()[0]; _fc.close()
     check("B1: foreign SQLite db -> fail-closed + ไม่ถูก adopt (ไม่เพิ่ม events/index + user_version ไม่ถูก stamp)",
           _fgr and _fga and _adopted == 0 and _uv == 0)
-    # same-name events แต่ index อ่อน (non-unique/non-partial) -> verify reject (ไม่ใช่แค่ชื่อ object)
+    # same-name events + application_id ถูก แต่ index อ่อน (non-unique/non-partial) -> verify reject (ไม่ใช่แค่ชื่อ)
     WK = _log("weak.db")
     _wc = sqlite3.connect(WK, isolation_level=None)
+    _wc.execute("PRAGMA journal_mode=DELETE")
     _wc.execute("CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT, run_id TEXT, event TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL)")
     _wc.execute("CREATE INDEX ux_started ON events(attempt_id)")           # non-unique/non-partial
     _wc.execute("CREATE INDEX ux_terminal ON events(attempt_id)")
-    _wc.execute("PRAGMA user_version=%d" % PV.SCHEMA_VERSION); _wc.close()
+    _wc.execute("PRAGMA application_id=%d" % PV._APP_ID); _wc.execute("PRAGMA user_version=%d" % PV.SCHEMA_VERSION); _wc.close()
     check("B1: same-name events แต่ index อ่อน (non-unique/non-partial) -> verify reject (ProvenanceError)",
           raises(lambda: PV.read_provenance(WK), PV.ProvenanceError) and raises(lambda: PV.append_event(WK, _ev("w0", "r", "STARTED")), PV.ProvenanceError))
+    # B1.2: schema ถูกหมดแต่ application_id ไม่ตรง (db เลียน schema) -> reject
+    AI = _log("noappid.db")
+    _ac = sqlite3.connect(AI, isolation_level=None); _ac.execute("PRAGMA journal_mode=DELETE")
+    _ac.execute("CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT, run_id TEXT, event TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL)")
+    _ac.execute("CREATE UNIQUE INDEX ux_started ON events(attempt_id) WHERE event='STARTED'")
+    _ac.execute("CREATE UNIQUE INDEX ux_terminal ON events(attempt_id) WHERE event IN ('PUBLISHED','DEGRADED','FAILED')")
+    _ac.execute("PRAGMA user_version=%d" % PV.SCHEMA_VERSION); _ac.close()   # ไม่ตั้ง application_id
+    check("B1.2: schema ถูกแต่ application_id ไม่ตรง (เลียน schema) -> reject",
+          raises(lambda: PV.read_provenance(AI), PV.ProvenanceError) and raises(lambda: PV.append_event(AI, _ev("ai0", "r", "STARTED")), PV.ProvenanceError))
+    # B1.2: extra index นอก allowlist บน events -> verify reject
+    XI = _log("extraidx.db")
+    PV.append_event(XI, _ev("x0", "r", "STARTED"))
+    _xc = sqlite3.connect(XI, isolation_level=None); _xc.execute("CREATE INDEX extra_idx ON events(run_id)"); _xc.close()
+    check("B1.2: extra index นอก allowlist -> verify reject",
+          raises(lambda: PV.read_provenance(XI), PV.ProvenanceError) and raises(lambda: PV.append_event(XI, _ev("x1", "r", "STARTED")), PV.ProvenanceError))
     # M2: existing zero-length authority -> fail-closed (ไม่ re-init เป็น empty ledger)
     ZL = _log("zero.db")
     PV.append_event(ZL, _ev("z0", "r", "STARTED"))
     with open(ZL, "r+b") as f: f.truncate(0)
     check("M2: existing 0-byte db -> read/append fail-closed (ไม่ตีเป็น fresh empty)",
           raises(lambda: PV.read_provenance(ZL), PV.ProvenanceError) and raises(lambda: PV.append_event(ZL, _ev("z1", "r", "STARTED")), PV.ProvenanceError))
+    # B1.1: existing db ถูก flip เป็น WAL -> reject + verify-only (ไม่ convert กลับ delete)
+    FW = _log("waltamper.db")
+    PV.append_event(FW, _ev("w0", "r", "STARTED"))         # valid provenance db (delete mode)
+    _wc = sqlite3.connect(FW, isolation_level=None); _wc.execute("PRAGMA journal_mode=WAL"); _wc.close()   # tamper -> WAL
+    _fwr = raises(lambda: PV.read_provenance(FW), PV.ProvenanceError)
+    _wc = sqlite3.connect(FW, isolation_level=None); _jm_after = _wc.execute("PRAGMA journal_mode").fetchone()[0]; _wc.close()
+    check("B1.1: existing db flip เป็น WAL -> reject + verify-only (ยังเป็น WAL, ไม่ถูก convert เป็น delete)",
+          _fwr and str(_jm_after).lower() == "wal")
+    # B1.2: trigger RAISE(IGNORE) บน events -> append fail-closed ก่อน mutation (ไม่ silent success)
+    TG = _log("trigger.db")
+    PV.append_event(TG, _ev("seed-0001", "r", "STARTED"))
+    _gc = sqlite3.connect(TG, isolation_level=None)
+    _gc.execute("CREATE TRIGGER swallow_insert BEFORE INSERT ON events BEGIN SELECT RAISE(IGNORE); END"); _gc.close()
+    _tg_fail = raises(lambda: PV.append_event(TG, _ev("lost-0002", "r", "STARTED")), PV.ProvenanceError)
+    _gc = sqlite3.connect(TG); _tg_cnt = _gc.execute("SELECT count(*) FROM events").fetchone()[0]; _gc.close()
+    check("B1.2: trigger RAISE(IGNORE) -> append fail-closed ก่อน mutation + ledger มีแค่ seed (ไม่ silent success)",
+          _tg_fail and _tg_cnt == 1)
+    # B1.2 defense-in-depth: ถ้า trigger หลุด schema verify (จำลอง) -> post-commit row verify จับได้
+    TG2 = _log("trigger2.db")
+    PV.append_event(TG2, _ev("s1", "r", "STARTED"))
+    _gc = sqlite3.connect(TG2, isolation_level=None)
+    _gc.execute("CREATE TRIGGER swallow2 BEFORE INSERT ON events BEGIN SELECT RAISE(IGNORE); END"); _gc.close()
+    _rvs = PV._verify_schema; PV._verify_schema = lambda conn: None          # จำลอง schema verify หลุด
+    try:
+        _def = raises(lambda: PV.append_event(TG2, _ev("s2", "r", "STARTED")), PV.ProvenanceError)
+    finally:
+        PV._verify_schema = _rvs
+    check("B1.2: post-commit row verify (defense) -> trigger ที่หลุด verify ยังถูกจับ (COMMIT ok แต่ row หาย)", _def)
 finally:
     PV._OPEN_RETRIES, PV._OPEN_DELAY = _rr, _rd
 

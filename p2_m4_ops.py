@@ -77,6 +77,14 @@ def _canon(p) -> str:
     return os.path.realpath(p)                              # M2: indirection เดียว — canonicalize out_dir ครั้งเดียว (test hook ได้)
 
 
+def _provenance_export_path(out_dir: str, run_id, aid) -> str:
+    """M1: diagnostic export path ผูก attempt_id แบบ **injective** — readable prefix (lossy) + sha256 ของ exact bytes
+    (colon/underscore/case ไม่ชนกัน) ; ไม่ใช่ decision evidence"""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(aid))[:32]
+    ahash = hashlib.sha256(str(aid).encode("utf-8")).hexdigest()[:40]
+    return os.path.join(out_dir, f"{run_id}.{safe}.{ahash}.provenance.jsonl")
+
+
 def _bundle_path(out_dir: str, run_id) -> str:
     return os.path.join(out_dir, str(run_id) + ".bundle.json")
 
@@ -154,12 +162,10 @@ def run_m4a_operational(*, provenance_db, out_dir, plan, frozen, cases, corpus, 
             return {**rec, "status": "PROVENANCE_INDETERMINATE", "provenance_error_type": type(pe).__name__}
         except Exception as pe:
             return {**rec, "status": "PROVENANCE_UNCONFIRMED", "recorded": False, "provenance_error_type": type(pe).__name__}
-        # B3: diagnostic JSONL snapshot ของ operational ledger — path ผูก run_id+attempt_id (retry-safe, ไม่ชน no-clobber) ;
-        # **ไม่ใช่ clean-publish decision evidence** (decision gate = SQLite ledger authority + runner bundle เท่านั้น) ;
-        # authority = db → export ล้ม/ชน ไม่เปลี่ยน terminal (แค่แนบ error diagnostic)
-        _safe_aid = re.sub(r"[^A-Za-z0-9._-]", "_", str(aid))
+        # B3: diagnostic JSONL snapshot ของ operational ledger — **ไม่ใช่ clean-publish decision evidence**
+        # (decision gate = SQLite ledger authority + runner bundle เท่านั้น) ; export ล้ม/ชน ไม่เปลี่ยน terminal
         try:
-            rec["provenance_export"] = PV.export_jsonl(provenance_db, os.path.join(out_dir_real, f"{run_id}.{_safe_aid}.provenance.jsonl"))
+            rec["provenance_export"] = PV.export_jsonl(provenance_db, _provenance_export_path(out_dir_real, run_id, aid))
         except Exception as ee:
             rec["provenance_export_error"] = type(ee).__name__
         return rec

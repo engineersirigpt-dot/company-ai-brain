@@ -135,9 +135,9 @@ _st, _tm = _evs[0], _evs[1]
 check("M3: STARTED bind run_manifest/m4_manifest/model/image/out_dir + started_at", _st["run_manifest_sha256"] == RP.run_manifest_sha256(PLAN) and _st["m4_case_manifest_sha256"] == PLAN["m4_case_manifest_sha256"] and _st["model_revision"] == PLAN["model_commit"] and _st["image_digest"] == PLAN["image_digest"] and _st["out_dir_realpath"] == os.path.realpath(d) and _st["started_at"] == "2026-08-05T05:01:00+07:00")
 check("M3: terminal bind capability + artifact/evidence/receipt digest + finished_at (แยก)", _tm["capability"]["hardlink_no_clobber"] and _tm["artifact_sha256"] == __import__("hashlib").sha256(open(r["path"], "rb").read()).hexdigest() and _tm["evidence_body_sha256"] == r["evidence"]["evidence_body_sha256"] and _tm["run_receipt_sha256"] == r["evidence"]["run_receipt_sha256"] and _tm["finished_at"] == "2026-08-05T05:04:00+07:00")
 check("M3.1: wrapper ใช้ clock authority เดียวกับ runner + monotonic + ไม่มี clock_anomaly", _st["started_at"] == "2026-08-05T05:01:00+07:00" and _tm["finished_at"] > _st["started_at"] and "clock_anomaly" not in _tm)
-# B3: export diagnostic JSONL snapshot ผูกกับ db + receipt (path ผูก run_id+attempt_id, retry-safe)
-_exp = r.get("provenance_export"); _expath = os.path.join(os.path.realpath(d), "run-1." + AID + ".provenance.jsonl")
-check("B3: terminal export provenance JSONL (atomic, path=run_id.attempt_id) + receipt (row_count/max_seq/jsonl_sha256) ผูก db",
+# B3: export diagnostic JSONL snapshot ผูกกับ db + receipt (path injective: run_id.<safe>.<hash>)
+_exp = r.get("provenance_export"); _expath = OPS._provenance_export_path(os.path.realpath(d), "run-1", AID)
+check("B3: terminal export provenance JSONL (atomic, injective path) + receipt (row_count/max_seq/jsonl_sha256) ผูก db",
       isinstance(_exp, dict) and _exp["path"] == _expath and os.path.isfile(_expath) and _exp["row_count"] == 2 and _exp["max_seq"] == 2 and E._is_sha256(_exp["jsonl_sha256"]))
 import json as _json
 _exlines = [l for l in open(_expath, encoding="utf-8").read().split("\n") if l]
@@ -149,12 +149,18 @@ shutil.rmtree(d, ignore_errors=True)
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.db")
 r1 = _run(d, log, _ports(iso=FakeIso(initial_count=5)), attempt_id="att-first0001")     # attempt แรก FAILED (interlock)
 r2 = _run(d, log, _ports(), attempt_id="att-second002")                                 # attempt สอง PUBLISHED (run_id เดิม)
-_p1 = os.path.join(os.path.realpath(d), "run-1.att-first0001.provenance.jsonl")
-_p2 = os.path.join(os.path.realpath(d), "run-1.att-second002.provenance.jsonl")
+_e1 = r1.get("provenance_export"); _e2 = r2.get("provenance_export")
 check("B3: retry run_id เดิม ต่าง attempt -> export คนละ path (ไม่ชน) + attempt สองไม่ถูกกลบ + ไม่มี export_error",
-      r1["status"] == "FAILED" and r2["status"] == "PUBLISHED" and os.path.isfile(_p1) and os.path.isfile(_p2)
+      r1["status"] == "FAILED" and r2["status"] == "PUBLISHED" and isinstance(_e1, dict) and isinstance(_e2, dict)
+      and _e1["path"] != _e2["path"] and os.path.isfile(_e1["path"]) and os.path.isfile(_e2["path"])
       and "provenance_export_error" not in r2 and "provenance_export_error" not in r1)
 shutil.rmtree(d, ignore_errors=True)
+
+# ── M1: attempt filename injective — 'att:...' กับ 'att_...' (valid ทั้งคู่) ต้องไม่ชน path เดียวกัน ──
+check("M1: export path injective — att:0000001 vs att_0000001 -> path ต่างกัน (colon/underscore ไม่ชน)",
+      OPS._provenance_export_path("/o", "run-1", "att:0000001") != OPS._provenance_export_path("/o", "run-1", "att_0000001"))
+check("M1: export path deterministic (input เดิม -> path เดิม)",
+      OPS._provenance_export_path("/o", "run-1", "att:0000001") == OPS._provenance_export_path("/o", "run-1", "att:0000001"))
 
 # ── M3.1: clock ไม่น่าเชื่อ (STARTED) -> FAILED/clock ก่อน provision ───────────
 d = tempfile.mkdtemp(prefix="p2ops-"); log = os.path.join(d, "prov.db")

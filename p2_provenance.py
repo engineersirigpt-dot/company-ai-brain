@@ -114,15 +114,13 @@ def _serialize(record: dict) -> bytes:
     return (_canonical(record) + "\n").encode("utf-8")
 
 
-def _apply_pragmas(conn: sqlite3.Connection) -> None:
-    conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-    conn.execute("PRAGMA synchronous=FULL")
-    conn.execute("PRAGMA journal_mode=DELETE")
-
-
-# ── B1/M2 (round-9): exact schema contract — init เฉพาะไฟล์ที่เราสร้างเอง (O_EXCL) ; existing = verify-only, ไม่แก้ ──
+# ── exact schema/format contract — init เฉพาะไฟล์ที่เราสร้าง (O_EXCL) ; existing = verify-only (ไม่แตะ file) ──
+_APP_ID = 0x50524F56                            # 'PROV' — application_id magic แยก provenance file จาก db ที่เลียน schema
+_DDL_TABLE = ("CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT, "
+              "run_id TEXT, event TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL)")
 _DDL_UX_STARTED = "CREATE UNIQUE INDEX ux_started ON events(attempt_id) WHERE event='STARTED'"
 _DDL_UX_TERMINAL = "CREATE UNIQUE INDEX ux_terminal ON events(attempt_id) WHERE event IN ('PUBLISHED','DEGRADED','FAILED')"
+_ALLOWED_INDEXES = {"ux_started": _DDL_UX_STARTED, "ux_terminal": _DDL_UX_TERMINAL}
 # PRAGMA table_info(events) → (name, type, notnull, pk) ตาม contract แบบ exact
 _EXPECT_COLUMNS = [("seq", "INTEGER", 0, 1), ("attempt_id", "TEXT", 0, 0), ("run_id", "TEXT", 0, 0),
                    ("event", "TEXT", 1, 0), ("body", "TEXT", 1, 0), ("body_sha256", "TEXT", 1, 0)]
@@ -133,36 +131,69 @@ def _norm_sql(s: str) -> str:
     return " ".join(s.split()).lower() if isinstance(s, str) else ""
 
 
+def _conn_pragmas(conn: sqlite3.Connection) -> None:
+    conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")   # non-persistent เท่านั้น (ก่อน verify existing)
+
+
+def _runtime_pragmas(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA synchronous=FULL")                   # per-connection (ไม่แตะ file) — ตั้งหลัง verify
+
+
 def _has_table(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
 def _verify_schema(conn: sqlite3.Connection) -> None:
-    """B1: ตรวจ **exact** schema — columns (name/type/notnull/pk) + index uniqueness/partial-predicate (ไม่ใช่แค่ชื่อ)"""
+    """
+    B1.2: ตรวจ **exact behavioral schema** — table DDL/columns ตรงเป๊ะ + index set = allowlist (unique/partial/predicate) +
+    **ห้ามมี trigger หรือ index นอก allowlist** บน `events` (กัน trigger `RAISE(IGNORE)` swallow INSERT เงียบ) + version
+    """
+    trow = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='events'").fetchone()
+    if not trow or _norm_sql(trow[0]) != _norm_sql(_DDL_TABLE):
+        raise ProvenanceError("events table DDL ไม่ตรง contract")
     cols = [(c[1], c[2], c[3], c[5]) for c in conn.execute("PRAGMA table_info(events)").fetchall()]
     if cols != _EXPECT_COLUMNS:
         raise ProvenanceError(f"events columns ไม่ตรง contract: {cols}")
-    for name, ddl in (("ux_started", _DDL_UX_STARTED), ("ux_terminal", _DDL_UX_TERMINAL)):
-        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
-        if not row or _norm_sql(row[0]) != _norm_sql(ddl):
-            raise ProvenanceError(f"index {name} ไม่ตรง contract (unique/partial/predicate/columns)")
-    uv = conn.execute("PRAGMA user_version").fetchone()[0]
-    if uv != SCHEMA_VERSION:
-        raise ProvenanceError(f"provenance schema version ไม่ตรง: {uv} != {SCHEMA_VERSION}")
+    idx = conn.execute("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='events'").fetchall()
+    seen = set()
+    for name, sql in idx:
+        if sql is None:                          # sqlite_autoindex (internal) — ไม่ใช่ user index
+            continue
+        if name not in _ALLOWED_INDEXES or _norm_sql(sql) != _norm_sql(_ALLOWED_INDEXES[name]):
+            raise ProvenanceError(f"index นอก allowlist / ไม่ตรง contract: {name}")
+        seen.add(name)
+    if seen != set(_ALLOWED_INDEXES):
+        raise ProvenanceError(f"index set ไม่ครบ contract: {seen}")
+    trg = conn.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='events'").fetchall()
+    if trg:
+        raise ProvenanceError(f"พบ trigger บน events (ห้าม — อาจ swallow INSERT): {[t[0] for t in trg]}")
+    if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+        raise ProvenanceError(f"provenance schema version ไม่ตรง: != {SCHEMA_VERSION}")
+
+
+def _verify_open(conn: sqlite3.Connection) -> None:
+    """B1.1: verify-only บน existing db — **อ่าน** journal_mode/application_id (ไม่ convert/mutate) ก่อน + exact schema"""
+    jm = conn.execute("PRAGMA journal_mode").fetchone()[0]    # no-arg = อ่าน current mode (ไม่ mutate)
+    if str(jm).lower() != "delete":
+        raise ProvenanceError(f"provenance db journal_mode ไม่ใช่ delete (foreign/tampered): {jm}")
+    if conn.execute("PRAGMA application_id").fetchone()[0] != _APP_ID:
+        raise ProvenanceError("provenance application_id ไม่ตรง (ไม่ใช่ provenance file)")
+    _verify_schema(conn)
 
 
 def _initialize(conn: sqlite3.Connection) -> None:
-    """สร้าง exact schema + stamp version ใต้ write lock (เฉพาะไฟล์ที่เราเพิ่งสร้างด้วย O_EXCL)"""
+    """สร้าง exact schema + application_id + version ใต้ write lock (เฉพาะไฟล์ที่เราเพิ่งสร้างด้วย O_EXCL)"""
+    conn.execute("PRAGMA journal_mode=DELETE")   # fresh file → ตั้ง DELETE ครั้งเดียวตอน init (ไม่ใช่ auto-repair existing)
     conn.execute("BEGIN IMMEDIATE")
     try:
-        if _has_table(conn, "events"):           # เผื่อ race (ไม่ควรเกิดกับไฟล์ O_EXCL) → verify แทน create
+        if _has_table(conn, "events"):           # racing creator ชนะไปแล้ว → verify แทน create
             _verify_schema(conn)
         else:
-            conn.execute("CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT, "
-                         "run_id TEXT, event TEXT NOT NULL, body TEXT NOT NULL, body_sha256 TEXT NOT NULL)")
+            conn.execute(f"PRAGMA application_id={_APP_ID}")
+            conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            conn.execute(_DDL_TABLE)
             conn.execute(_DDL_UX_STARTED)
             conn.execute(_DDL_UX_TERMINAL)
-            conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         conn.execute("COMMIT")
     except BaseException:
         try:
@@ -173,13 +204,10 @@ def _initialize(conn: sqlite3.Connection) -> None:
 
 
 def _open_existing(conn: sqlite3.Connection, canonical: str) -> None:
-    """
-    existing file = verify-only (ไม่สร้าง/แก้ schema, B1) — foreign/truncated/wrong schema = fail-closed ;
-    รอ concurrent creator ที่กำลัง init commit (bounded) ก่อนตัดสินว่า schema หาย
-    """
+    """existing = verify-only (ไม่สร้าง/แก้ schema/pragma, B1) — รอ concurrent creator commit (bounded) ก่อน fail-closed"""
     for _ in range(_OPEN_RETRIES):
         if _has_table(conn, "events"):
-            _verify_schema(conn)
+            _verify_open(conn)
             return
         time.sleep(_OPEN_DELAY)
     raise ProvenanceError(f"existing provenance db ไม่มี provenance schema (foreign/truncated/init ค้าง) — fail-closed: {canonical}")
@@ -211,16 +239,17 @@ def _connect(log_path: str) -> sqlite3.Connection:
     created = _try_create(canonical)
     try:
         conn = sqlite3.connect(canonical, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
-        _apply_pragmas(conn)
+        _conn_pragmas(conn)                      # B1.1: pre-verify = non-persistent (busy_timeout) เท่านั้น
     except sqlite3.Error as e:
         if created:
             _safe_unlink(canonical)
         raise ProvenanceError(f"เปิด provenance db ไม่ได้: {e}") from e
     try:
         if created:
-            _initialize(conn)                    # เราสร้างไฟล์เอง → init exact schema
+            _initialize(conn)                    # เราสร้างไฟล์เอง → init exact schema + format marker
         else:
-            _open_existing(conn, canonical)      # ไฟล์มีอยู่ → verify-only (fail-closed ถ้า foreign/wrong)
+            _open_existing(conn, canonical)      # ไฟล์มีอยู่ → verify-only (ไม่ mutate ; fail-closed ถ้า foreign/wrong)
+        _runtime_pragmas(conn)                   # ตั้ง persistent-safe runtime options หลัง verify แล้ว
     except ProvenanceError:
         conn.close()
         if created:
@@ -345,8 +374,8 @@ def _row_exists(canonical: str, aid, ev, bsha) -> bool:
     conn = sqlite3.connect(canonical, timeout=_BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
     try:
         conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-        cur = conn.execute("SELECT 1 FROM events WHERE attempt_id IS ? AND event=? AND body_sha256=? LIMIT 1",
-                           (aid, ev, bsha))
+        cur = conn.execute("SELECT 1 FROM events WHERE attempt_id IS ? AND event IS ? AND body_sha256=? LIMIT 1",
+                           (aid, ev, bsha))          # IS จัดการ NULL (raw record ที่ไม่มี attempt_id/event)
         return cur.fetchone() is not None
     finally:
         conn.close()
@@ -405,6 +434,9 @@ def _locked_write(log_path: str, record: dict, validate_state) -> None:
             if outcome == "uncommitted":
                 raise                             # retryable (re-raise ประเภทเดิม)
             raise ProvenanceIndeterminate(f"COMMIT outcome พิสูจน์ไม่ได้: {canonical}") from ce
+        # B1.2 defense-in-depth: COMMIT สำเร็จแล้วต้องมี row จริง (กัน silent-drop เช่น trigger RAISE(IGNORE) ที่หลุด verify)
+        if not _row_exists(canonical, aid, record.get("event"), bsha):
+            raise ProvenanceError("append COMMIT สำเร็จแต่ row ไม่ปรากฏ (swallowed insert / silent drop)")
     finally:
         conn.close()
 
