@@ -20,11 +20,20 @@ import p2_reranker as RK
 import p2_runplan as RP
 
 QD_EP = os.environ["M4_QDRANT_ENDPOINT"]                    # http://m4qd-<tok>:6333 (internal DNS)
-IMG = os.environ["M4_EVAL_IMAGE_DIGEST"]                    # sha256:<64hex> (evaluator container image)
+IMG = os.environ["M4_EVAL_IMAGE_DIGEST"]                    # sha256:<64hex> (evaluator container image — controller pin)
 NET, VOL, PROJ = os.environ["M4_NETWORK_ID"], os.environ["M4_VOLUME_ID"], os.environ["M4_PROJECT_ID"]
 OUT = os.environ.get("M4_OUT", "/out")
 VS = 4
-COLL = "m4eval-" + uuid.uuid4().hex[:8]
+COLL = os.environ["M4_COLLECTION_ID"]                       # controller-supplied (identity ที่ controller cross-check ด้วย hash)
+
+
+def _deps_sha256() -> str:
+    """sha256 ของ installed dist+version (sorted) — ให้ controller bind dependency identity ที่รันจริง (M1)"""
+    import hashlib
+    from importlib import metadata
+    items = sorted(f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions()
+                   if d.metadata and d.metadata.get("Name"))
+    return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()
 
 
 class RealQdrantClient:
@@ -94,7 +103,8 @@ def main() -> int:
     result = {"status": r["status"], "evidence_status": ev["status"],
               "isolated_interlock": ev["isolated_interlock"], "independent_oracle": ev["independent_oracle"],
               "sentinel_reached_model": ev["sentinel_reached_model"], "unauthorized_in_model_inputs": ev["unauthorized_in_model_inputs"],
-              "decision_eligible": ev["decision_eligible"], "bundle_path": r["path"]}
+              "decision_eligible": ev["decision_eligible"], "bundle_path": r["path"],
+              "declared_image_digest": IMG, "deps_sha256": _deps_sha256()}   # controller bind + cross-check
     print("M4A_RESULT " + json.dumps(result))
     return 0 if (r["status"] == "PUBLISHED" and ev["status"] == "PASS") else 1
 
