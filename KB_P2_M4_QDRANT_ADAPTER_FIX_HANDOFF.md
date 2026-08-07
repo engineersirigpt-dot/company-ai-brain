@@ -47,10 +47,20 @@ test_p2_provider 22/22   test_policy 69/69   test_p2 166/166   ... (20 suites)
 - **รัน M4a จริง = NO-GO** จน adapter provenance/isolation review ผ่าน + Data Owner sign-off (hash-bound) + validated real M4 PASS + P5b canary — AI จะไม่สร้าง/กรอก sign-off เอง
 - real-run: `client_factory` ต้องสร้าง `qdrant_client.QdrantClient(url=endpoint)` + session `observed_target_identity` ยืนยัน endpoint/collection จริง (เช่น ping server + get_collection) — ยกให้ isolation adapter review
 
-## ขอ Codex review (adapter provenance/isolation รอบ 2)
+## ขอ Codex review — **targeted re-review หนึ่งรอบ** (bounded scope, owner decision 2026-08-07)
 
-1. session-from-handle identity (B1) — production/mismatch/rebind ปิดครบไหม ; identity มาจาก session จริง
-2. case-scoped oracle (B2) + approved-probe authorization (M1) — หลาย case/role + role นอก approved set ปิดครบไหม ; port change ใน runner โอเคไหม
-3. หลังผ่าน → isolation/Docker adapter ; M4a run ยัง NO-GO จน sign-off
+ตรวจเฉพาะ **Definition of Done 3 ข้อ** ของ B1/B2/M1 เท่านั้น:
+1. **(B1)** client ถูกสร้าง/bind จาก endpoint ใน isolated handle จริง — production/mismatch/rebind abort ; identity มาจาก session ที่ยิง query
+2. **(B2)** oracle observation ผูก **ราย case** (`observe_visibility(case_id, role)`) — หลาย case/role เดียวได้ ; port change ใน runner สอดคล้อง
+3. **(M1)** probe roles มาจาก **approved allowlist** ผูก RunPlan/frozen — ไม่ mint admin เอง
 
-**Gate:** adapter provenance review รอบ 2 = **FIX-THEN-GO/GO** · isolation/Docker + scorer adapter = หลัง review นี้ · M4a real run = **NO-GO** จน adapter provenance/isolation review + Data Owner sign-off (hash-bound) · N-sweep = รอ validated M4a PASS · decision benchmark = NO-GO จน sign-off + M4b + validated canary
+> **Freeze policy หลังผ่าน DoD (owner decision — บันทึกใน `STATUS.md` 2026-08-07):**
+> **freeze safety/provenance v1 ; ห้ามขยาย hardening เพิ่ม** ; finding ใหม่ → **backlog** เว้นแต่พิสูจน์ได้ว่าเกิดหนึ่งใน:
+> **(1)** ข้อมูลข้ามสิทธิ์ถึงโมเดล · **(2)** adapter แตะ production ได้ · **(3)** evidence รายงาน PASS เท็จ · **(4)** resource cleanup ล้มจนมีผลต่อการรันถัดไป
+> — finding นอกสี่ข้อนี้ ให้ลง backlog ไม่บล็อกการเดินต่อ
+
+**Gate (ปรับตาม owner decision 2026-08-07 — ดู `STATUS.md`):**
+- adapter re-review รอบ 2 = **FIX-THEN-GO/GO** (bounded DoD) → ผ่านแล้ว **freeze v1**
+- **M4a synthetic mechanics = GO** (corpus สังเคราะห์ + isolated Qdrant ; ไม่ต้อง sign-off) → ทำ isolation/Docker adapter + รัน synthetic ต่อได้
+- **M4b / N-sweep / decision benchmark = NO-GO** จน Data Owner sign-off (hash-bound) + classification + human-reviewed labels
+- **Production = NO-GO** จน auth + deployment approval + governance ; AI ห้ามสร้าง/กรอก sign-off เอง

@@ -4,13 +4,25 @@
 > ให้อ่านไฟล์นี้ก่อนเริ่มวิเคราะห์ วางแผน หรือแก้ไขโปรเจกต์ เพื่อใช้ข้อเท็จจริงและการตัดสินใจล่าสุดร่วมกัน  
 > เมื่อพบหลักฐานใหม่ ให้แยกให้ชัดระหว่าง **ยืนยันแล้ว**, **ยังต้องตรวจสอบ** และ **ข้อเสนอ**
 
-**อัปเดตล่าสุด:** 2026-08-04
+**อัปเดตล่าสุด:** 2026-08-07
 
 > **⚠️ Scope (2026-08-04):** repo นี้ = **Knowledge Brain (Module 12) เท่านั้น** — คลังความรู้กลาง (RAG, `/search`, `/ask`, RBAC)
 > งาน **RFQ/ENQ backend (Module 01/02)** ที่เคยลองทำใน repo นี้ (migrations, enq_api, sign-off/version/draft-edit) **ถูกลบออกแล้ว** เพราะเป็นคนละ module — RFQ ตัวจริงอยู่ที่โปรเจกต์ `../RFQ_Estimate` (Estimate-Packaging) ; ประวัติ RFQ ยังอยู่ใน git history ถ้าต้องหยิบดีไซน์ governance ไปเสริม RFQ_Estimate
 
 > **✅ P1 closure (2026-08-04, Codex GO @ `d120935`):** *P1 permission policy hardened สำหรับ PoC local/synthetic/single-writer ที่ d120935; evidence/run2 PASS. ยังไม่ production-ready และ deploy gates ทั้งหมดยังเปิด.*
 > เดินต่อ **P2 (reranker offline/shadow + hybrid arm)** เป็น in-progress. **production reality ไม่เปลี่ยน:** AUTH_MODE=warn, user auth/OIDC และ /ask egress ยังไม่ปิด. P2 guardrail: filter ก่อน candidates เสมอ (reranker ห้ามเห็น point นอกสิทธิ์แม้ shadow), candidate set เดียวเทียบ dense/reranked/hybrid, แยก retrieval-quality metric ออกจาก permission suite (`TOP_K=10` ของ P5b ไม่นับเป็น quality result), คง canary leak=0 เป็น regression gate, ไม่แตะ production/cloud egress.
+
+> **🧭 P2/M4 decision (2026-08-07, เจ้าของงาน Suwat — บันทึกเป็นการตัดสินใจใหม่ ไม่ใช่เปลี่ยนเงียบ ๆ):**
+> หลัง safety-pieces ผ่าน Codex 12 รอบ (GO/SHIP) + provenance ย้าย SQLite + Qdrant provider/oracle adapter — **เปลี่ยนโหมดจาก "พิสูจน์ว่ากลไกกันพัง" → "พิสูจน์ว่าระบบสร้างผลลัพธ์จริง"** โดย:
+> 1. **ปิด adapter B1/B2/M1** (`a2c0f9e`) แล้วส่ง Codex **targeted re-review หนึ่งรอบ** — **Definition of Done:** (ก) client ถูกสร้าง/bind จาก endpoint ใน isolated handle จริง (ข) oracle observation ผูกราย **case** (ค) probe roles มาจาก **approved allowlist** ผูก RunPlan/frozen (ไม่ mint admin เอง) (ง) targeted tests ผ่าน
+> 2. **Freeze safety/provenance v1** หลัง DoD ผ่าน — **ห้ามขยาย hardening เพิ่ม** ; finding ใหม่จาก Codex → **backlog** เว้นแต่พิสูจน์ได้ว่าเกิดหนึ่งใน: **(1) ข้อมูลข้ามสิทธิ์ถึงโมเดล · (2) adapter แตะ production ได้ · (3) evidence รายงาน PASS เท็จ · (4) resource cleanup ล้มจนมีผลต่อการรันถัดไป**
+> 3. **แยก gate (เปลี่ยนจากเดิมที่ล็อกว่า M4a ต้อง sign-off):**
+>    - **M4a synthetic mechanics = GO** — corpus สังเคราะห์บน isolated Qdrant เพื่อพิสูจน์ว่า pipeline รันจริงได้ ; **ไม่ต้องใช้เอกสารบริษัท / ไม่ต้อง Data Owner sign-off**
+>    - **M4b decision benchmark / ข้อมูลจริง + N-sweep = NO-GO** จน **Data Owner sign-off (hash-bound) + classification + human-reviewed labels**
+>    - **Production = NO-GO** จน auth + deployment approval + governance ครบ
+>    - **คงเดิม:** AI **ห้าม**สร้าง/กรอก sign-off เอง และ**ห้าม**เปลี่ยน `label_status` เป็น human-reviewed
+> 4. **ขอบเขต P2 ต่อการตัดสินใจ hardware:** P2 reranker พิสูจน์เฉพาะ **retrieval quality + permission leakage + reranker latency** เท่านั้น — **ตัดสินใจ GPU ทั้งระบบไม่ได้** ; Qwen3-32B (generation, context length, concurrency, e2e latency) ต้อง benchmark **แยก** (ดู §10/§12)
+> 5. **ลำดับ:** ปิด adapter B1/B2/M1 (เสร็จ) → freeze v1 → isolation/Docker adapter → **M4a synthetic run ครั้งแรก** → (ขนาน) **Data Owner sign-off pack** (เอกสาร 30–50 ไฟล์, classification, allowed roles, Local/Cloud policy, ผู้อนุมัติ) → หลัง sign-off ค่อยรัน M4b/N-sweep บนชุดตัวแทนจริง → เปิด generation/hardware benchmark แยกจาก P2
 
 ---
 
