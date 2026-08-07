@@ -145,3 +145,38 @@ outer_receipt_sha256  f08f4dbedfcaf854e6e954123abc2164174d98268733bdfa3337ec7a9d
 - synthetic corpus / dummy vectors เท่านั้น ; **M4b/ข้อมูลจริง ยัง NO-GO** จน Data Owner sign-off
 
 ทุก container **teardown + post-inspect ยืนยันหายจริง** ; ไม่มี resource ค้าง ; ไม่แตะข้อมูลจริง
+
+---
+
+## 6. 🔒 Strict validator — ปิด Codex re-review B1/B2/B3 (field ต้อง "บังคับ verdict")
+
+**Codex re-review (84b9cf8):** capability ผ่าน แต่ "field อยู่ใน JSON ≠ field บังคับ verdict" — ลบ M1 field หรือใส่
+qdrant/run/network ผิด แล้ว recompute hash **ยังได้ PASS** → เข้า freeze exception (false-PASS + cleanup-failure)
+
+ทำให้ทุกฟิลด์ที่ receipt อ้าง authority **load-bearing** (validator error + terminal ≠ PASS ถ้าขาด/ผิด):
+
+| Codex | ปิดด้วย |
+|---|---|
+| **B1** inspect error = "หายแล้ว" → false cleanup PASS | `teardown_and_verify` ใช้ **three-state existence probe** (`docker ps -a`/`network ls`/`volume ls --filter` ที่ต้อง `rc==0` ก่อนเชื่อ empty=**ABSENT**) ; rc≠0 (daemon/permission ล้ม) = **UNKNOWN** แยกจาก ABSENT → `cleanup.unknown` → **DEGRADED** ไม่ใช่ PASS |
+| **B2** M1 process/source/dep ไม่ load-bearing | validator บังคับ schema เต็ม: command non-empty, exit 0, timestamps ISO เรียงได้, stdout/stderr/dep = sha256, git_commit + **source_tree_digest** = 40-hex, **git_tree_dirty is False** ; mount source **`:ro`** + real_run **stage จาก `git archive HEAD`** (mounted tree = committed tree, ไม่มี untracked shadow) |
+| **B3** qdrant/run/network ไม่ตรวจ | top `run_id == inner.run_id` ; `network_internal` เป็น bool ; `qdrant_image_ref` ต้องอยู่ใน observed **RepoDigests** (docker inspect — ไม่เอา manifest ไปเทียบ image id) ; cleanup schema exact |
+
+### ผลรัน evidence (strict, clean tree)
+
+```
+git_commit / dirty     7aa4d61d468b / False
+source_tree_digest     3174a6ee2022…              (HEAD^{tree} — source ที่รัน = committed tree)
+TERMINAL_STATUS        PASS
+strict validate errs   []   (required_field_errors=[]  false_pass_reasons=[])
+cleanup                confirmed=True residual=[] unknown=[]        (three-state)
+qdrant ref∈RepoDigests True | published_ports 0 | top run_id==inner True
+outer_receipt_sha256   b97949f326539bdc…
+```
+
+### negative proof (offline) — Codex targeted acceptance 4 ข้อ ✅
+- **1 (B1)** daemon/inspect error ตอน cleanup → `DEGRADED` (`test_p2_m4_controller` probe_unknown ; `test_p2_m4_receipt` UNKNOWN)
+- **2 (B2)** ลบ/malformed process/source/dep field ทีละกลุ่ม → validate error + terminal ≠ PASS (5 กลุ่ม + dirty)
+- **3 (B3)** qdrant RepoDigest ไม่ตรง / network mode หาย / top≠inner run id → validate error + terminal ≠ PASS
+- **4** rerun synthetic 1 ครั้ง → inner+outer artifacts ผ่าน strict validator, cleanup confirmed จาก absence probe, no leftover จริง
+
+หลักฐาน: `KB_P2_M4_OUTER_RECEIPT.json` + `KB_P2_M4_INNER_BUNDLE.json` (commit 7aa4d61) · receipt **30/30** + controller **15/15** · offline **943/943**
