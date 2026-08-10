@@ -39,6 +39,12 @@
 - **retention** — เก็บนานเท่าไร / เงื่อนไขลบ
 - **human-reviewed label** — ✅ เมื่อมนุษย์ตรวจ label (classification+allowed_roles) ของเอกสารนี้แล้วว่าถูกต้อง
 
+### 1.1 ฟิลด์เพิ่มต่อเอกสาร (มนุษย์กรอก — เข้า canonical manifest §3)
+
+- **purpose** — วัตถุประสงค์การใช้เอกสารนี้ใน PoC (เช่น retrieval eval / permission test) ; ใช้เกินขอบเขตนี้ = ต้องอนุมัติใหม่
+- **redaction/minimization** — ต้อง redact ฟิลด์ไหนก่อน ingest (PII/ราคา/สูตร) + เก็บเท่าที่จำเป็น (data minimization) ; `none` ถ้าไม่ต้อง
+- **deletion_trigger** — เงื่อนไข/กำหนดลบ (เช่น "จบ PoC" / วันที่) ; คู่กับ retention
+
 ---
 
 ## 2. Data Egress Policy (สรุปตาม classification)
@@ -56,12 +62,14 @@
 
 > การลงนามผูกกับ **hash ของ manifest** — ถ้าชุดเอกสาร/attribute เปลี่ยนแม้แถวเดียว hash เปลี่ยน → sign-off เดิม **เป็นโมฆะ ต้องลงนามใหม่**
 
-1. สร้าง canonical manifest (JSON, sort key, ต่อหนึ่งแถวมี: source, doc_owner, classification, confidentiality_level, allowed_roles(sorted), has_pii, is_trade_secret, egress_policy, retention, human_reviewed)
-2. คำนวณ `sha256` ของ canonical manifest bytes
-3. บันทึกค่าที่นี่ (มนุษย์/tooling กรอก — **ไม่ใช่ AI**):
+1. สร้าง canonical manifest (JSON, sort key, ต่อหนึ่งแถวมี: source, **file_sha256** (hash เนื้อไฟล์จริง), doc_owner, classification, confidentiality_level, allowed_roles(sorted), has_pii, is_trade_secret, egress_policy, purpose, redaction, deletion_trigger, retention, human_reviewed)
+2. คำนวณ `sha256` ของ canonical manifest bytes (= `manifest_sha256` ที่ผูกกับ sign-off)
+3. **tooling ช่วยได้:** `data_owner_manifest.py build <dir>` สแกนโฟลเดอร์ → คำนวณ `file_sha256` ต่อไฟล์จริง + วาง row skeleton (ฟิลด์ human เว้นว่าง, `human_reviewed=false`, `label_status=PENDING`) → เขียน manifest JSON + `manifest_sha256`. **tooling ไม่กรอก classification/allowed_roles/human_reviewed แทนมนุษย์**
+4. บันทึกค่าที่นี่ (มนุษย์/tooling กรอก — **AI ไม่ตั้ง approved/human_reviewed**):
 
 ```
-manifest_sha256 : [ รอกรอก — 64-hex ]
+manifest_version   : [ รอกรอก — เช่น v1 ]
+manifest_sha256    : [ รอกรอก — 64-hex (จาก tooling) ]
 manifest_row_count : [ รอกรอก — 30–50 ]
 manifest_built_at  : [ รอกรอก — ISO-8601+tz ]
 ```
@@ -83,9 +91,13 @@ manifest_built_at  : [ รอกรอก — ISO-8601+tz ]
 
 | บทบาท | ชื่อ | หมายเหตุ |
 |---|---|---|
-| Data Owner (เจ้าของข้อมูล) | [ รอกรอก ] | ผู้รับผิดชอบ classification |
-| ผู้จัดเตรียม manifest | [ รอกรอก ] | |
+| Data Owner (เจ้าของข้อมูล / business owner) | [ รอกรอก ] | ผู้รับผิดชอบ classification |
+| ผู้จัดเตรียม manifest | [ รอกรอก ] | รัน tooling + ตรวจไฟล์ |
+| Label reviewer | [ รอกรอก ] | ตรวจ classification+allowed_roles ต่อเอกสาร (ติ๊ก human-reviewed) |
+| DPO / Legal checkpoint | [ รอกรอก ] | ยืนยัน PDPA/ความลับการค้า/egress ก่อนอนุมัติ (ลงชื่อแยกจาก approver) |
 | ผู้อนุมัติ (Approver) | **[ รอมนุษย์ลงนาม — AI ห้ามกรอก ]** | ดู §7 |
+
+> **DPO/Legal checkpoint ต้องผ่านก่อน §7 มีผล** — approver ลงนามได้เฉพาะหลัง DPO/Legal ยืนยัน (human-only ทั้งคู่)
 
 ---
 
@@ -104,9 +116,12 @@ Data Owner/ผู้บริหารเลือกหนึ่ง (ดู STA
 
 ```
 status            : PENDING            # ค่าเดียวที่ AI ตั้งได้คือ PENDING ; approved = มนุษย์เท่านั้น
+pack_version      : [ รอมนุษย์กรอก — เช่น v1 ]
 approver_name     : [ รอมนุษย์ลงนาม ]
 approver_role     : [ รอมนุษย์ลงนาม ]
-approved_manifest_sha256 : [ รอมนุษย์กรอก — ต้องตรง §3 ]
+dpo_legal_cleared_by : [ รอมนุษย์ลงนาม — DPO/Legal ก่อน approver ]
+approved_manifest_version : [ รอมนุษย์กรอก — ต้องตรง §3 ]
+approved_manifest_sha256  : [ รอมนุษย์กรอก — 64-hex ต้องตรง §3 (hash ของ doc-set + labels) ]
 approved_date     : [ รอมนุษย์ลงนาม — ISO-8601+tz ]
 signature         : [ รอมนุษย์ลงนาม ]
 ```
