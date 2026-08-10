@@ -43,6 +43,10 @@ info/
 *.dll
 *.bat
 
+# Local scratch / intake dump (เอกสารดิบ, รูปสแกน, ข้อมูลลูกค้าจริง — ห้าม commit เด็ดขาด)
+# หมายเหตุ: ext rules ด้านบนไม่ครอบ .jpg/.png/.mp4/.py/.db ที่อยู่ใน tmp/ → ignore ทั้งโฟลเดอร์
+tmp/
+
 # OS
 .DS_Store
 Thumbs.db
