@@ -179,4 +179,34 @@ outer_receipt_sha256   b97949f326539bdc…
 - **3 (B3)** qdrant RepoDigest ไม่ตรง / network mode หาย / top≠inner run id → validate error + terminal ≠ PASS
 - **4** rerun synthetic 1 ครั้ง → inner+outer artifacts ผ่าน strict validator, cleanup confirmed จาก absence probe, no leftover จริง
 
-หลักฐาน: `KB_P2_M4_OUTER_RECEIPT.json` + `KB_P2_M4_INNER_BUNDLE.json` (commit 7aa4d61) · receipt **30/30** + controller **15/15** · offline **943/943**
+หลักฐาน: `KB_P2_M4_OUTER_RECEIPT.json` + `KB_P2_M4_INNER_BUNDLE.json` · receipt **30/30** + controller **15/15** · offline **943/943**
+
+---
+
+## 7. 🔐 Cross-binding รอบสุดท้าย — ปิด Codex B2.1/B3.1 (evidence @72a1763)
+
+**Codex re-review (7aa4d61):** B1 + schema ปิดแล้ว เหลือ cross-binding 2 จุดที่ยังไม่ผูก producer→artifact:
+
+| Codex | ปิดด้วย |
+|---|---|
+| **B3.1** RepoDigests อ่านจาก requested ref ไม่ใช่ image ที่ container รันจริง | controller inspect RepoDigests จาก **`.Image` (actual container image id)** ; receipt เพิ่ม `qdrant_repo_digests_subject` + `qdrant_container_config_image` ; validator บังคับ **`subject == observed.qdrant_image`** + pinned ref ∈ RepoDigests(subject) → เปลี่ยน actual image = FAILED |
+| **B2.1** git identity อ่านจาก live HEAD หลังรัน (race) | `p2_m4_real_run` resolve commit+tree **ก่อน** staging → `git archive <commit>` (ไม่ใช่ HEAD) → ส่ง **immutable `source_identity`** เข้า controller ; certify **ไม่ re-read live HEAD** (fallback `_git_identity` เฉพาะ offline test) |
+
+### ผลรัน evidence (strict, @72a1763)
+
+```
+TERMINAL_STATUS        PASS      strict validate errs []
+B3.1  qdrant_image = repo_digests_subject = sha256:0bd98fa7…   (subject == container image ที่รันจริง)
+      pinned ref ∈ RepoDigests(subject) = True | container_config_image = qdrant/qdrant@sha256:0bd98fa7…
+B2.1  git_commit 72a1763b… (staged, resolve ก่อน archive) | git_tree_dirty False | source_tree_digest f53e014c…
+cleanup confirmed=True residual=[] unknown=[]  | docker ps -a/network ls/volume ls: no leftover | staging ลบแล้ว
+outer_receipt_sha256   8cf7334d1e0d998a…
+```
+
+### negative proof (Codex acceptance 4 ข้อ) ✅
+- **1 (B3.1)** actual container image คนละตัว / RepoDigests(subject) ไม่มี pinned ref → **FAILED** (receipt subject-mismatch + controller wrong-image)
+- **2 (B2.1)** stage commit A แต่ live HEAD = B ก่อน certify → receipt bind **A** (staged) ไม่ตาม live HEAD (`test_p2_m4_controller` staged-vs-liveHEAD)
+- **3** strict validator artifact ใหม่ผ่าน + suites ไม่ regress: receipt **32/32** · controller **19/19** · offline **949/949**
+- **4** bounded rerun 1 ครั้ง → inner+outer artifacts ผ่าน strict validator, cleanup confirmed จาก absence probe, no leftover จริง
+
+หลักฐาน: `KB_P2_M4_OUTER_RECEIPT.json` + `KB_P2_M4_INNER_BUNDLE.json` (commit 72a1763)
