@@ -4,7 +4,7 @@
 > ให้อ่านไฟล์นี้ก่อนเริ่มวิเคราะห์ วางแผน หรือแก้ไขโปรเจกต์ เพื่อใช้ข้อเท็จจริงและการตัดสินใจล่าสุดร่วมกัน  
 > เมื่อพบหลักฐานใหม่ ให้แยกให้ชัดระหว่าง **ยืนยันแล้ว**, **ยังต้องตรวจสอบ** และ **ข้อเสนอ**
 
-**อัปเดตล่าสุด:** 2026-08-07
+**อัปเดตล่าสุด:** 2026-08-10
 
 > **⚠️ Scope (2026-08-04):** repo นี้ = **Knowledge Brain (Module 12) เท่านั้น** — คลังความรู้กลาง (RAG, `/search`, `/ask`, RBAC)
 > งาน **RFQ/ENQ backend (Module 01/02)** ที่เคยลองทำใน repo นี้ (migrations, enq_api, sign-off/version/draft-edit) **ถูกลบออกแล้ว** เพราะเป็นคนละ module — RFQ ตัวจริงอยู่ที่โปรเจกต์ `../RFQ_Estimate` (Estimate-Packaging) ; ประวัติ RFQ ยังอยู่ใน git history ถ้าต้องหยิบดีไซน์ governance ไปเสริม RFQ_Estimate
@@ -23,6 +23,14 @@
 >    - **คงเดิม:** AI **ห้าม**สร้าง/กรอก sign-off เอง และ**ห้าม**เปลี่ยน `label_status` เป็น human-reviewed
 > 4. **ขอบเขต P2 ต่อการตัดสินใจ hardware:** P2 reranker พิสูจน์เฉพาะ **retrieval quality + permission leakage + reranker latency** เท่านั้น — **ตัดสินใจ GPU ทั้งระบบไม่ได้** ; Qwen3-32B (generation, context length, concurrency, e2e latency) ต้อง benchmark **แยก** (ดู §10/§12)
 > 5. **ลำดับ:** ปิด adapter B1/B2/M1 (เสร็จ) → freeze v1 → isolation/Docker adapter → **M4a synthetic run ครั้งแรก** → (ขนาน) **Data Owner sign-off pack** (เอกสาร 30–50 ไฟล์, classification, allowed roles, Local/Cloud policy, ผู้อนุมัติ) → หลัง sign-off ค่อยรัน M4b/N-sweep บนชุดตัวแทนจริง → เปิด generation/hardware benchmark แยกจาก P2
+
+> **✅ M4a permission-leak slice CLOSED + FROZEN (2026-08-10, Codex GO/SHIP @ `72a1763`, `KB_P2_M4_OUTER_RECEIPT_FIX2_CODEX_REREVIEW_72A1763.md`):**
+> **permission-leak proof track = COMPLETE** เฉพาะขอบเขต **PoC local / synthetic / single-run mechanics** — พิสูจน์ครบว่า candidate ที่มีสิทธิ์ถึง pinned cross-encoder จริง และ sentinel (นอกสิทธิ์ แต่คล้ายเชิง semantic) **ไม่ถึงโมเดล** บน **infra จริง** (Docker + real bge-reranker + real Qdrant)
+> - เส้นทางที่ปิด: full M4a real run (`b84e47d`) → host-authoritative **outer receipt** + `DockerM4Controller` (สังเกต image/isolation/cleanup จาก Docker inspect จริง ไม่ใช่ evaluator ประกาศเอง) → 3 รอบ Codex closure: B1/B2/B3/M1 (`7aa4d61`) → B1 three-state cleanup + B2 M1 load-bearing + B3 cross-field → **B2.1 staged-source identity + B3.1 actual-image RepoDigests** (`72a1763`)
+> - หลักฐาน tracked: `KB_P2_M4_OUTER_RECEIPT.json` + `KB_P2_M4_INNER_BUNDLE.json` (terminal PASS, strict validate errs=[], receipt tree == git tree, cleanup confirmed no-leftover) · offline **949/949**
+> - **FROZEN — ห้ามขยาย receipt/provenance/isolation surface เพิ่ม** ; finding ใหม่ → backlog เว้นแต่พิสูจน์ได้ว่าเกิด **leak-to-model / touch-production / false-PASS / cleanup-failure**
+> - **ไม่ใช่** production-security approval และ **ไม่ใช่**หลักฐานตัดสิน GPU ทั้งระบบ ; bridge network + runtime pip + synthetic/dummy-vector = disclosed PoC limitations
+> - **Data Owner pack = GO เดินต่อ** (`DATA_OWNER_SIGNOFF_PACK.md` + `data_owner_manifest.py` — template/manifest เท่านั้น, AI ไม่กรอก approval/label) ; **M4b / ข้อมูลจริง / N-sweep / decision / production ยัง NO-GO** จน Data Owner sign-off (hash-bound) + classification + human-reviewed labels ครบ (ทำโดยมนุษย์)
 
 ---
 
