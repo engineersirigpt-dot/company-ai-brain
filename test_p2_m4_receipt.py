@@ -44,7 +44,8 @@ def mk_bundle(evidence):
 
 def mk_observed(**over):
     o = {"expected_evaluator_image": IMG, "evaluator_image": IMG, "qdrant_image_ref": QREF,
-         "qdrant_image": "sha256:" + "a" * 64, "qdrant_repo_digests": [QREF], "network_internal": False,
+         "qdrant_image": "sha256:" + "a" * 64, "qdrant_repo_digests_subject": "sha256:" + "a" * 64,
+         "qdrant_repo_digests": [QREF], "network_internal": False,
          "network_id": RAW["network_id"], "volume_id": RAW["volume_id"],
          "project_id": RAW["project_id"], "collection_id": RAW["collection_id"], "published_ports": 0,
          "endpoint": "http://m4qd-x:6333", "endpoint_is_production": False}
@@ -140,6 +141,11 @@ check("B2 git_tree_dirty=True -> FAILED (source ยืนยันไม่ไ�
 # ── B3 (Codex re-review): qdrant/run/network field ต้อง load-bearing ──
 r_qd = build(ev, bb, mk_observed(qdrant_repo_digests=["qdrant/qdrant@sha256:" + "9" * 64]))
 check("B3 qdrant_image_ref ไม่อยู่ใน observed RepoDigests -> FAILED", r_qd["terminal_status"] == RCPT.FAILED)
+# B3.1 (Codex re-review): actual container image คนละตัว แต่ RepoDigests (จาก subject เดิม) ยังถูก -> FAILED
+r_qd31 = build(ev, bb, mk_observed(qdrant_image="sha256:" + "7" * 64))   # subject ยัง "a"*64 -> subject != image
+check("B3.1 actual qdrant_image != RepoDigests subject -> FAILED (RepoDigests ไม่ได้อ่านจาก image ที่รันจริง)",
+      r_qd31["terminal_status"] == RCPT.FAILED)
+check("B3.1: reason ระบุ subject mismatch", any("subject" in x for x in RCPT.false_pass_reasons(r_qd31)))
 r_run = build(ev, bb, mk_observed(), run_id="run-EVIL")
 check("B3 top run_id != inner.run_id -> FAILED", r_run["terminal_status"] == RCPT.FAILED)
 r_nomode = dict(r_pass); r_nomode["observed"] = {k: v for k, v in r_pass["observed"].items() if k != "network_internal"}

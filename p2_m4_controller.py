@@ -59,7 +59,7 @@ class DockerM4Controller:
     def __init__(self, *, run, source_dir_host, out_dir_host, read_bundle,
                  evaluator_image, qdrant_image, project_id, attempt_id, token, clock,
                  vector_size=4, internal=True, eval_entrypoint=("python", "/host/p2_m4_evaluator.py"),
-                 git_dir_host=None):
+                 git_dir_host=None, source_identity=None):
         if not (isinstance(evaluator_image, str) and evaluator_image.startswith("sha256:")
                 and len(evaluator_image) == 71):
             raise ControllerError("evaluator_image ต้อง pin เป็น sha256:<64hex> (image id ที่จะ run + attest)")
@@ -79,6 +79,8 @@ class DockerM4Controller:
         self._internal = bool(internal)                     # False = bridge (มี egress ให้ runtime pip) — ต้องบันทึกเป็นข้อจำกัด
         self._entry = list(eval_entrypoint)                 # คำสั่งใน evaluator container (บันทึกใน receipt.process.command)
         self._git = git_dir_host or source_dir_host         # repo จริงสำหรับ git identity (source_dir อาจเป็น staging สะอาด)
+        # B2.1: source identity ที่ resolve **ก่อน staging** (immutable) — ห้าม re-read live HEAD หลังรัน (กัน race)
+        self._source_identity = dict(source_identity) if source_identity else None
         self._net = self._vol = self._qd = self._evalc = None
         self._collection = f"m4coll-{token}"
         self._endpoint = None
@@ -122,10 +124,13 @@ class DockerM4Controller:
             raise ControllerError(f".NetworkSettings.Ports inspect ไม่ใช่ json: {raw!r}")
         return sum(1 for v in ports.values() if v)          # v truthy = มี host binding = publish จริง
 
-    def _qdrant_repo_digests(self) -> list:
-        """B3: RepoDigests ของ qdrant image (docker inspect) — validator require pinned ref อยู่ในชุดนี้
-        (พิสูจน์ image ที่รัน = pin ; ไม่เอา manifest digest ไปเทียบ image .Id ที่คนละชนิด)"""
-        raw = self._checked(["docker", "image", "inspect", self._qd_img, "--format", "{{json .RepoDigests}}"])
+    def _qdrant_repo_digests(self, subject_image_id: str) -> list:
+        """
+        B3.1: RepoDigests ต้อง inspect จาก **image id ของ container ที่รันจริง** (`subject_image_id` = `.Image`)
+        ไม่ใช่จาก requested ref (`self._qd_img`) — มิฉะนั้นเปลี่ยน container image แล้ว RepoDigests ของ ref เดิมยังผ่าน
+        validator require pinned ref อยู่ในชุดนี้ + subject == observed qdrant_image (bind กับ image ที่รันจริง)
+        """
+        raw = self._checked(["docker", "image", "inspect", subject_image_id, "--format", "{{json .RepoDigests}}"])
         try:
             digs = json.loads(raw or "[]") or []
         except ValueError:
@@ -133,7 +138,8 @@ class DockerM4Controller:
         return [d for d in digs if isinstance(d, str)]
 
     def _observe(self) -> dict:
-        qd_image = self._inspect(self._qd, "{{index .Image}}")           # docker-observed qdrant image id
+        qd_image = self._inspect(self._qd, "{{index .Image}}")           # docker-observed qdrant image id (subject)
+        qd_config = self._inspect(self._qd, "{{.Config.Image}}")         # ref ที่ container ถูกสร้าง (diagnostic)
         eval_image = self._inspect(self._evalc, "{{index .Image}}")      # B1 authority: image ที่ evaluator รันจริง
         published = self._published_ports()                              # B2 authority: host-published ports
         return {
@@ -141,7 +147,9 @@ class DockerM4Controller:
             "evaluator_image": eval_image,
             "qdrant_image_ref": self._qd_img,
             "qdrant_image": qd_image,
-            "qdrant_repo_digests": self._qdrant_repo_digests(),
+            "qdrant_container_config_image": qd_config,
+            "qdrant_repo_digests_subject": qd_image,                     # B3.1: subject ที่อ่าน RepoDigests = container image
+            "qdrant_repo_digests": self._qdrant_repo_digests(qd_image),
             "network_id": self._net,
             "volume_id": self._vol,
             "project_id": self._project,
@@ -249,7 +257,9 @@ class DockerM4Controller:
                 "started_utc": proc["started_utc"], "finished_utc": proc["finished_utc"],
                 "stdout_sha256": proc["stdout_sha256"], "stderr_sha256": proc["stderr_sha256"],
                 "dependency_digest": result.get("deps_sha256", ""),
-                **self._git_identity(),
+                # B2.1: ใช้ staged-source identity ที่ inject มา (resolve ก่อน staging) ไม่ re-read live HEAD ;
+                # fallback _git_identity เฉพาะ offline test ที่ไม่ได้ stage
+                **(self._source_identity or self._git_identity()),
             }
             cleanup = self.teardown_and_verify()
         except BaseException:

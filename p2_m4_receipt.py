@@ -171,6 +171,8 @@ def _required_field_errors(receipt: dict) -> list:
             e.append(f"observed.{k} ว่าง/ผิดชนิด")
     if not _is_qdrant_ref(obs.get("qdrant_image_ref")):
         e.append("observed.qdrant_image_ref ต้องเป็น repo@sha256:<64hex>")
+    if not _is_image_id(obs.get("qdrant_repo_digests_subject")):
+        e.append("observed.qdrant_repo_digests_subject ต้องเป็น image id (subject ที่อ่าน RepoDigests — B3.1)")
     rd = obs.get("qdrant_repo_digests")
     if not (isinstance(rd, list) and rd and all(isinstance(x, str) and x for x in rd)):
         e.append("observed.qdrant_repo_digests ต้องเป็น non-empty list ของ str (docker RepoDigests)")
@@ -273,8 +275,12 @@ def false_pass_reasons(receipt: dict) -> list:
     if receipt.get("run_id") != inner.get("run_id"):
         r.append(f"top run_id ≠ inner.run_id: {receipt.get('run_id')!r} != {inner.get('run_id')!r}")
 
-    # B3: qdrant runtime identity — pinned ref ต้องอยู่ใน RepoDigests ที่ docker inspect เห็น (ไม่เทียบ manifest กับ image id)
+    # B3/B3.1: qdrant runtime identity — RepoDigests ต้อง inspect จาก **image ของ container ที่รันจริง** (subject ==
+    # observed qdrant_image) แล้ว pinned ref ต้องอยู่ในชุดนั้น (เปลี่ยน actual image → subject≠qdrant_image → FAILED)
     rd = obs.get("qdrant_repo_digests") or []
+    if obs.get("qdrant_repo_digests_subject") != obs.get("qdrant_image"):
+        r.append(f"qdrant_repo_digests_subject ≠ observed qdrant_image (RepoDigests อ่านจาก image คนละตัวกับ container): "
+                 f"{obs.get('qdrant_repo_digests_subject')!r} != {obs.get('qdrant_image')!r}")
     if obs.get("qdrant_image_ref") not in rd:
         r.append(f"qdrant_image_ref ไม่อยู่ใน observed RepoDigests (image ที่รัน ≠ pin): {obs.get('qdrant_image_ref')!r}")
 

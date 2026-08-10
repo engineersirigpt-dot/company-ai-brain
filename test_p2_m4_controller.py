@@ -55,6 +55,7 @@ class FakeDocker:
         s.eval_rc = k.get("eval_rc", 0)
         s.eval_declared_ports = k.get("eval_declared_ports", None)   # None = ตรงกับ observed
         s.leak_container = k.get("leak_container", False)
+        s.qd_repo_digests = k.get("qd_repo_digests", [QREF])         # RepoDigests ของ image ที่ qdrant container รัน (B3.1)
         s.probe_unknown = k.get("probe_unknown", False)              # existence probe rc!=0 = daemon ล้มตอน cleanup (B1)
         s.removed = set()
         s.net = s.vol = None
@@ -88,15 +89,17 @@ class FakeDocker:
             result = {"status": "PUBLISHED", "evidence_status": "PASS", "bundle_path": "/out/run-1.bundle.json",
                       "declared_image_digest": env["M4_EVAL_IMAGE_DIGEST"], "deps_sha256": "d" * 64}
             return R(stdout=b"M4A_RESULT " + json.dumps(result).encode(), rc=s.eval_rc)
-        # image RepoDigests (B3)
+        # image RepoDigests (B3.1) — คืนตาม subject image id ที่ inspect (default [QREF])
         if j[:3] == ["docker", "image", "inspect"]:
-            return R(stdout=json.dumps([QREF]).encode())
+            return R(stdout=json.dumps(s.qd_repo_digests).encode())
         # container inspect (-f) — observe
         if j[:2] == ["docker", "inspect"]:
             fmt = j[3] if j[2] == "-f" else None
             ref = j[-1]
             if fmt == "{{index .Image}}":
                 return R(stdout=(s.observed_eval_image if ref == "m4eval-tok01" else "sha256:" + "a" * 64).encode())
+            if fmt == "{{.Config.Image}}":
+                return R(stdout=QREF.encode())
             if fmt == "{{json .NetworkSettings.Networks}}":
                 return R(stdout=json.dumps({s.net: {"IPAddress": "172.20.0.2"}}).encode())
             if fmt == "{{json .Mounts}}":
@@ -157,6 +160,25 @@ check("happy: teardown ถูกเรียก (rm container/volume/network)",
       any(c[:3] == ["docker", "rm", "-f"] for c in f.calls) and
       any(c[:3] == ["docker", "network", "rm"] for c in f.calls))
 check("happy: cleanup confirmed (post-inspect ไม่เจอ residual)", out["receipt"]["cleanup"]["confirmed"] is True)
+check("happy (B3.1): RepoDigests subject == observed qdrant_image (อ่านจาก container image ที่รันจริง)",
+      out["receipt"]["observed"]["qdrant_repo_digests_subject"] == out["receipt"]["observed"]["qdrant_image"])
+
+# ── B3.1 (Codex re-review): image ของ container ที่รันจริง มี RepoDigests ที่ไม่มี pinned ref -> FAILED ──
+f31 = FakeDocker(qd_repo_digests=["qdrant/qdrant@sha256:" + "9" * 64])
+o31 = mk(f31, attempt="att-31").certify()
+check("B3.1 actual qdrant container image RepoDigests ไม่มี pinned ref -> FAILED", o31["terminal_status"] == RCPT.FAILED)
+
+# ── B2.1 (Codex re-review): staged-source identity ถูก inject -> receipt bind commit ที่ stage ไม่ใช่ live HEAD ──
+STAGED = {"git_commit": "a" * 40, "source_tree_digest": "b" * 40, "git_tree_dirty": False}
+f21 = FakeDocker()          # FakeDocker git handler คืน live HEAD = "c"*40 (ต่างจาก staged)
+c21 = CTL.DockerM4Controller(run=f21.run, source_dir_host="/host/src", out_dir_host="/host/out",
+                             read_bundle=lambda p: f21.bundle_bytes, evaluator_image=PIN, qdrant_image=QREF,
+                             project_id="proj-run", attempt_id="att-21", token="tok01", clock=FakeClock(),
+                             source_identity=STAGED)
+o21 = c21.certify()
+check("B2.1: receipt.process.git_commit = staged commit (inject) ไม่ใช่ live HEAD",
+      o21["receipt"]["process"]["git_commit"] == "a" * 40 and o21["receipt"]["process"]["source_tree_digest"] == "b" * 40)
+check("B2.1: terminal PASS (staged identity ครบ)", o21["terminal_status"] == RCPT.PASS, o21["terminal_status"])
 
 # ── image observed ปลอม: evaluator container รันคนละ image กับ pin -> FAILED ──
 f2 = FakeDocker(observed_eval_image="sha256:" + "9" * 64)
