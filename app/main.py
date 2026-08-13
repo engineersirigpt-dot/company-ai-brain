@@ -25,6 +25,7 @@ from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
 
 import policy  # P1 policy compiler (pure) — auth/effective-ACL/filter contracts
+import llm_provider as LP  # LLM abstraction — สลับ cloud(Claude) ↔ local(Ollama/vLLM) ด้วย LLM_PROVIDER
 from qdrant_filter import to_qdrant_filter  # spec -> Qdrant Filter (adapter เดียวกับ P5b harness)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
@@ -33,7 +34,9 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "company_docs")
 MODEL_NAME = os.getenv("MODEL_NAME", "BAAI/bge-m3")
 MAX_CONTENT_CHARS = 2000  # จำกัดขนาด content ต่อ result กัน response ใหญ่เกิน
 
-# LLM สำหรับ /ask — จุดสลับ cloud↔local อยู่ที่ generate_answer() จุดเดียว
+# LLM สำหรับ /ask — จุดสลับ cloud↔local อยู่ที่ generate_answer() + llm_provider.py
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")  # anthropic(Claude) | openai(Ollama/vLLM/OpenAI)
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")           # provider=openai: endpoint local (Ollama :11434/v1, vLLM :8001/v1)
 LLM_MODEL = os.getenv("LLM_MODEL", "claude-opus-4-8")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))  # คำตอบสั้นโดยตั้งใจ (ใช้กับ voicebot)
 
@@ -58,9 +61,9 @@ async def lifespan(app: FastAPI):
     app.state.model = model
     app.state.qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     print(f"Connected to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
-    # LLM client — ไม่มี key ก็รันได้ (/search ใช้ปกติ, /ask จะตอบ 503)
-    app.state.llm = anthropic.Anthropic() if os.getenv("ANTHROPIC_API_KEY") else None
-    print(f"LLM: {LLM_MODEL if app.state.llm else 'not configured'}")
+    # LLM client — สลับ provider ด้วย LLM_PROVIDER ; ไม่พร้อมก็รันได้ (/search ปกติ, /ask ตอบ 503)
+    app.state.llm = LP.make_client(LLM_PROVIDER, base_url=LLM_BASE_URL)
+    print(f"LLM: {LLM_PROVIDER}/{LLM_MODEL if app.state.llm else 'not configured'}")
     # Service API keys — {sha256_hex: {"service": str, "allowed_roles": [...]}}
     if AUTH_MODE not in ("off", "warn", "enforce"):
         raise RuntimeError(
@@ -184,17 +187,12 @@ ANSWER_SYSTEM_PROMPT = """คุณคือผู้ช่วยตอบคำ
   และสะกดให้ถูกต้องในคำตอบเสมอ"""
 
 
-def generate_answer(llm, question: str, context: str) -> "anthropic.types.Message":
-    """จุดเดียวที่คุยกับ LLM — สลับ cloud↔local เปลี่ยนที่ฟังก์ชันนี้"""
-    return llm.messages.create(
-        model=LLM_MODEL,
-        max_tokens=LLM_MAX_TOKENS,
-        system=ANSWER_SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": f"ข้อมูลอ้างอิง:\n\n{context}\n\nคำถาม: {question}",
-        }],
-    )
+def generate_answer(llm, question: str, context: str):
+    """จุดเดียวที่คุยกับ LLM — สลับ provider (cloud Claude ↔ local Ollama/vLLM) ด้วย LLM_PROVIDER
+    คืน (answer_text, model_name, refused) — normalize response ของแต่ละ provider (ดู llm_provider.py)"""
+    user = f"ข้อมูลอ้างอิง:\n\n{context}\n\nคำถาม: {question}"
+    return LP.generate(llm, LLM_PROVIDER, model=LLM_MODEL, max_tokens=LLM_MAX_TOKENS,
+                       system=ANSWER_SYSTEM_PROMPT, user=user)
 
 
 def build_content(payload: dict) -> str:
@@ -337,20 +335,20 @@ def ask(req: AskRequest, request: Request):
         for i, p in enumerate(points)
     )
 
-    # 3) Generate
+    # 3) Generate (provider-agnostic — คืน normalized tuple)
     try:
-        resp = generate_answer(llm, req.question, context)
+        answer, model_used, refused = generate_answer(llm, req.question, context)
     except anthropic.RateLimitError:
         raise HTTPException(status_code=429, detail="LLM rate limited — retry later")
     except anthropic.APIConnectionError:
         raise HTTPException(status_code=503, detail="Cannot reach LLM provider")
     except anthropic.APIStatusError as e:
         raise HTTPException(status_code=502, detail=f"LLM error: {e.message}")
+    except Exception as e:                              # provider อื่น (openai/Ollama/vLLM) — map เป็น 502
+        raise HTTPException(status_code=502, detail=f"LLM error: {e}")
 
-    if resp.stop_reason == "refusal":
+    if refused:
         answer = "ระบบไม่สามารถตอบคำถามนี้ได้ กรุณาติดต่อผู้ดูแลระบบ"
-    else:
-        answer = "".join(b.text for b in resp.content if b.type == "text").strip()
 
     return AskResponse(
         question=req.question,
@@ -368,7 +366,7 @@ def ask(req: AskRequest, request: Request):
             )
             for i, p in enumerate(points)
         ],
-        model=resp.model,
+        model=model_used,
     )
 
 
