@@ -16,16 +16,23 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModel
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchAny
+
+import policy  # ใช้ compiler/role set เดียวกับ API (กัน filter drift)
+from qdrant_filter import to_qdrant_filter  # canonical adapter (fail-closed guard เดียวกับ API)
 
 QDRANT_PATH = "./qdrant_storage"
 COLLECTION_NAME = "company_docs"
 TOP_K = 3
 
-VALID_ROLES = [
-    "admin", "management", "production", "prepress", "qc",
-    "engineering", "sales", "purchasing", "logistics", "hr", "it",
-]
+VALID_ROLES = sorted(policy.KNOWN_ROLES)  # จาก policy จุดเดียว (ไม่ hardcode/drift)
+
+
+def _rbac_filter(role: str):
+    """filter เดียวกับ API เป๊ะ — compile_retrieval_filter (4 เงื่อนไข: role + policy_status/version/schema)
+    ไม่ใช่แค่ allowed_roles (กัน CLI โชว์ point ที่ API กรองทิ้ง = ภาพสิทธิ์ผิด)"""
+    access = policy.EffectiveAccess(
+        policy.ServicePrincipal("search-rbac-cli", (role,), True, "enforce"), role)
+    return to_qdrant_filter(policy.compile_retrieval_filter(access))
 
 
 def embed(tokenizer, model, text: str) -> list[float]:
@@ -50,15 +57,8 @@ def search(query: str, role: str, top_k: int = TOP_K):
     vec = embed(tokenizer, model, query)
     client = QdrantClient(path=QDRANT_PATH)
 
-    # Filter: เฉพาะ chunk ที่ role นี้มีสิทธิ์
-    rbac_filter = Filter(
-        must=[
-            FieldCondition(
-                key="allowed_roles",
-                match=MatchAny(any=[role]),
-            )
-        ]
-    )
+    # Filter: canonical (เดียวกับ API — role + policy_status/version/schema)
+    rbac_filter = _rbac_filter(role)
 
     results = client.query_points(
         collection_name=COLLECTION_NAME,
