@@ -3,6 +3,8 @@
 Enterprise Knowledge System — ระบบ AI **ตัวกลาง** สำหรับองค์กร  
 รวบรวมความรู้ทั้งหมดของบริษัทไว้ที่เดียว ให้ AI Project อื่นๆ เชื่อมต่อมาใช้ร่วมกัน
 
+> **สถานะความปลอดภัย:** M4 permission-leak proof = **CLOSED + FROZEN** (ผ่าน independent review) — พิสูจน์ว่าเอกสารข้ามสิทธิ์ **ไม่ถึงโมเดล**. ยังเป็น PoC (ยังไม่ปิด gate ด้าน user-auth/egress — ดู `STATUS.md`)
+
 ---
 
 ## แนวคิดหลัก — ทำไมต้องมี AI Brain?
@@ -96,6 +98,9 @@ Content-Type: application/json
 | `it` | ฝ่าย IT |
 | `management` | ผู้จัดการ |
 | `admin` | เห็นทุก document |
+
+> ### ⚠️ สำคัญมากสำหรับ integration
+> **ต้องส่ง `role` ของ user จริง (ตามแผนก) ทุก request** — ถ้า caller ส่ง `admin` ตายตัว หรือไม่ส่ง role → **RBAC ถูก bypass (ทุกคนเห็นทุก document)**. Brain กัน leak ได้ก็ต่อเมื่อ caller map `user → role แผนก` ให้ถูก (ดู field `level`/`collection` ใน response ไว้ audit ได้ด้วย)
 
 ### ตัวอย่าง Integration (Python)
 
