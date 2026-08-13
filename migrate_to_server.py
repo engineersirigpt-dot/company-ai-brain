@@ -20,10 +20,10 @@ VECTOR_DIM = 1024
 BATCH_SIZE = 100
 
 
-def migrate(server_url: str, dry_run: bool):
+def migrate(server_url: str, dry_run: bool, replace: bool = False):
     print(f"Source : local  ({LOCAL_PATH})")
     print(f"Target : {server_url}")
-    print(f"Mode   : {'DRY RUN' if dry_run else 'APPLY'}")
+    print(f"Mode   : {'DRY RUN' if dry_run else ('APPLY --replace' if replace else 'APPLY (additive)')}")
     print()
 
     local = QdrantClient(path=LOCAL_PATH)
@@ -47,6 +47,11 @@ def migrate(server_url: str, dry_run: bool):
 
     # สร้าง collection บน server ถ้ายังไม่มี
     existing = [c.name for c in server.get_collections().collections]
+    # --replace: ลบ collection เดิมก่อน migrate = "clean full replace" (server == local เป๊ะ)
+    if replace and COLLECTION_NAME in existing:
+        server.delete_collection(COLLECTION_NAME)
+        existing.remove(COLLECTION_NAME)
+        print(f"[--replace] ลบ collection '{COLLECTION_NAME}' เดิมบน server (clean migration)")
     if COLLECTION_NAME not in existing:
         server.create_collection(
             collection_name=COLLECTION_NAME,
@@ -54,8 +59,14 @@ def migrate(server_url: str, dry_run: bool):
         )
         print(f"สร้าง collection '{COLLECTION_NAME}' บน server แล้ว")
     else:
-        server_info = server.get_collection(COLLECTION_NAME)
-        print(f"Server มี collection แล้ว — {server_info.points_count} vectors อยู่แล้ว")
+        n = server.get_collection(COLLECTION_NAME).points_count
+        print(f"Server มี collection แล้ว — {n} vectors อยู่แล้ว")
+        if n > 0:
+            # ⚠️ security: upsert เป็น additive — point ที่ถูกลบ/แคบ ACL ที่ local จะ "ไม่ถูกลบ" ออกจาก server
+            # → เอกสารเก่า/ACL กว้างอาจค้างบน server ให้ค้นเจอ (stale = leak). clean migrate ต้องใช้ --replace
+            print("[WARN] migrate แบบ additive (upsert) — จะไม่ลบ point เก่าที่หายไปจาก local\n"
+                  "       เอกสารที่ลบ/แคบ ACL ที่ local อาจค้างบน server ด้วย ACL เก่า (เสี่ยง leak)\n"
+                  "       → ใช้ `--replace` เพื่อ migrate สะอาด (ลบ collection เดิมก่อน)")
 
     # Scroll + upload ทีละ batch
     print(f"\nกำลังย้ายข้อมูล (batch size = {BATCH_SIZE})...")
@@ -111,5 +122,7 @@ if __name__ == "__main__":
                         help="URL ของ Qdrant server เช่น http://192.168.1.10:6333")
     parser.add_argument("--dry-run", action="store_true",
                         help="ดูว่าจะทำอะไรโดยไม่ย้ายจริง")
+    parser.add_argument("--replace", action="store_true",
+                        help="ลบ collection เดิมบน server ก่อน migrate (clean — กัน stale ACL เก่าค้าง)")
     args = parser.parse_args()
-    migrate(args.server, args.dry_run)
+    migrate(args.server, args.dry_run, args.replace)
